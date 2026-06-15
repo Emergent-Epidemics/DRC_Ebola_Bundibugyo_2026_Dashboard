@@ -835,6 +835,133 @@ def load_dashboard_plots() -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# INSP cumulative confirmed time series (Trends tab map slider)
+# ---------------------------------------------------------------------------
+
+_CONFIRMED_TS_LONG = (
+    BUILD_LONG_DIR / "insp_sitrep__cumulative_confirmed_cases.csv"
+)
+_CONFIRMED_TS_PROCESSED = (
+    EXTERNAL_DATA / "insp_sitrep" / "processed"
+    / "insp_sitrep__cumulative_confirmed_cases__daily.csv"
+)
+_CONFIRMED_TS_SKIP_NOMS = frozenset({"DRC", "NA", "Sans Fiche", ""})
+
+
+def _read_insp_cumulative_confirmed_df() -> pd.DataFrame | None:
+    """Load long-format INSP cumulative confirmed cases (build/long or processed)."""
+    for path in (_CONFIRMED_TS_LONG, _CONFIRMED_TS_PROCESSED):
+        if not path.exists():
+            continue
+        df = pd.read_csv(path)
+        lower = {str(c).strip().lower(): c for c in df.columns}
+        if "nom" in lower and "date" in lower:
+            nom_col = lower["nom"]
+            date_col = lower["date"]
+            val_col = next(
+                (lower[k] for k in lower if k not in ("nom", "date")),
+                None,
+            )
+            if val_col is None:
+                continue
+        else:
+            df = pd.read_csv(path, header=None, names=["nom", "date", "value"])
+            nom_col, date_col, val_col = "nom", "date", "value"
+        out = df[[nom_col, date_col, val_col]].copy()
+        out.columns = ["nom", "date", "value"]
+        return out
+    return None
+
+
+def _parse_confirmed_count(value) -> int | None:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    s = str(value).strip()
+    if not s or s.upper() in ("NA", "ND", "NAN", "NONE"):
+        return None
+    num = pd.to_numeric(s, errors="coerce")
+    if pd.isna(num):
+        return None
+    return int(round(float(num)))
+
+
+def load_confirmed_cases_timeseries(valid_noms: set[str]) -> dict | None:
+    """Build carry-forward cumulative confirmed series for the Trends tab slider.
+
+    Untracked zones (no row before a date) are 0. Tracked zones carry forward
+    the last known cumulative count when a sitrep date has no update (or ND).
+    """
+    df = _read_insp_cumulative_confirmed_df()
+    if df is None or df.empty:
+        print("  NOTE: INSP cumulative confirmed time series not found; "
+              "Trends map slider unavailable")
+        return None
+
+    df = df.copy()
+    df["nom"] = df["nom"].astype(str).str.strip()
+    df["nom"] = df["nom"].map(lambda n: _NAME_TO_NOM.get(n, n))
+    df = df[~df["nom"].isin(_CONFIRMED_TS_SKIP_NOMS)]
+    df = df[df["nom"].isin(valid_noms)]
+
+    parsed_dates: list[tuple[date, str]] = []
+    for raw in df["date"].astype(str).str.strip().unique():
+        d = _parse_sitrep_date(raw)
+        if d is not None:
+            parsed_dates.append((d, raw))
+    if not parsed_dates:
+        print("  WARNING: no parseable dates in cumulative confirmed series")
+        return None
+
+    parsed_dates.sort(key=lambda x: x[0])
+    iso_dates = [d.isoformat() for d, _ in parsed_dates]
+    raw_by_iso = {d.isoformat(): raw for d, raw in parsed_dates}
+
+    by_nom_date: dict[str, dict[str, int]] = {}
+    for _, row in df.iterrows():
+        d = _parse_sitrep_date(row["date"])
+        if d is None:
+            continue
+        v = _parse_confirmed_count(row["value"])
+        if v is None:
+            continue
+        by_nom_date.setdefault(row["nom"], {})[d.isoformat()] = v
+
+    by_nom: dict[str, list[int]] = {}
+    max_confirmed = 0
+    min_positive: int | None = None
+    for nom, date_vals in sorted(by_nom_date.items()):
+        series: list[int] = []
+        last: int | None = None
+        for iso in iso_dates:
+            if iso in date_vals:
+                last = date_vals[iso]
+            if last is None:
+                series.append(0)
+            else:
+                series.append(last)
+                max_confirmed = max(max_confirmed, last)
+                if last > 0:
+                    min_positive = (
+                        last if min_positive is None else min(min_positive, last)
+                    )
+        by_nom[nom] = series
+
+    if not by_nom:
+        print("  WARNING: cumulative confirmed series has no zone-level rows")
+        return None
+
+    print(f"  confirmed time series: {len(iso_dates)} date(s), "
+          f"{len(by_nom)} zone(s), max={max_confirmed}")
+    return {
+        "dates": iso_dates,
+        "date_labels": {iso: raw_by_iso[iso] for iso in iso_dates},
+        "by_nom": by_nom,
+        "max_confirmed": max_confirmed,
+        "min_positive": min_positive or 1,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Public health response context (INSP SitRep pillars → Context tab)
 # ---------------------------------------------------------------------------
 
@@ -1901,6 +2028,7 @@ def build_payload() -> dict:
 
     onset_trends = load_dashboard_plots()
     phr_context = load_public_health_context()
+    confirmed_timeseries = load_confirmed_cases_timeseries(set(zone_data.keys()))
 
     asof = detect_asof()
     print(f"  asof: {asof}")
@@ -1933,6 +2061,7 @@ def build_payload() -> dict:
         "province_boundaries": province_boundaries,
         "onset_trends": onset_trends,
         "phr_context": phr_context,
+        "confirmed_timeseries": confirmed_timeseries,
     }
 
 
@@ -1973,6 +2102,63 @@ HTML_TEMPLATE = r"""<!doctype html>
   body.view-trends #legend,
   body.view-trends #info { display:none !important; }
   body.view-trends #trends { display:block; }
+  #trends-legend {
+    position:absolute; z-index:1000;
+    bottom:24px; left:12px; max-width:300px;
+    background:rgba(20,20,20,0.92); color:#f4f4f4;
+    padding:12px 14px; border-radius:8px;
+    box-shadow:0 2px 10px rgba(0,0,0,0.4);
+    font-size:13px; line-height:1.4;
+    display:none;
+  }
+  body.view-trends #trends-legend { display:block; }
+  #trends-date-slider {
+    width:100%; margin-top:4px;
+    accent-color:#5b86b3;
+    -webkit-appearance:none;
+    appearance:none;
+    height:6px;
+    background:#444;
+    border-radius:3px;
+    outline:none;
+  }
+  #trends-date-slider::-webkit-slider-runnable-track {
+    height:6px;
+    background:#444;
+    border-radius:3px;
+  }
+  #trends-date-slider::-webkit-slider-thumb {
+    -webkit-appearance:none;
+    appearance:none;
+    width:16px;
+    height:16px;
+    margin-top:-5px;
+    border-radius:50%;
+    background:#5b86b3;
+    border:2px solid #fff;
+    box-shadow:0 0 0 1px #5b86b3;
+    cursor:pointer;
+  }
+  #trends-date-slider::-moz-range-track {
+    height:6px;
+    background:#444;
+    border-radius:3px;
+  }
+  #trends-date-slider::-moz-range-thumb {
+    width:16px;
+    height:16px;
+    border-radius:50%;
+    background:#5b86b3;
+    border:2px solid #fff;
+    box-shadow:0 0 0 1px #5b86b3;
+    cursor:pointer;
+  }
+  #trends-date-label {
+    display:block; margin-top:10px; font-size:12px; color:#bbb;
+  }
+  #trends-legend-desc {
+    font-size:10px; color:#888; line-height:1.35; margin:4px 0 8px 0;
+  }
   body.view-trends #imperial-model-estimates,
   body.view-context #imperial-model-estimates,
   body.view-trends .tracker-countries,
@@ -2031,7 +2217,8 @@ HTML_TEMPLATE = r"""<!doctype html>
     line-height:1.4;
   }
   body.view-trends #trends-hint { display:flex; }
-  body.view-trends.trends-province-hovered #trends-hint { display:none; }
+  body.view-trends.trends-province-hovered #trends-hint,
+  body.view-trends.trends-slider-busy #trends-hint { display:none; }
   #trends-body.trends-empty { color:#888; font-size:12px; }
   #context-national {
     top:12px; left:12px; bottom:auto; right:auto;
@@ -2376,6 +2563,16 @@ HTML_TEMPLATE = r"""<!doctype html>
     <div class="legend-scale" id="legend-scale"></div>
     <div id="legend-gray" style="font-size:11px;color:#bbb;margin-top:4px"></div>
   </div>
+</div>
+<div id="trends-legend" class="panel">
+  <div id="trends-legend-title"><strong>Confirmed cases (cumulative)</strong></div>
+  <p id="trends-legend-desc">Transcribed from INSP sitreps. Cases are sometimes revised downwards in consecutive sitreps.</p>
+  <div class="legend-bar" id="trends-legend-bar"></div>
+  <div class="legend-ticks" id="trends-legend-ticks"></div>
+  <div class="legend-scale" id="trends-legend-scale">(log scale)</div>
+  <label for="trends-date-slider" id="trends-date-label">As of —</label>
+  <input type="range" id="trends-date-slider" min="0" max="0" value="0"
+         aria-label="SitRep date for confirmed cases map" />
 </div>
 <div id="info" class="panel">
   <div id="info-header">
@@ -3175,32 +3372,189 @@ let activeView = "map";
 let trendsHoverTimer = null;
 let trendsHoveredProvince = null;
 let savedMapLayerId = null;
+let trendsDateIdx = 0;
+let trendsSliderTimer = null;
+let trendsSliderAnimating = false;
+let trendsSliderPointerDown = false;
+const TRENDS_SLIDER_STEP_MS = 300;
+
+function setTrendsSliderBusy(busy) {
+  document.body.classList.toggle("trends-slider-busy", !!busy);
+}
+
+function syncTrendsSliderBusy() {
+  setTrendsSliderBusy(trendsSliderAnimating || trendsSliderPointerDown);
+}
+
+function stopTrendsSliderAnimation() {
+  if (trendsSliderTimer != null) {
+    clearInterval(trendsSliderTimer);
+    trendsSliderTimer = null;
+  }
+  trendsSliderAnimating = false;
+  syncTrendsSliderBusy();
+}
+
+function applyTrendsDateIdx(idx) {
+  const ts = PAYLOAD.confirmed_timeseries;
+  const slider = document.getElementById("trends-date-slider");
+  if (!ts || !ts.dates || !ts.dates.length) return;
+  trendsDateIdx = Math.max(0, Math.min(idx, ts.dates.length - 1));
+  if (slider) slider.value = String(trendsDateIdx);
+  updateTrendsDateLabel();
+  recomputeTrendsMap();
+}
+
+function playTrendsSliderAnimation() {
+  stopTrendsSliderAnimation();
+  const ts = PAYLOAD.confirmed_timeseries;
+  if (!ts || !ts.dates || ts.dates.length < 2) return;
+  trendsSliderAnimating = true;
+  syncTrendsSliderBusy();
+  let idx = 0;
+  applyTrendsDateIdx(0);
+  trendsSliderTimer = setInterval(function() {
+    if (activeView !== "trends") {
+      stopTrendsSliderAnimation();
+      return;
+    }
+    idx += 1;
+    if (idx >= ts.dates.length) {
+      applyTrendsDateIdx(ts.dates.length - 1);
+      stopTrendsSliderAnimation();
+      return;
+    }
+    applyTrendsDateIdx(idx);
+  }, TRENDS_SLIDER_STEP_MS);
+}
+
+function getTrendsConfirmedAt(nom, dateIdx) {
+  const ts = PAYLOAD.confirmed_timeseries;
+  if (!ts || !ts.by_nom) return 0;
+  const series = ts.by_nom[nom];
+  if (!series || dateIdx < 0 || dateIdx >= series.length) return 0;
+  return series[dateIdx];
+}
+
+function initTrendsLegendBar() {
+  const ts = PAYLOAD.confirmed_timeseries;
+  if (!ts) return;
+  const layer = getLayer("obs::confirmed");
+  const palette = PALETTES[(layer && layer.palette) || "reds"] || REDS;
+  const bar = document.getElementById("trends-legend-bar");
+  if (!bar) return;
+  const stops = [];
+  const N = 32;
+  for (let i = 0; i < N; i++) {
+    const t = i / (N - 1);
+    stops.push(rgb(lerpColor(palette, t)) + " " + Math.round(t * 100) + "%");
+  }
+  bar.style.background = "linear-gradient(to right, " + stops.join(", ") + ")";
+  const lo = ts.min_positive || 1;
+  const hi = ts.max_confirmed || 1;
+  const mid = Math.sqrt(lo * hi);
+  const ticks = document.getElementById("trends-legend-ticks");
+  if (ticks) {
+    ticks.innerHTML =
+      "<span>" + fmtLegend(lo, "int") + "</span>" +
+      "<span>" + fmtLegend(mid, "int") + "</span>" +
+      "<span>" + fmtLegend(hi, "int") + "</span>";
+  }
+  const scaleEl = document.getElementById("trends-legend-scale");
+  if (scaleEl) scaleEl.textContent = "(log scale)";
+}
+
+function updateTrendsDateLabel() {
+  const ts = PAYLOAD.confirmed_timeseries;
+  const label = document.getElementById("trends-date-label");
+  if (!label || !ts || !ts.dates || !ts.dates.length) return;
+  const iso = ts.dates[trendsDateIdx];
+  const raw = (ts.date_labels && ts.date_labels[iso]) || iso;
+  label.textContent = "As of " + formatContextDate(raw);
+}
+
+function recomputeTrendsMap() {
+  const ts = PAYLOAD.confirmed_timeseries;
+  if (!ts || !ts.dates || !ts.dates.length) return;
+  const layer = getLayer("obs::confirmed") || { palette: "reds" };
+  currentValues.clear();
+  for (const feat of PAYLOAD.geometry.features) {
+    const ref = feat.properties.nom;
+    currentValues.set(ref, getTrendsConfirmedAt(ref, trendsDateIdx));
+  }
+  const lo = ts.min_positive || 1;
+  let hi = ts.max_confirmed || 1;
+  if (hi <= lo) hi = lo + 1;
+  currentDomain = {
+    min: lo,
+    max: hi,
+    isLog: true,
+    palette: PALETTES[layer.palette] || REDS,
+  };
+  geoLayer.setStyle(styleFn);
+}
+
+function restoreCaseMarkersForView(view) {
+  if (view === "trends") {
+    map.removeLayer(caseLayer);
+    return;
+  }
+  if (showCasesBox.checked) caseLayer.addTo(map);
+  else map.removeLayer(caseLayer);
+}
+
+function enterTrendsView() {
+  savedMapLayerId = layerSelect.value;
+  layerSelect.value = "obs::confirmed";
+  map.removeLayer(caseLayer);
+  showProvinceOutlines();
+  clearContextSelection();
+  const ts = PAYLOAD.confirmed_timeseries;
+  const legendPanel = document.getElementById("trends-legend");
+  if (!ts || !ts.dates || !ts.dates.length) {
+    if (legendPanel) legendPanel.style.display = "none";
+    recompute();
+    return;
+  }
+  if (legendPanel) legendPanel.style.display = "";
+  initTrendsLegendBar();
+  const slider = document.getElementById("trends-date-slider");
+  if (slider) slider.max = String(ts.dates.length - 1);
+  playTrendsSliderAnimation();
+}
+
+function leaveTrendsView() {
+  stopTrendsSliderAnimation();
+  trendsSliderPointerDown = false;
+  setTrendsSliderBusy(false);
+  hideProvinceOutlines();
+  renderTrendsPanel(null);
+  if (savedMapLayerId) {
+    layerSelect.value = savedMapLayerId;
+    recompute();
+  }
+}
 
 function setActiveView(view) {
   if (view === activeView) return;
   if (view === "trends") {
-    savedMapLayerId = layerSelect.value;
-    layerSelect.value = "obs::total";
-    recompute();
-    showProvinceOutlines();
-    clearContextSelection();
+    enterTrendsView();
   } else if (view === "context") {
-    hideProvinceOutlines();
-    renderTrendsPanel(null);
-    clearContextSelection();
-    if (savedMapLayerId && activeView === "trends") {
-      layerSelect.value = savedMapLayerId;
-      recompute();
+    if (activeView === "trends") leaveTrendsView();
+    else {
+      hideProvinceOutlines();
+      renderTrendsPanel(null);
     }
-  } else {
-    hideProvinceOutlines();
     clearContextSelection();
-    if (savedMapLayerId) {
-      layerSelect.value = savedMapLayerId;
-      recompute();
+  } else {
+    if (activeView === "trends") leaveTrendsView();
+    else {
+      hideProvinceOutlines();
+      clearContextSelection();
     }
   }
   activeView = view;
+  restoreCaseMarkersForView(view);
   document.body.classList.toggle("view-map", view === "map");
   document.body.classList.toggle("view-trends", view === "trends");
   document.body.classList.toggle("view-context", view === "context");
@@ -3214,6 +3568,29 @@ document.querySelectorAll(".view-tab").forEach(function(btn) {
     setActiveView(btn.dataset.view || "map");
   });
 });
+
+(function wireTrendsDateSlider() {
+  const slider = document.getElementById("trends-date-slider");
+  if (!slider) return;
+  function onUserSliderChange() {
+    if (activeView !== "trends") return;
+    stopTrendsSliderAnimation();
+    applyTrendsDateIdx(parseInt(slider.value, 10) || 0);
+  }
+  function onSliderPointerDown() {
+    trendsSliderPointerDown = true;
+    syncTrendsSliderBusy();
+    stopTrendsSliderAnimation();
+  }
+  function onSliderPointerUp() {
+    trendsSliderPointerDown = false;
+    syncTrendsSliderBusy();
+  }
+  slider.addEventListener("input", onUserSliderChange);
+  slider.addEventListener("pointerdown", onSliderPointerDown);
+  slider.addEventListener("pointerup", onSliderPointerUp);
+  slider.addEventListener("pointercancel", onSliderPointerUp);
+})();
 
 // --- active-case markers ---
 const ACTIVE_CASES = PAYLOAD.active_case_markers || [];

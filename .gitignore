@@ -3,3 +3,5 @@
 **.claude/
 **/__pycache__/
 daily_counts_by_onset*.csv
+
+.venv/*
