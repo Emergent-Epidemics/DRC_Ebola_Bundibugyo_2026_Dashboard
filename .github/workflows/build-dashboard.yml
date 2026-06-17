@@ -133,7 +133,7 @@ jobs:
       - name: Sync dashboard plots from linelist
         run: |
           set -euo pipefail
-          src="${{ github.workspace }}/BDBV2026-Linelist_Processing/dashboard_plots"
+          src="${{ github.workspace }}/BDBV2026-Linelist_Processing/outputs/dashboard_plots"
           dest="${{ github.workspace }}/dashboard/Data/dashboard_plots"
           if [ ! -f "${src}/manifest.json" ]; then
             echo "::warning::No dashboard_plots/manifest.json in linelist repo; trends plots may be unavailable."
