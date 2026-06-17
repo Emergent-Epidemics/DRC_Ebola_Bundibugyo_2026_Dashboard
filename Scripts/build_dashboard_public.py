@@ -610,7 +610,7 @@ def _national_totals_from_build_geojson() -> dict | None:
         "global_suspected_cases": susp,
         "global_confirmed_deaths": conf_d,
         "global_suspected_deaths": susp_d,
-        "global_total_cases": conf + susp,
+        "global_total_cases": conf,
         "affected_countries": ["DRC"],
         "affected_country_count": 1,
         "per_country": per_country,
@@ -1361,7 +1361,7 @@ def compute_global_sitrep_totals() -> dict | None:
     for c in metric_cols:
         sr[c] = pd.to_numeric(sr[c], errors="coerce").fillna(0).astype(int)
     grouped = sr.groupby("country", as_index=False)[metric_cols].sum()
-    grouped["total"] = grouped["confirmed cases"] + grouped["suspected cases"]
+    grouped["total"] = grouped["confirmed cases"]
     grouped = grouped[grouped["total"] > 0].sort_values("total", ascending=False)
 
     def total_metric(col):
@@ -1401,7 +1401,7 @@ def compute_global_sitrep_totals() -> dict | None:
         "global_suspected_cases":  final_susp,
         "global_confirmed_deaths": final_conf_d,
         "global_suspected_deaths": final_susp_d,
-        "global_total_cases":      final_conf + final_susp,
+        "global_total_cases":      final_conf,
         "affected_countries":      [c["country"] for c in per_country],
         "affected_country_count":  len(per_country),
         "per_country":             per_country,
@@ -2000,8 +2000,7 @@ def build_payload() -> dict:
             "global_suspected_cases":  case_totals.get("suspected_cases", 0),
             "global_confirmed_deaths": case_totals.get("confirmed_deaths", 0),
             "global_suspected_deaths": case_totals.get("suspected_deaths", 0),
-            "global_total_cases":      case_totals.get("confirmed_cases", 0)
-                                       + case_totals.get("suspected_cases", 0),
+            "global_total_cases":      case_totals.get("confirmed_cases", 0),
             "affected_countries": ["DRC"],
             "affected_country_count": 1,
             "per_country": [{
@@ -2684,10 +2683,10 @@ function isEpicenterZone(ref, layer) {
         }).join("") +
       "</div>"
     : "";
-  const globalDeaths = (t.global_confirmed_deaths || 0) + (t.global_suspected_deaths || 0);
+  const globalDeaths = (t.global_confirmed_deaths || 0);
   tracker.innerHTML =
     "<div class='stats-block'>" +
-      "<div class='global-title'>outbreak size (confirmed + suspected)</div>" +
+      "<div class='global-title'>outbreak size (confirmed)</div>" +
       "<div class='global-row'>" +
         "<div class='global-cell cases'>" +
           "<div class='num'>" + num(t.global_total_cases) + "</div>" +
