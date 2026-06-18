@@ -556,6 +556,7 @@ _NATIONAL_INSP_KEYS = (
     ("suspected_cases", "national_cumulative_suspected_cases"),
     ("confirmed_deaths", "national_cumulative_confirmed_deaths"),
     ("suspected_deaths", "national_cumulative_suspected_deaths"),
+    ("recovered_cases", "national_cumulative_recovered_cases"),
 )
 
 
@@ -595,6 +596,7 @@ def _national_totals_from_build_geojson() -> dict | None:
     susp = int(metrics.get("suspected_cases") or 0)
     conf_d = int(metrics.get("confirmed_deaths") or 0)
     susp_d = int(metrics.get("suspected_deaths") or 0)
+    rec = int(metrics.get("recovered_cases") or 0)
     # Single-country row: national_* in GeoJSON are DRC-only aggregates.
     per_country = [{
         "country": "DRC",
@@ -602,6 +604,7 @@ def _national_totals_from_build_geojson() -> dict | None:
         "suspected_cases": susp,
         "confirmed_deaths": conf_d,
         "suspected_deaths": susp_d,
+        "recovered_cases": rec,
         "total": conf + susp,
     }]
     # Match compute_global_sitrep_totals() so build_payload can merge blindly.
@@ -610,6 +613,7 @@ def _national_totals_from_build_geojson() -> dict | None:
         "global_suspected_cases": susp,
         "global_confirmed_deaths": conf_d,
         "global_suspected_deaths": susp_d,
+        "global_recovered_cases": rec,
         "global_total_cases": conf,
         "affected_countries": ["DRC"],
         "affected_country_count": 1,
@@ -1331,6 +1335,7 @@ def compute_global_sitrep_totals() -> dict | None:
     out = {
         "global_confirmed_cases": 0, "global_suspected_cases": 0,
         "global_confirmed_deaths": 0, "global_suspected_deaths": 0,
+        "global_recovered_cases": 0,
         "global_total_cases": 0,
         "affected_countries": [], "affected_country_count": 0,
         "per_country": [],
@@ -1406,6 +1411,9 @@ def compute_global_sitrep_totals() -> dict | None:
         "affected_country_count":  len(per_country),
         "per_country":             per_country,
     })
+    geo_nat = _national_totals_from_build_geojson()
+    if geo_nat is not None:
+        out["global_recovered_cases"] = geo_nat.get("global_recovered_cases", 0)
     return out
 
 
@@ -2000,6 +2008,7 @@ def build_payload() -> dict:
             "global_suspected_cases":  case_totals.get("suspected_cases", 0),
             "global_confirmed_deaths": case_totals.get("confirmed_deaths", 0),
             "global_suspected_deaths": case_totals.get("suspected_deaths", 0),
+            "global_recovered_cases":  0,
             "global_total_cases":      case_totals.get("confirmed_cases", 0),
             "affected_countries": ["DRC"],
             "affected_country_count": 1,
@@ -2009,6 +2018,7 @@ def build_payload() -> dict:
                 "suspected_cases":  case_totals.get("suspected_cases", 0),
                 "confirmed_deaths": case_totals.get("confirmed_deaths", 0),
                 "suspected_deaths": case_totals.get("suspected_deaths", 0),
+                "recovered_cases":  0,
                 "total": case_totals.get("confirmed_cases", 0)
                          + case_totals.get("suspected_cases", 0),
             }],
@@ -2360,6 +2370,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   #tracker .global-cell .sub { font-size:clamp(9px, 1.5vw, 10px); color:#bbb; text-transform:uppercase; letter-spacing:0.6px; margin-top:2px; }
   #tracker .global-cell.cases  .num { color:#ffd166; }
   #tracker .global-cell.deaths .num { color:#ff4d4d; }
+  #tracker .global-cell.recovered .num { color:#8CD790; }
   #tracker .countries-row { display:flex; flex-direction:column; align-items:center; gap:3px; margin-top:8px; font-size:clamp(10px, 1.6vw, 11px); color:#ddd; }
   #tracker .country { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; justify-content:center; }
   #tracker .country .name { color:#9fcdfb; font-weight:600; }
@@ -2684,6 +2695,7 @@ function isEpicenterZone(ref, layer) {
       "</div>"
     : "";
   const globalDeaths = (t.global_confirmed_deaths || 0);
+  const globalRecovered = (t.global_recovered_cases || 0);
   tracker.innerHTML =
     "<div class='stats-block'>" +
       "<div class='global-title'>outbreak size (confirmed)</div>" +
@@ -2695,6 +2707,10 @@ function isEpicenterZone(ref, layer) {
         "<div class='global-cell deaths'>" +
           "<div class='num'>" + num(globalDeaths) + "</div>" +
           "<div class='sub'>deaths</div>" +
+        "</div>" +
+        "<div class='global-cell recovered'>" +
+          "<div class='num'>" + num(globalRecovered) + "</div>" +
+          "<div class='sub'>recovered</div>" +
         "</div>" +
       "</div>" +
     "</div>" +

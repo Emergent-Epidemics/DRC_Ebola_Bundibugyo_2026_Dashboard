@@ -23,6 +23,7 @@
   --province-outline-weight-hover: 1.5;
   --case-marker: #5b86b3;
   --case-marker-opacity: 0.85;
+  --green: #285943;
 }
 
 /* ── Page ─────────────────────────────────────────────────── */
@@ -93,6 +94,9 @@ html, body {
 }
 #tracker .global-cell.deaths .num {
   color: var(--maroon) !important;
+}
+#tracker .global-cell.recovered .num {
+  color: var(--green) !important;
 }
 #tracker .countries-row {
   color: var(--ink) !important;
