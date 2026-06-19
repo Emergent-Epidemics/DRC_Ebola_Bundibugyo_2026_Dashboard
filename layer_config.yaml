@@ -33,16 +33,19 @@ exclude:
 groups:
   insp_sitrep:
     label: "Observed (INSP sitrep)"
+    label_fr: "Observé (sitrep INSP)"
     palette: reds
     scale: log
     legend_round: int
   testing_capacity:
     label: "Testing capacity"
+    label_fr: "Capacité de dépistage"
     palette: viridis
     scale: log
     legend_round: int
   flowminder_short_trips:
     label: "Movements from epicentre"
+    label_fr: "Mouvements depuis l'épicentre"
     palette: reds
     scale: log
     legend_round: 1
@@ -50,31 +53,37 @@ groups:
     epicenter_highlight: true
   worldpop:
     label: "Population"
+    label_fr: "Population"
     palette: viridis
     scale: log
     legend_round: int
   grid3_healthsites:
     label: "Health facilities (GRID3)"
+    label_fr: "Établissements de santé (GRID3)"
     palette: viridis
     scale: log
     legend_round: int
   healthsites_io:
     label: "Health facilities (healthsites.io)"
+    label_fr: "Établissements de santé (healthsites.io)"
     palette: viridis
     scale: log
     legend_round: int
   ccvi:
     label: "Vulnerability (CCVI)"
+    label_fr: "Vulnérabilité (CCVI)"
     palette: viridis
     scale: log
     legend_round: 2
   fao_lccs:
     label: "Land cover (FAO LCCS)"
+    label_fr: "Occupation des sols (FAO LCCS)"
     palette: viridis
     scale: log
     legend_round: 4
   gdp_pc:
     label: "GDP per capita"
+    label_fr: "PIB par habitant"
     palette: viridis
     scale: log
     legend_round: int
