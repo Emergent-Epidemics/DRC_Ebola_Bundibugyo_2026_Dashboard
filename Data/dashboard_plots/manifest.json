@@ -1,32 +1,47 @@
 {
-  "source_csv": "data/processed/for_dashboard_plotting.csv",
+  "source_csv": "data/processed/dhis2_linelist_processed/province_aggregated.csv",
   "series": [
     {
       "id": "d_pos",
       "label": "Confirmed",
-      "color": "#D55E00"
+      "color": "#b23b2e"
     },
     {
       "id": "d_neg",
       "label": "Negative",
-      "color": "#0072B2"
+      "color": "#5b86b3"
     },
     {
       "id": "d_inv",
-      "label": "Under investigation",
-      "color": "#E69F00"
+      "label": "Invalid Result",
+      "color": "#d08163"
     },
     {
       "id": "d_blk",
       "label": "Unclassified",
-      "color": "#999999"
+      "color": "#9c968b"
     }
   ],
+  "incomplete_styling": {
+    "days": 5,
+    "color": "#9c968b",
+    "label": "Reporting likely incomplete"
+  },
   "plots": {
     "Ituri": {
       "file": "daily_onset_ituri.svg",
-      "title": "Daily onset \u2014 Ituri",
-      "caption": "Cases by date of symptom onset"
+      "title": "Daily Cases by Symptom Onset - Ituri",
+      "caption": "Confirmed cases by date of symptom onset. Grey bars: last 5 days (reporting may be incomplete)."
+    },
+    "Nord-Kivu": {
+      "file": "daily_onset_nord-kivu.svg",
+      "title": "Daily Cases by Symptom Onset - Nord-Kivu",
+      "caption": "Confirmed cases by date of symptom onset. Grey bars: last 5 days (reporting may be incomplete)."
+    },
+    "Sud-Kivu": {
+      "file": "daily_onset_sud-kivu.svg",
+      "title": "Daily Cases by Symptom Onset - Sud-Kivu",
+      "caption": "Confirmed cases by date of symptom onset. Grey bars: last 5 days (reporting may be incomplete)."
     }
   }
 }
