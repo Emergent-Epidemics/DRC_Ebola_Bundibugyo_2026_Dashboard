@@ -1,0 +1,32 @@
+<h2>Contributeurs, données et méthodes</h2>
+
+<h3>Direction du projet</h3>
+<p>Ce travail est dirigé par l'Institut National de Recherche Biomédicale (INRB) Kinshasa / One Health Institute for Africa (INOHA) Kinshasa (Dav Ebengo, Placide Mbala-Kingebeni et Tania Bishola), et l'Institut National de Santé Publique (INSP) (Pierre Akilimali, Adelard Lofungola).</p>
+
+<h3>Institutions et agences partenaires</h3>
+<ul>
+<li>Institut National de Santé Publique (INSP)</li>
+<li>Institut National de Recherche Biomédicale (INRB)</li>
+<li>Centres africains de contrôle et de prévention des maladies (Africa CDC), Addis-Abeba, Éthiopie</li>
+<li>Organisation mondiale de la Santé, Genève, Suisse</li>
+<li>Bureau pays de l'OMS, Kinshasa, République démocratique du Congo</li>
+<li>Northeastern University, États-Unis</li>
+<li>Université d'Oxford, Royaume-Uni</li>
+</ul>
+
+<h3>Déclaration sur les travaux en cours</h3>
+<p>Les données épidémiologiques présentées ici sont basées sur des travaux en cours et doivent être considérées comme préliminaires. Nos analyses sont en cours et une publication est en préparation. Les données contextuelles sont accessibles publiquement ; veuillez vous référer à la licence originale lors de leur réutilisation.</p>
+<p>Pour toute utilisation des données épidémiologiques avant publication, ou pour toute autre demande, contactez le Prof. Placide Mbala-Kingebeni (<a href="mailto:placide.mbala@inrb.cd">placide.mbala@inrb.cd</a>), le Prof. Dav Ebengo (<a href="mailto:dav.ebengo@umie-inrb.org">dav.ebengo@umie-inrb.org</a>) et Pierre Akilimali (<a href="mailto:pierre.akilimali@insp.cd">pierre.akilimali@insp.cd</a>).</p>
+
+<h3>Sources de données</h3>
+<p>Le tableau de bord combine des données épidémiologiques (situations INSP), des limites administratives des zones de santé, des données contextuelles (population, établissements de santé, mobilité, vulnérabilité, etc.) et, le cas échéant, des estimations de modèles et des graphiques de tendances dérivés du traitement des linelistes.</p>
+<p>Les géométries et jeux de données contextuels proviennent du dépôt <a href="https://github.com/INRB-UMIE/BDBV2026-Data" target="_blank" rel="noopener">BDBV2026-Data</a>. Les données épidémiologiques INSP sont mises à jour via les sitreps officiels publiés sur <a href="https://insp.cd/" target="_blank" rel="noopener">insp.cd</a>.</p>
+
+<h3>Méthodes</h3>
+<p>Les cas observés proviennent des sitreps INSP et, le cas échéant, de mises à jour épidémiologiques consolidées dans le GeoJSON de build. Les totaux nationaux affichés dans l'en-tête privilégient le sitrep le plus récent lorsqu'il est disponible.</p>
+<p>Les couches cartographiques sont découvertes automatiquement à partir des propriétés embarquées dans le GeoJSON des zones de santé, avec exclusion et stylisation configurées dans <code>layer_config.yaml</code>. Les matrices de mobilité, de déplacement et de temps de trajet OSRM sont agrégées au niveau des zones.</p>
+<p>L'onglet Tendances utilise une série temporelle cumulative de cas confirmés transcrite des sitreps INSP. L'onglet Contexte affiche les piliers de la réponse sanitaire publique tels que rapportés dans les sitreps INSP (texte source conservé tel que publié).</p>
+<p>Les estimations du modèle Imperial College, lorsqu'elles sont disponibles, sont fournies séparément des totaux INSP et sont documentées dans le rapport source cité dans l'infobulle du tableau de bord.</p>
+
+<h3>Citation</h3>
+<p>Veuillez citer les fournisseurs de données originaux et ce dépôt si du code ou des données dérivées sont réutilisés. DOI du tableau de bord INRB/INOHA/INSP RDC : 10.5281/zenodo.20347624</p>
