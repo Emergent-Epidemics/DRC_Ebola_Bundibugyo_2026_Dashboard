@@ -89,10 +89,15 @@ CAVEATS_CSV      = DATA_ROOT / "caveats.csv"
 DASHBOARD_PLOTS_DIR = DATA_ROOT / "dashboard_plots"
 SIT_REPS_DIR     = DATA_ROOT / "Epidemiological Data"
 METHODS_DOCX     = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website.docx"
+METHODS_DOCX_FR  = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website_fr.docx"
+METHODS_HTML_FR  = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website_fr.html"
 TERMS_TXT        = DATA_ROOT / "ToS" / "Terms of Use.txt"
+TERMS_TXT_FR     = DATA_ROOT / "ToS" / "Terms of Use_fr.txt"
 BRANDING_DIR     = DATA_ROOT / "Branding"
 BRANDING_URLS    = BRANDING_DIR / "urls.txt"
 THEME_CSS        = BRANDING_DIR / "dashboard-theme.css"
+LOCALES_DIR      = SCRIPT_DIR.parent / "locales"
+SUPPORTED_LANGS  = ("en", "fr")
 
 
 # ---------------------------------------------------------------------------
@@ -655,7 +660,7 @@ def _normalize_tracker_caveat_metric(raw: str) -> str | None:
     return None
 
 
-def load_tracker_caveats() -> list[dict]:
+def load_tracker_caveats(lang: str = "en") -> list[dict]:
     """Load tracker footnotes from Data/caveats.csv.
 
     Each row adds an asterisk (or †, ‡, § for further rows) beside the matching
@@ -663,7 +668,7 @@ def load_tracker_caveats() -> list[dict]:
 
     Expected CSV::
 
-        metric,warning
+        metric,warning[,warning_fr]
         suspected_cases,National suspected counts include contacts under surveillance.
 
     ``metric`` must resolve to one of: confirmed_cases, suspected_cases,
@@ -685,6 +690,7 @@ def load_tracker_caveats() -> list[dict]:
         print(f"  WARNING: {CAVEATS_CSV.name} needs a warning column "
               f"(e.g. warning, message, caveat)")
         return []
+    fr_col = "warning_fr" if "warning_fr" in df.columns else None
     out: list[dict] = []
     seen: set[str] = set()
     for _, row in df.iterrows():
@@ -695,13 +701,17 @@ def load_tracker_caveats() -> list[dict]:
         if metric in seen:
             print(f"  WARNING: duplicate caveat for {metric}; keeping first row")
             continue
-        warning = str(row[warn_col]).strip()
+        warning = ""
+        if lang == "fr" and fr_col:
+            warning = str(row[fr_col]).strip()
+        if not warning or warning.lower() in ("nan", "none"):
+            warning = str(row[warn_col]).strip()
         if not warning or warning.lower() in ("nan", "none"):
             continue
         mark = _TRACKER_CAVEAT_MARKS[len(out)] if len(out) < len(_TRACKER_CAVEAT_MARKS) else "*"
         out.append({"metric": metric, "mark": mark, "warning": warning})
         seen.add(metric)
-    if out:
+    if out and lang == "en":
         print(f"  tracker caveats: {[c['metric'] for c in out]}")
     return out
 
@@ -1461,7 +1471,7 @@ def _strip_bullet(s: str) -> str:
     return s.lstrip()
 
 
-def load_methods_html() -> str:
+def load_methods_html(path: Path | None = None) -> str:
     """Render Contributors_Methods_Data_website.docx as an HTML snippet.
 
     Headings 1/2/3 -> h2/h3/h4. Bold-only paragraphs are promoted to h2 as a
@@ -1470,7 +1480,8 @@ def load_methods_html() -> str:
     Hyperlinks are preserved with target=_blank. Email addresses become
     mailto: links.
     """
-    if not METHODS_DOCX.exists():
+    docx_path = path or METHODS_DOCX
+    if not docx_path.exists():
         return ""
     try:
         from docx import Document
@@ -1478,8 +1489,8 @@ def load_methods_html() -> str:
         from docx.text.paragraph import Paragraph
     except Exception:
         return ("<p style='color:#c66'>python-docx not installed; cannot render "
-                f"{METHODS_DOCX.name}.</p>")
-    d = Document(METHODS_DOCX)
+                f"{docx_path.name}.</p>")
+    d = Document(docx_path)
     rid_to_url: dict[str, str] = {}
     for rid, rel in d.part.rels.items():
         if "hyperlink" in rel.reltype.lower():
@@ -1581,18 +1592,35 @@ def load_methods_html() -> str:
 
 _TERMS_SECTION_RE = re.compile(r"^(\d+)\.\s+(.+)$")
 _TERMS_LASTUPDATED_RE = re.compile(r"^Last updated:\s*(.+)$", re.IGNORECASE)
+_TERMS_LASTUPDATED_FR_RE = re.compile(r"^Dernière mise à jour\s*:\s*(.+)$", re.IGNORECASE)
+_TERMS_HEADER_SKIP_RE = re.compile(
+    r"^(terms of use|conditions d'utilisation)$", re.IGNORECASE,
+)
 
 
-def load_terms_html() -> tuple[str, str]:
-    if not TERMS_TXT.exists():
+def load_methods_html_lang(lang: str = "en") -> str:
+    """Load methods content for ``lang`` (docx preferred; French HTML fallback)."""
+    if lang == "fr":
+        if METHODS_DOCX_FR.exists():
+            return load_methods_html(METHODS_DOCX_FR)
+        if METHODS_HTML_FR.exists():
+            print(f"  methods HTML (fr): {METHODS_HTML_FR.name}")
+            return METHODS_HTML_FR.read_text(encoding="utf-8").strip()
+        print("  WARNING: no French methods document; falling back to English")
+    return load_methods_html(METHODS_DOCX)
+
+
+def load_terms_html(path: Path | None = None) -> tuple[str, str]:
+    terms_path = path or TERMS_TXT
+    if not terms_path.exists():
         return "", ""
     last_updated = ""
     parts: list[str] = []
-    for line in TERMS_TXT.read_text(encoding="utf-8").splitlines():
+    for line in terms_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
-        if not line or line.lower() == "terms of use":
+        if not line or _TERMS_HEADER_SKIP_RE.match(line):
             continue
-        m = _TERMS_LASTUPDATED_RE.match(line)
+        m = _TERMS_LASTUPDATED_RE.match(line) or _TERMS_LASTUPDATED_FR_RE.match(line)
         if m:
             last_updated = m.group(1).strip()
             continue
@@ -1607,6 +1635,14 @@ def load_terms_html() -> tuple[str, str]:
         )
         parts.append(f"<p>{text}</p>")
     return "\n".join(parts), last_updated
+
+
+def load_terms_html_lang(lang: str = "en") -> tuple[str, str]:
+    if lang == "fr" and TERMS_TXT_FR.exists():
+        return load_terms_html(TERMS_TXT_FR)
+    if lang == "fr":
+        print("  WARNING: no French terms document; falling back to English")
+    return load_terms_html(TERMS_TXT)
 
 
 # ---------------------------------------------------------------------------
@@ -1929,6 +1965,78 @@ def _sort_layers_for_dropdown(layers: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# i18n (locale YAML + per-language layers / legal text)
+# ---------------------------------------------------------------------------
+
+def _load_locale_yaml(lang: str) -> dict:
+    path = LOCALES_DIR / f"{lang}.yaml"
+    if not path.exists():
+        print(f"  WARNING: locale file missing: {path.name}")
+        return {}
+    try:
+        import yaml
+    except ImportError:
+        print("  WARNING: PyYAML not installed; locale files ignored")
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def load_locales() -> dict[str, dict]:
+    locales = {lang: _load_locale_yaml(lang) for lang in SUPPORTED_LANGS}
+    for lang, data in locales.items():
+        if data:
+            print(f"  locale {lang}: loaded")
+    return locales
+
+
+def localize_layers(layers: list[dict], locale: dict) -> list[dict]:
+    """Return a copy of ``layers`` with group/label text from a locale bundle."""
+    group_map = locale.get("layer_groups") or {}
+    label_map = locale.get("layer_labels") or {}
+    out: list[dict] = []
+    for layer in layers:
+        localized = dict(layer)
+        en_group = layer["group"]
+        if en_group in group_map:
+            localized["group"] = group_map[en_group]
+        layer_id = layer["id"]
+        if layer_id in label_map:
+            localized["label"] = label_map[layer_id]
+        out.append(localized)
+    return out
+
+
+def build_i18n_payload(layers_en: list[dict]) -> dict:
+    locales = load_locales()
+    layers_by_lang = {
+        lang: localize_layers(layers_en, locales.get(lang, {}))
+        for lang in SUPPORTED_LANGS
+    }
+    methods_html = {lang: load_methods_html_lang(lang) for lang in SUPPORTED_LANGS}
+    terms_html: dict[str, str] = {}
+    terms_updated: dict[str, str] = {}
+    tracker_caveats: dict[str, list] = {}
+    for lang in SUPPORTED_LANGS:
+        html, updated = load_terms_html_lang(lang)
+        terms_html[lang] = html
+        terms_updated[lang] = updated
+        tracker_caveats[lang] = load_tracker_caveats(lang)
+    print(f"  i18n: {', '.join(SUPPORTED_LANGS)} "
+          f"(methods fr={len(methods_html.get('fr', ''))} chars)")
+    return {
+        "default": "en",
+        "langs": list(SUPPORTED_LANGS),
+        "strings": locales,
+        "layers": layers_by_lang,
+        "methods_html": methods_html,
+        "terms_html": terms_html,
+        "terms_updated": terms_updated,
+        "tracker_caveats": tracker_caveats,
+    }
+
+
+# ---------------------------------------------------------------------------
 # payload assembly
 # ---------------------------------------------------------------------------
 
@@ -1993,9 +2101,11 @@ def build_payload() -> dict:
     ]
     layers = _sort_layers_for_dropdown(extra_layers + discovered_layers)
 
-    methods_html = load_methods_html()
+    i18n = build_i18n_payload(layers)
+    methods_html = i18n["methods_html"]["en"]
     print(f"  methods HTML: {len(methods_html)} chars")
-    terms_html, terms_updated = load_terms_html()
+    terms_html = i18n["terms_html"]["en"]
+    terms_updated = i18n["terms_updated"]["en"]
     print(f"  terms HTML: {len(terms_html)} chars (updated {terms_updated!r})")
     partners = load_partners()
     print(f"  partner logos: {[p['alt'] for p in partners]}")
@@ -2025,7 +2135,7 @@ def build_payload() -> dict:
         }
     totals = {**case_totals, **sitrep}
     ic_model = load_ic_model_estimates()
-    tracker_caveats = load_tracker_caveats()
+    tracker_caveats = i18n["tracker_caveats"]["en"]
     print(f"  case totals: confirmed={totals.get('confirmed_cases', 0)}, "
           f"suspected={totals.get('suspected_cases', 0)}, "
           f"affected zones={totals.get('affected_zones', 0)}")
@@ -2062,6 +2172,7 @@ def build_payload() -> dict:
         "methods_html": methods_html,
         "terms_html": terms_html,
         "terms_updated": terms_updated,
+        "i18n": i18n,
         "partners": partners,
         "totals": totals,
         "ic_model": ic_model,
@@ -2094,8 +2205,20 @@ HTML_TEMPLATE = r"""<!doctype html>
     padding:12px 14px; border-radius:8px;
     box-shadow:0 2px 10px rgba(0,0,0,0.4);
     font-size:13px; line-height:1.4;
+    box-sizing:border-box;
   }
-  #controls     { top:12px; left:12px; max-width:340px; }
+  #controls     {
+    top:12px; left:12px;
+    width:min(340px, calc(100vw - 24px));
+    max-width:min(340px, calc(100vw - 24px));
+  }
+  #controls .panel-body { min-width:0; }
+  #controls select {
+    display:block;
+    width:100%;
+    max-width:100%;
+    box-sizing:border-box;
+  }
   #legend       { bottom:24px; left:12px; max-width:300px; }
   #info         { top:12px; right:12px; max-width:340px; max-height:80vh; overflow-y:auto; }
   #trends       {
@@ -2438,7 +2561,62 @@ HTML_TEMPLATE = r"""<!doctype html>
   #imperial-model-estimates .info-wrap:focus-within .info-tooltip { display:block; }
   #title h1 { margin:0 0 4px 0; font-size:clamp(16px, 3.4vw, 22px); font-weight:700; letter-spacing:0.3px; }
   #title .sub { font-size:11px; opacity:0.8; }
-  select, button { background:#222; color:#eee; border:1px solid #444; padding:4px 6px; border-radius:4px; font-size:12px; }
+  #lang-switcher {
+    display:flex; justify-content:center;
+    margin-top:6px; margin-bottom:14px;
+  }
+  .lang-toggle-track {
+    position:relative;
+    display:inline-grid;
+    grid-template-columns:1fr 1fr;
+    align-items:stretch;
+    background:#9b7d4e;
+    border:1px solid #9b7d4e;
+    border-radius:999px;
+    padding:2px;
+    min-width:92px;
+    box-shadow:inset 0 1px 2px rgba(0,0,0,0.15);
+  }
+  .lang-toggle-thumb {
+    position:absolute;
+    top:2px; bottom:2px; left:2px;
+    width:calc(50% - 2px);
+    border-radius:999px;
+    background:#e7e3db;
+    border:none;
+    box-shadow:0 1px 3px rgba(0,0,0,0.2);
+    transition:transform 0.22s ease;
+    pointer-events:none;
+    z-index:0;
+  }
+  #lang-switcher.lang-fr .lang-toggle-thumb {
+    transform:translateX(100%);
+  }
+  select, button { background:#222; color:#eee; border:1px solid #444; padding:4px 6px; border-radius:4px; font-size:12px; box-sizing:border-box; }
+  #lang-switcher .lang-btn {
+    position:relative; z-index:1;
+    border:none !important; border-radius:999px; box-sizing:border-box;
+    padding:4px 16px; font-size:11px; font-weight:600;
+    cursor:pointer; line-height:1.3; letter-spacing:0.4px;
+    min-width:44px;
+  }
+  #lang-switcher .lang-btn:not(.active) {
+    color:#e7e3db !important;
+    background:#9b7d4e !important;
+  }
+  #lang-switcher .lang-btn:not(.active):hover {
+    color:#fff !important;
+    background:#9b7d4e !important;
+  }
+  #lang-switcher .lang-btn.active {
+    color:#9b7d4e !important;
+    background:transparent !important;
+  }
+  #lang-switcher .lang-btn.active:hover {
+    color:#9b7d4e !important;
+    background:transparent !important;
+  }
+  select { max-width:100%; }
   label { display:block; margin-top:6px; font-size:12px; color:#bbb; }
   .swatch { display:inline-block; width:18px; height:12px; margin-right:6px; vertical-align:middle; border:1px solid #444; }
   .swatch-no-data { background:transparent !important; border:1px dashed #888; }
@@ -2514,58 +2692,65 @@ HTML_TEMPLATE = r"""<!doctype html>
 </head>
 <body class="view-map">
 <div id="map"></div>
-<div id="trends-hint">Hover over a province to see trends</div>
-<div id="context-hint">Click a health zone to see response context</div>
+<div id="trends-hint" data-i18n="ui.hints.trends">Hover over a province to see trends</div>
+<div id="context-hint" data-i18n="ui.hints.context">Click a health zone to see response context</div>
 <div id="partners"></div>
 <div id="title" class="panel">
-  <h1>DRC Ebola Bundibugyo 2026</h1>
+  <h1 id="page-heading">DRC Ebola Bundibugyo 2026</h1>
+  <div id="lang-switcher" class="lang-switcher" role="group" aria-label="Language">
+    <div class="lang-toggle-track">
+      <span class="lang-toggle-thumb" aria-hidden="true"></span>
+      <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true">EN</button>
+      <button type="button" class="lang-btn" data-lang="fr" aria-pressed="false">FR</button>
+    </div>
+  </div>
   <div class="sub" id="title-sub"></div>
   <div id="tracker"></div>
   <div class="sub" id="imperial-model-estimates"></div>
   <div style="margin-top:4px">
-    <button id="methods-btn" class="link-btn" type="button">Contributors, Data, and Methods</button>
-    <button id="terms-btn"   class="link-btn" type="button">Terms of Use</button>
+    <button id="methods-btn" class="link-btn" type="button" data-i18n="ui.methods_btn">Contributors, Data, and Methods</button>
+    <button id="terms-btn"   class="link-btn" type="button" data-i18n="ui.terms_btn">Terms of Use</button>
   </div>
 </div>
 <div id="methods-modal" class="modal" role="dialog" aria-label="Contributors, Data, and Methods" aria-modal="true">
   <div class="sheet">
     <button class="close" id="methods-close" aria-label="Close">✕</button>
-    <h2>Contributors, Data, and Methods</h2>
+    <h2 id="methods-modal-title" data-i18n="ui.methods_modal_title">Contributors, Data, and Methods</h2>
     <div id="methods-content"></div>
   </div>
 </div>
 <div id="terms-modal" class="modal" role="dialog" aria-label="Terms of Use" aria-modal="true">
   <div class="sheet">
     <button class="close" id="terms-close" aria-label="Close">✕</button>
-    <h2>Terms of Use</h2>
+    <h2 id="terms-modal-title" data-i18n="ui.terms_modal_title">Terms of Use</h2>
     <div id="terms-updated" style="font-size:11px;color:#888;margin-bottom:10px"></div>
     <div id="terms-content"></div>
   </div>
 </div>
 <div id="controls" class="panel">
   <div class="panel-header">
-    <strong>Layer</strong>
-    <button class="panel-toggle" data-target="controls" type="button" aria-label="Toggle layer controls" title="Collapse / expand layer controls">−</button>
+    <strong data-i18n="ui.layer">Layer</strong>
+    <button class="panel-toggle" data-target="controls" type="button" data-i18n-aria="ui.aria.toggle_layer" data-i18n-title="ui.aria.collapse_layer" aria-label="Toggle layer controls" title="Collapse / expand layer controls">−</button>
   </div>
   <div class="panel-body">
-    <label for="layer-select">Source</label>
+    <label for="layer-select" data-i18n="ui.source">Source</label>
     <select id="layer-select"></select>
-    <label for="scale-select">Color scale</label>
+    <label for="scale-select" data-i18n="ui.color_scale">Color scale</label>
     <select id="scale-select">
-      <option value="log">log</option>
-      <option value="linear">linear</option>
+      <option value="log" data-i18n="ui.scale_log">log</option>
+      <option value="linear" data-i18n="ui.scale_linear">linear</option>
     </select>
     <div class="checkbox-row">
       <input type="checkbox" id="show-cases" />
-      <label for="show-cases" style="margin:0;color:#eee">Show active-case markers</label>
+      <label for="show-cases" style="margin:0;color:#eee" data-i18n="ui.show_cases">Show active-case markers</label>
     </div>
     <div class="footer" id="layer-meta"></div>
   </div>
 </div>
 <div id="legend" class="panel">
   <div class="panel-header">
-    <div id="legend-title"><strong>Legend</strong></div>
-    <button class="panel-toggle" data-target="legend" type="button" aria-label="Toggle legend" title="Collapse / expand legend">−</button>
+    <div id="legend-title"><strong data-i18n="ui.legend">Legend</strong></div>
+    <button class="panel-toggle" data-target="legend" type="button" data-i18n-aria="ui.aria.toggle_legend" data-i18n-title="ui.aria.collapse_legend" aria-label="Toggle legend" title="Collapse / expand legend">−</button>
   </div>
   <div class="panel-body">
     <div class="legend-bar" id="legend-bar"></div>
@@ -2575,49 +2760,49 @@ HTML_TEMPLATE = r"""<!doctype html>
   </div>
 </div>
 <div id="trends-legend" class="panel">
-  <div id="trends-legend-title"><strong>Confirmed cases (cumulative)</strong></div>
-  <p id="trends-legend-desc">Transcribed from INSP sitreps. Cases are sometimes revised downwards in consecutive sitreps.</p>
+  <div id="trends-legend-title"><strong data-i18n="ui.trends_confirmed_title">Confirmed cases (cumulative)</strong></div>
+  <p id="trends-legend-desc" data-i18n="ui.trends_legend_desc">Transcribed from INSP sitreps. Cases are sometimes revised downwards in consecutive sitreps.</p>
   <div class="legend-bar" id="trends-legend-bar"></div>
   <div class="legend-ticks" id="trends-legend-ticks"></div>
-  <div class="legend-scale" id="trends-legend-scale">(log scale)</div>
-  <label for="trends-date-slider" id="trends-date-label">As of —</label>
+  <div class="legend-scale" id="trends-legend-scale" data-i18n="ui.trends_scale_log">(log scale)</div>
+  <label for="trends-date-slider" id="trends-date-label" data-i18n="ui.trends_as_of">As of —</label>
   <input type="range" id="trends-date-slider" min="0" max="0" value="0"
-         aria-label="SitRep date for confirmed cases map" />
+         data-i18n-aria="ui.trends_slider_aria" aria-label="SitRep date for confirmed cases map" />
 </div>
 <div id="info" class="panel">
   <div id="info-header">
-    <strong>Zone</strong>
-    <button id="info-toggle" type="button" aria-label="Toggle zone details" title="Collapse / expand zone details">−</button>
+    <strong data-i18n="ui.zone">Zone</strong>
+    <button id="info-toggle" type="button" data-i18n-aria="ui.aria.toggle_zone" data-i18n-title="ui.aria.collapse_zone" aria-label="Toggle zone details" title="Collapse / expand zone details">−</button>
   </div>
-  <div id="info-body" class="info-empty">Hover a health zone.</div>
+  <div id="info-body" class="info-empty" data-i18n="ui.hover_zone">Hover a health zone.</div>
 </div>
 <div id="view-switcher">
   <div id="view-tabs" class="view-tabs">
-    <button type="button" class="view-tab active" data-view="map">Current snapshot</button>
-    <button type="button" class="view-tab" data-view="trends">Trends</button>
-    <button type="button" class="view-tab" data-view="context">Context</button>
+    <button type="button" class="view-tab active" data-view="map" data-i18n="ui.view_map">Current snapshot</button>
+    <button type="button" class="view-tab" data-view="trends" data-i18n="ui.view_trends">Trends</button>
+    <button type="button" class="view-tab" data-view="context" data-i18n="ui.view_context">Context</button>
   </div>
 </div>
 <div id="trends" class="panel">
   <div class="panel-header">
-    <strong id="trends-title">Trends</strong>
-    <button class="panel-toggle" data-target="trends" type="button" aria-label="Toggle trends panel" title="Collapse / expand trends">−</button>
+    <strong id="trends-title" data-i18n="ui.trends_panel">Trends</strong>
+    <button class="panel-toggle" data-target="trends" type="button" data-i18n-aria="ui.aria.toggle_trends" data-i18n-title="ui.aria.collapse_trends" aria-label="Toggle trends panel" title="Collapse / expand trends">−</button>
   </div>
   <div id="trends-body" class="panel-body trends-empty"></div>
 </div>
 <div id="context-national" class="panel">
   <div class="panel-header">
-    <strong>National and Provincial Response</strong>
-    <button class="panel-toggle" data-target="context-national" type="button" aria-label="Toggle national and provincial context panel" title="Collapse / expand national and provincial context">−</button>
+    <strong data-i18n="ui.context_national">National and Provincial Response</strong>
+    <button class="panel-toggle" data-target="context-national" type="button" data-i18n-aria="ui.aria.toggle_context_national" data-i18n-title="ui.aria.collapse_context_national" aria-label="Toggle national and provincial context panel" title="Collapse / expand national and provincial context">−</button>
   </div>
   <div id="context-national-body" class="panel-body context-empty"></div>
 </div>
 <div id="context" class="panel">
   <div class="panel-header">
-    <strong id="context-title">Health zone context</strong>
-    <button class="panel-toggle" data-target="context" type="button" aria-label="Toggle health zone context panel" title="Collapse / expand zone context">−</button>
+    <strong id="context-title" data-i18n="ui.context_zone">Health zone context</strong>
+    <button class="panel-toggle" data-target="context" type="button" data-i18n-aria="ui.aria.toggle_context_zone" data-i18n-title="ui.aria.collapse_context_zone" aria-label="Toggle health zone context panel" title="Collapse / expand zone context">−</button>
   </div>
-  <div id="context-body" class="panel-body context-empty">Click a health zone on the map.</div>
+  <div id="context-body" class="panel-body context-empty" data-i18n="ui.context_click_zone">Click a health zone on the map.</div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -2625,10 +2810,52 @@ HTML_TEMPLATE = r"""<!doctype html>
 <script>
 const PAYLOAD = JSON.parse(document.getElementById("payload").textContent);
 const ZONE_DATA = PAYLOAD.zone_data;
-const LAYERS = PAYLOAD.layers;
+const I18N = PAYLOAD.i18n || {};
+let LAYERS = PAYLOAD.layers;
 const TRAVEL_FROM = PAYLOAD.travel_from || "Mongbwalu";
 const EPICENTER_NOMS = new Set(PAYLOAD.epicenter_noms || []);
 const EPICENTER_FILL = PAYLOAD.epicenter_fill || "#9b7d4e";
+let currentLang = (function resolveLang() {
+  const stored = localStorage.getItem("bdbv-dashboard-lang");
+  if (stored && I18N.strings && I18N.strings[stored]) return stored;
+  const nav = (navigator.language || "").slice(0, 2).toLowerCase();
+  if (nav === "fr" && I18N.strings && I18N.strings.fr) return "fr";
+  return I18N.default || "en";
+})();
+
+function t(path) {
+  const parts = String(path).split(".");
+  let node = (I18N.strings && I18N.strings[currentLang]) || (I18N.strings && I18N.strings.en) || {};
+  for (let i = 0; i < parts.length; i++) {
+    if (node == null || typeof node !== "object") return path;
+    node = node[parts[i]];
+  }
+  return node != null ? node : path;
+}
+
+function tf(path, vars) {
+  let s = String(t(path));
+  if (vars) {
+    Object.keys(vars).forEach(function(k) {
+      s = s.split("{" + k + "}").join(String(vars[k]));
+    });
+  }
+  return s;
+}
+
+function localeTag() {
+  return currentLang === "fr" ? "fr-FR" : "en-US";
+}
+
+function fmtLocale(v) {
+  return (v == null ? 0 : v).toLocaleString(localeTag());
+}
+
+function trackerCaveats() {
+  const byLang = (I18N.tracker_caveats || {})[currentLang];
+  if (byLang && byLang.length) return byLang;
+  return PAYLOAD.tracker_caveats || [];
+}
 
 function layerEpicenterHighlight(layer) {
   return !!(layer && layer.epicenter_highlight);
@@ -2637,27 +2864,71 @@ function isEpicenterZone(ref, layer) {
   return layerEpicenterHighlight(layer) && EPICENTER_NOMS.has(ref);
 }
 
-(function buildTitleSub() {
+function applyStaticI18n() {
+  document.documentElement.lang = currentLang;
+  document.title = t("meta.title");
+  const heading = document.getElementById("page-heading");
+  if (heading) heading.textContent = t("meta.heading");
+  document.querySelectorAll("[data-i18n]").forEach(function(el) {
+    const key = el.getAttribute("data-i18n");
+    const val = t(key);
+    if (el.id === "info-body" && !el.classList.contains("info-empty")) return;
+    if (el.id === "context-body" && contextSelectedNom) return;
+    el.textContent = val;
+  });
+  document.querySelectorAll("[data-i18n-aria]").forEach(function(el) {
+    el.setAttribute("aria-label", t(el.getAttribute("data-i18n-aria")));
+  });
+  document.querySelectorAll("[data-i18n-title]").forEach(function(el) {
+    el.setAttribute("title", t(el.getAttribute("data-i18n-title")));
+  });
+  document.querySelectorAll(".lang-btn").forEach(function(btn) {
+    const on = btn.dataset.lang === currentLang;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  const langSwitcher = document.getElementById("lang-switcher");
+  if (langSwitcher) langSwitcher.classList.toggle("lang-fr", currentLang === "fr");
+  const methodsModal = document.getElementById("methods-modal");
+  const termsModal = document.getElementById("terms-modal");
+  if (methodsModal) methodsModal.setAttribute("aria-label", t("ui.methods_modal_title"));
+  if (termsModal) termsModal.setAttribute("aria-label", t("ui.terms_modal_title"));
+}
+
+function updateLegalContent() {
+  const methods = (I18N.methods_html || {})[currentLang] || PAYLOAD.methods_html || "";
+  const terms = (I18N.terms_html || {})[currentLang] || PAYLOAD.terms_html || "";
+  const updated = ((I18N.terms_updated || {})[currentLang]) || PAYLOAD.terms_updated || "";
+  document.getElementById("methods-content").innerHTML =
+    methods || "<p style='color:#888'>" + t("ui.methods_missing") + "</p>";
+  document.getElementById("terms-content").innerHTML =
+    terms || "<p style='color:#888'>" + t("ui.terms_missing") + "</p>";
+  const termsUpdatedEl = document.getElementById("terms-updated");
+  if (termsUpdatedEl) {
+    termsUpdatedEl.textContent = updated ? (t("ui.terms_updated") + " " + updated) : "";
+  }
+}
+
+function buildTitleSub() {
   const linkStyle = "color:#9fcdfb;text-decoration:underline";
   let html =
-    "Latest " +
+    t("ui.title_sub.latest") + " " +
     "<a href='" + (PAYLOAD.insp_sitrep_url || "https://insp.cd/") + "' target='_blank' rel='noopener' " +
-    "style='" + linkStyle + "'>INSP Sit Rep</a>" +
+    "style='" + linkStyle + "'>" + t("ui.title_sub.insp_sitrep") + "</a>" +
     " - " + PAYLOAD.asof;
   const db = PAYLOAD.data_build;
   if (db && db.url && db.tag) {
     html +=
-      " · Built on release: <a href='" + db.url + "' target='_blank' rel='noopener' style='" + linkStyle + "'>" +
+      " · " + t("ui.title_sub.built_on") + " <a href='" + db.url + "' target='_blank' rel='noopener' style='" + linkStyle + "'>" +
        db.tag + "</a>";
   }
   document.getElementById("title-sub").innerHTML = html;
-})();
+}
 
-// --- case-count tracker ---
-(function buildTracker() {
-  const t = PAYLOAD.totals || {};
+function buildTracker() {
+  const totals = PAYLOAD.totals || {};
   const tracker = document.getElementById("tracker");
-  const caveats = PAYLOAD.tracker_caveats || [];
+  const caveats = trackerCaveats();
   const caveatByMetric = {};
   caveats.forEach(function(c) { caveatByMetric[c.metric] = c.mark; });
   function esc(s) {
@@ -2667,23 +2938,23 @@ function isEpicenterZone(ref, layer) {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   }
-  function num(v) { return (v == null ? 0 : v).toLocaleString(); }
   function countWithMark(v, metric) {
-    const base = num(v);
+    const base = fmtLocale(v);
     const mark = caveatByMetric[metric];
     return mark
       ? base + "<span class='caveat-mark' aria-hidden='true'>" + esc(mark) + "</span>"
       : base;
   }
-  const per = (t.per_country || []);
+  const tr = t("ui.tracker");
+  const per = (totals.per_country || []);
   const countryHTML = per.map(function(c) {
     return "<div class='country'>" +
              "<span class='name'>" + esc(c.country) + "</span>" +
              "<span class='nums'>" +
-               "<span class='conf'>"   + countWithMark(c.confirmed_cases,  "confirmed_cases")  + "</span> conf · " +
-               "<span class='susp'>"   + countWithMark(c.suspected_cases,  "suspected_cases")  + "</span> susp · " +
-               "<span class='conf-d'>" + countWithMark(c.confirmed_deaths, "confirmed_deaths") + "</span> conf deaths · " +
-               "<span class='susp-d'>" + countWithMark(c.suspected_deaths, "suspected_deaths") + "</span> susp deaths" +
+               "<span class='conf'>"   + countWithMark(c.confirmed_cases,  "confirmed_cases")  + "</span> " + tr.conf + " · " +
+               "<span class='susp'>"   + countWithMark(c.suspected_cases,  "suspected_cases")  + "</span> " + tr.susp + " · " +
+               "<span class='conf-d'>" + countWithMark(c.confirmed_deaths, "confirmed_deaths") + "</span> " + tr.conf_deaths + " · " +
+               "<span class='susp-d'>" + countWithMark(c.suspected_deaths, "suspected_deaths") + "</span> " + tr.susp_deaths +
              "</span>" +
            "</div>";
   }).join("");
@@ -2694,58 +2965,57 @@ function isEpicenterZone(ref, layer) {
         }).join("") +
       "</div>"
     : "";
-  const globalDeaths = (t.global_confirmed_deaths || 0);
-  const globalRecovered = (t.global_recovered_cases || 0);
+  const globalDeaths = (totals.global_confirmed_deaths || 0);
+  const globalRecovered = (totals.global_recovered_cases || 0);
   tracker.innerHTML =
     "<div class='stats-block'>" +
-      "<div class='global-title'>outbreak size (confirmed)</div>" +
+      "<div class='global-title'>" + tr.outbreak_size + "</div>" +
       "<div class='global-row'>" +
         "<div class='global-cell cases'>" +
-          "<div class='num'>" + num(t.global_total_cases) + "</div>" +
-          "<div class='sub'>cases</div>" +
+          "<div class='num'>" + fmtLocale(totals.global_total_cases) + "</div>" +
+          "<div class='sub'>" + tr.cases + "</div>" +
         "</div>" +
         "<div class='global-cell deaths'>" +
-          "<div class='num'>" + num(globalDeaths) + "</div>" +
-          "<div class='sub'>deaths</div>" +
+          "<div class='num'>" + fmtLocale(globalDeaths) + "</div>" +
+          "<div class='sub'>" + tr.deaths + "</div>" +
         "</div>" +
         "<div class='global-cell recovered'>" +
-          "<div class='num'>" + num(globalRecovered) + "</div>" +
-          "<div class='sub'>recovered</div>" +
+          "<div class='num'>" + fmtLocale(globalRecovered) + "</div>" +
+          "<div class='sub'>" + tr.recovered + "</div>" +
         "</div>" +
       "</div>" +
     "</div>" +
     "<div class='countries-row tracker-countries'>" + (countryHTML || "<span class='sub'>—</span>") + "</div>" +
     footnotesHTML;
-})();
+}
 
-// --- modeled-estimate note + tooltip ---
-(function buildModeledEstimateNote() {
+function buildModeledEstimateNote() {
   const root = document.getElementById("imperial-model-estimates");
   if (!root) return;
   const m = PAYLOAD.ic_model || {};
   function icDisplay(v) {
     if (v == null || v === "") return "NA";
-    if (typeof v === "number") return v.toLocaleString();
+    if (typeof v === "number") return v.toLocaleString(localeTag());
     return String(v);
   }
   const date = icDisplay(m.ic_model_date);
   const lo = icDisplay(m.ic_model_lowerbound);
   const hi = icDisplay(m.ic_model_upperbound);
-  const sentence = "Modelled estimates indicate the outbreak may be larger than what is shown by these totals.";
+  const ic = t("ui.ic_model");
   const icReportUrl = "https://www.imperial.ac.uk/media/imperial-college/medicine/mrc-gida/Report-ebola-update-20-05-2026.pdf";
-  const tooltip = "Based on data up to " + date +
-    ", the true outbreak size is estimated between " + lo +
-    " and " + hi + " cases (Depending on assumptions underpinning outbreak severity and growth - see <a href='" + icReportUrl +
-    "' target='_blank' rel='noopener'>this report</a> for more details).";
+  const tooltip = ic.tooltip_prefix + " " + date + ", " +
+    ic.tooltip_between + " " + lo + " " + ic.tooltip_and + " " + hi + " " +
+    ic.tooltip_suffix + " <a href='" + icReportUrl + "' target='_blank' rel='noopener'>" +
+    ic.tooltip_link + "</a> " + ic.tooltip_end;
   root.innerHTML =
     "<span class='note-wrap'>" +
-      "<span class='note-text'>" + sentence + "</span>" +
+      "<span class='note-text'>" + ic.sentence + "</span>" +
       "<span class='info-wrap'>" +
-        "<button class='info-icon' type='button' aria-label='More information about modeled estimates'>i</button>" +
+        "<button class='info-icon' type='button' aria-label='" + ic.aria + "'>i</button>" +
         "<span class='info-tooltip' role='tooltip'>" + tooltip + "</span>" +
       "</span>" +
     "</span>";
-})();
+}
 
 // --- partners strip ---
 (function buildPartners() {
@@ -2764,7 +3034,9 @@ const layerSelect = document.getElementById("layer-select");
 const scaleSelect = document.getElementById("scale-select");
 const layerMeta = document.getElementById("layer-meta");
 
-(function buildSelect() {
+function rebuildLayerSelect() {
+  const selected = layerSelect.value;
+  layerSelect.innerHTML = "";
   const groups = {};
   for (const L of LAYERS) {
     if (!groups[L.group]) {
@@ -2777,7 +3049,44 @@ const layerMeta = document.getElementById("layer-meta");
     o.value = L.id; o.textContent = L.label;
     groups[L.group].appendChild(o);
   }
-})();
+  if (selected && getLayer(selected)) layerSelect.value = selected;
+  else if (LAYERS.length) layerSelect.value = LAYERS[0].id;
+}
+
+function setLang(lang) {
+  if (!I18N.strings || !I18N.strings[lang]) return;
+  currentLang = lang;
+  localStorage.setItem("bdbv-dashboard-lang", lang);
+  LAYERS = (I18N.layers && I18N.layers[lang]) || PAYLOAD.layers;
+  applyStaticI18n();
+  rebuildLayerSelect();
+  buildTitleSub();
+  buildTracker();
+  buildModeledEstimateNote();
+  updateLegalContent();
+  recompute();
+  if (activeView === "trends") {
+    updateTrendsDateLabel();
+    renderTrendsPanel(trendsHoveredProvince);
+  } else if (activeView === "context") {
+    renderContextPanel(contextSelectedNom);
+  } else {
+    const infoBody = document.getElementById("info-body");
+    if (infoBody && !infoBody.classList.contains("info-empty")) {
+      for (const feat of PAYLOAD.geometry.features) {
+        if ((feat.properties.name || "").toLowerCase() === (TRAVEL_FROM || "Mongbwalu").toLowerCase() ||
+            (feat.properties.nom || "").toLowerCase() === "mongbalu") {
+          infoBody.innerHTML = infoHTML(feat);
+          break;
+        }
+      }
+    }
+  }
+}
+
+document.querySelectorAll(".lang-btn").forEach(function(btn) {
+  btn.addEventListener("click", function() { setLang(btn.dataset.lang || "en"); });
+});
 
 function getLayer(id) { return LAYERS.find(L => L.id === id); }
 
@@ -2952,14 +3261,14 @@ function updateLegend(layer) {
     "<span>" + fmtLegend(mid, lr) + "</span>" +
     "<span>" + fmtLegend(hi,  lr) + "</span>";
   document.getElementById("legend-scale").textContent =
-    currentDomain.isLog ? "(log scale)" : "(linear scale)";
+    currentDomain.isLog ? t("ui.legend.log_scale") : t("ui.legend.linear_scale");
   var grayParts = [
-    "<span class='swatch' style='background:" + ZERO_FILL + "'></span>zero",
-    "<span class='swatch swatch-no-data'></span>no data"
+    "<span class='swatch' style='background:" + ZERO_FILL + "'></span>" + t("ui.legend.zero"),
+    "<span class='swatch swatch-no-data'></span>" + t("ui.legend.no_data")
   ];
   if (layerEpicenterHighlight(layer)) {
     grayParts.push(
-      "<span class='swatch' style='background:" + EPICENTER_FILL + "'></span>epicenter"
+      "<span class='swatch' style='background:" + EPICENTER_FILL + "'></span>" + t("ui.legend.epicenter")
     );
   }
   document.getElementById("legend-gray").innerHTML = grayParts.join(" · ");
@@ -2968,57 +3277,58 @@ function updateLegend(layer) {
 function infoHTML(feature) {
   const ref = feature.properties.nom;
   const z = ZONE_DATA[ref] || {};
-  const name = feature.properties.name || "(unnamed)";
+  const name = feature.properties.name || t("ui.case_tooltip.unnamed");
+  const info = t("ui.info");
   let h = "<div><strong>" + name + "</strong></div>";
   h += "<div style='color:#aaa;font-size:11px;margin-bottom:6px'>" + (ref || "—") + "</div>";
 
-  h += "<h4>Observed cases (" + PAYLOAD.asof + ")</h4>";
+  h += "<h4>" + info.observed_cases + " (" + PAYLOAD.asof + ")</h4>";
   h += "<table>";
-  h += "<tr><td>total</td><td>" + fmt(z.total_cases) + "</td></tr>";
-  h += "<tr><td>confirmed</td><td>" + fmt(z.confirmed_cases) + "</td></tr>";
-  h += "<tr><td>confirmed deaths</td><td>" + fmt(z.confirmed_deaths) + "</td></tr>";
-  h += "<tr><td>suspected</td><td>" + fmt(z.suspected_cases) + "</td></tr>";
-  h += "<tr><td>suspected deaths</td><td>" + fmt(z.suspected_deaths) + "</td></tr>";
+  h += "<tr><td>" + info.total + "</td><td>" + fmt(z.total_cases) + "</td></tr>";
+  h += "<tr><td>" + info.confirmed + "</td><td>" + fmt(z.confirmed_cases) + "</td></tr>";
+  h += "<tr><td>" + info.confirmed_deaths + "</td><td>" + fmt(z.confirmed_deaths) + "</td></tr>";
+  h += "<tr><td>" + info.suspected + "</td><td>" + fmt(z.suspected_cases) + "</td></tr>";
+  h += "<tr><td>" + info.suspected_deaths + "</td><td>" + fmt(z.suspected_deaths) + "</td></tr>";
   h += "</table>";
 
-  h += "<h4>Population</h4>";
+  h += "<h4>" + info.population + "</h4>";
   h += "<table>";
-  h += "<tr><td>pop count</td><td>" + fmt(z.worldpop__pop_count__pop_count) + "</td></tr>";
+  h += "<tr><td>" + info.pop_count + "</td><td>" + fmt(z.worldpop__pop_count__pop_count) + "</td></tr>";
   h += "</table>";
 
-  h += "<h4>Health facilities (GRID3)</h4>";
+  h += "<h4>" + info.health_facilities_grid3 + "</h4>";
   h += "<table>";
-  h += "<tr><td>healthsite count</td><td>" + fmt(z.grid3_healthsites__healthsite_count__healthsite_count) + "</td></tr>";
+  h += "<tr><td>" + info.healthsite_count + "</td><td>" + fmt(z.grid3_healthsites__healthsite_count__healthsite_count) + "</td></tr>";
   h += "</table>";
 
-  h += "<h4>Contact tracing (INSP)</h4>";
+  h += "<h4>" + info.contact_tracing + "</h4>";
   h += "<table>";
-  h += "<tr><td>contacts traced</td><td>" + fmt(z.insp_sitrep__cumulative_contacts_traced__cumulative_contacts_traced) + "</td></tr>";
-  h += "<tr><td>contacts isolated</td><td>" + fmt(z.insp_sitrep__cumulative_contacts_isolated__cumulative_contacts_isolated) + "</td></tr>";
+  h += "<tr><td>" + info.contacts_traced + "</td><td>" + fmt(z.insp_sitrep__cumulative_contacts_traced__cumulative_contacts_traced) + "</td></tr>";
+  h += "<tr><td>" + info.contacts_isolated + "</td><td>" + fmt(z.insp_sitrep__cumulative_contacts_isolated__cumulative_contacts_isolated) + "</td></tr>";
   h += "</table>";
 
-  h += "<h4>Testing capacity</h4>";
+  h += "<h4>" + info.testing_capacity + "</h4>";
   h += "<table>";
-  h += "<tr><td>PCR machines</td><td>" + fmt(z.testing_capacity__pcr_machines__pcr_machines) + "</td></tr>";
-  h += "<tr><td>PCR tests</td><td>" + fmt(z.testing_capacity__pcr_tests__pcr_tests) + "</td></tr>";
+  h += "<tr><td>" + info.pcr_machines + "</td><td>" + fmt(z.testing_capacity__pcr_machines__pcr_machines) + "</td></tr>";
+  h += "<tr><td>" + info.pcr_tests + "</td><td>" + fmt(z.testing_capacity__pcr_tests__pcr_tests) + "</td></tr>";
   h += "</table>";
 
-  h += "<h4>Modeled projection</h4>";
+  h += "<h4>" + info.modeled_projection + "</h4>";
   h += "<table>";
-  h += "<tr><td>relative risk</td><td>" + fmt(z.relative_risk, "rel") + "</td></tr>";
+  h += "<tr><td>" + info.relative_risk + "</td><td>" + fmt(z.relative_risk, "rel") + "</td></tr>";
   h += "</table>";
 
-  h += "<h4>Incoming Mobility</h4>";
+  h += "<h4>" + info.incoming_mobility + "</h4>";
   h += "<table>";
-  h += "<tr><td>displaced persons (12mo)</td><td>" + fmt(z.displaced_in_individuals_12mo) + "</td></tr>";
-  h += "<tr><td>Flowminder travel (Mar 2026)</td><td>" + fmt(z.flowminder_in_mar2026) + "</td></tr>";
-  h += "<tr><td>From outbreak epicenter (May 2026)</td><td>" + fmt(z.flowminder_short_trips__outflow_20260524__outflow_20260524, "cal") + "</td></tr>";
+  h += "<tr><td>" + info.displaced_12mo + "</td><td>" + fmt(z.displaced_in_individuals_12mo) + "</td></tr>";
+  h += "<tr><td>" + info.flowminder_mar + "</td><td>" + fmt(z.flowminder_in_mar2026) + "</td></tr>";
+  h += "<tr><td>" + info.flowminder_may + "</td><td>" + fmt(z.flowminder_short_trips__outflow_20260524__outflow_20260524, "cal") + "</td></tr>";
   h += "</table>";
 
-  h += "<h4>Distance from " + TRAVEL_FROM + "</h4>";
+  h += "<h4>" + tf("ui.info.distance_from", {origin: TRAVEL_FROM}) + "</h4>";
   h += "<table>";
-  h += "<tr><td>travel time (h)</td><td>" + fmt(z.travel_time_to_mongbwalu_h) + "</td></tr>";
-  h += "<tr><td>road distance (km)</td><td>" + fmt(z.geodesic_to_mongbwalu_km) + "</td></tr>";
+  h += "<tr><td>" + info.travel_time_h + "</td><td>" + fmt(z.travel_time_to_mongbwalu_h) + "</td></tr>";
+  h += "<tr><td>" + info.road_distance_km + "</td><td>" + fmt(z.geodesic_to_mongbwalu_km) + "</td></tr>";
   h += "</table>";
   return h;
 }
@@ -3125,7 +3435,7 @@ function renderTrendsPanel(province) {
   const title = document.getElementById("trends-title");
   if (!body) return;
   if (!province) {
-    if (title) title.textContent = "Trends";
+    if (title) title.textContent = t("ui.trends_panel");
     body.className = "panel-body trends-empty";
     body.innerHTML = "";
     return;
@@ -3133,9 +3443,9 @@ function renderTrendsPanel(province) {
   const trends = PAYLOAD.onset_trends;
   const plot = trends && trends.plots && trends.plots[province];
   if (!plot || !plot.svg) {
-    if (title) title.textContent = "Trends";
+    if (title) title.textContent = t("ui.trends_panel");
     body.className = "panel-body trends-empty";
-    body.innerHTML = "<p>No daily onset data for " + escHtml(province) + ".</p>";
+    body.innerHTML = "<p>" + tf("ui.trends_no_data", {province: escHtml(province)}) + "</p>";
     return;
   }
   if (title) title.textContent = plot.title || ("Daily onset — " + province);
@@ -3225,7 +3535,7 @@ function sortContextPillarsByDate(pillars) {
   return pillars.slice().sort(function(a, b) {
     const diff = contextDateSortKey(b) - contextDateSortKey(a);
     if (diff !== 0) return diff;
-    return (a.label || "").localeCompare(b.label || "");
+    return phrLabel(a).localeCompare(phrLabel(b));
   });
 }
 
@@ -3235,15 +3545,24 @@ function phrPillarCategoryClass(pillar) {
   return "pillar-" + cat.replace(/_/g, "-");
 }
 
+function phrLabel(pillar) {
+  const key = (pillar.metric || "").replace(/^national_/, "").replace(/^provincial_/, "");
+  const labels = t("phr");
+  if (labels && typeof labels === "object" && labels[key]) return labels[key];
+  return pillar.label || key;
+}
+
 function phrScopeStamp(pillar) {
-  if (pillar && pillar.scope_tag) return pillar.scope_tag;
+  if (pillar && pillar.scope_tag && pillar.scope !== "national" && pillar.scope !== "zone") {
+    return pillar.scope_tag;
+  }
   if (!pillar) return "";
-  if (pillar.scope === "national") return "NATIONAL";
+  if (pillar.scope === "national") return t("scope_tags.national");
   if (pillar.scope === "provincial" && pillar.province) {
     return String(pillar.province).toUpperCase();
   }
-  if (pillar.scope === "zone") return "HEALTH ZONE";
-  return "";
+  if (pillar.scope === "zone") return t("scope_tags.health_zone");
+  return pillar.scope_tag || "";
 }
 
 function renderContextPillarHtml(pillar, opts) {
@@ -3255,11 +3574,11 @@ function renderContextPillarHtml(pillar, opts) {
     if (stamp) meta = "<span class='scope-tag'>" + escHtml(stamp) + "</span>";
   }
   const dateStr = formatContextDate(pillar.date);
-  if (dateStr) meta += "<span>as of " + escHtml(dateStr) + "</span>";
+  if (dateStr) meta += "<span>" + t("ui.context_as_of") + " " + escHtml(dateStr) + "</span>";
   const metaBlock = meta ? "<div class='context-meta'>" + meta + "</div>" : "";
   return (
     "<div class='context-pillar " + catClass + "'>" +
-      "<h4>" + escHtml(pillar.label) + "</h4>" +
+      "<h4>" + escHtml(phrLabel(pillar)) + "</h4>" +
       metaBlock +
       "<p>" + escHtml(pillar.text) + "</p>" +
     "</div>"
@@ -3306,8 +3625,8 @@ function renderNationalContextPanel(nom) {
   if (!rollups.length) {
     body.className = "panel-body context-empty";
     body.innerHTML = nom
-      ? "<p>No national or provincial SitRep notes for this area.</p>"
-      : "<p>No national SitRep pillar notes available.</p>";
+      ? "<p>" + t("ui.context_no_national_area") + "</p>"
+      : "<p>" + t("ui.context_no_national") + "</p>";
     return;
   }
   body.className = "panel-body";
@@ -3348,9 +3667,9 @@ function renderContextPanel(nom) {
   renderNationalContextPanel(nom);
   body.scrollTop = 0;
   if (!nom) {
-    if (title) title.textContent = "Health zone context";
+    if (title) title.textContent = t("ui.context_zone");
     body.className = "panel-body context-empty";
-    body.innerHTML = "<p>Click a health zone on the map.</p>";
+    body.innerHTML = "<p>" + t("ui.context_click_zone") + "</p>";
     return;
   }
   const zonePillars = ((PAYLOAD.phr_context || {}).by_nom || {})[nom] || [];
@@ -3358,7 +3677,7 @@ function renderContextPanel(nom) {
   if (title) title.textContent = displayName;
   if (!zonePillars.length) {
     body.className = "panel-body context-empty";
-    body.innerHTML = "<p>No zone-specific SitRep notes for " + escHtml(displayName) + ".</p>";
+    body.innerHTML = "<p>" + tf("ui.context_no_zone", {zone: escHtml(displayName)}) + "</p>";
     return;
   }
   body.className = "panel-body";
@@ -3476,7 +3795,7 @@ function initTrendsLegendBar() {
       "<span>" + fmtLegend(hi, "int") + "</span>";
   }
   const scaleEl = document.getElementById("trends-legend-scale");
-  if (scaleEl) scaleEl.textContent = "(log scale)";
+  if (scaleEl) scaleEl.textContent = t("ui.trends_scale_log");
 }
 
 function updateTrendsDateLabel() {
@@ -3485,7 +3804,7 @@ function updateTrendsDateLabel() {
   if (!label || !ts || !ts.dates || !ts.dates.length) return;
   const iso = ts.dates[trendsDateIdx];
   const raw = (ts.date_labels && ts.date_labels[iso]) || iso;
-  label.textContent = "As of " + formatContextDate(raw);
+  label.textContent = t("ui.trends_as_of").replace("—", formatContextDate(raw));
 }
 
 function recomputeTrendsMap() {
@@ -3617,9 +3936,10 @@ for (const c of ACTIVE_CASES) {
   const m = L.marker([c.lat, c.lon], {icon: caseIcon});
   const totalDeaths = (c.confirmed_deaths || 0) + (c.suspected_deaths || 0);
   m.bindTooltip(
-    "<strong>" + (c.name || "(unnamed)") + "</strong><br/>" +
-    "confirmed: " + c.confirmed + "  ·  suspected: " + c.suspected +
-    (totalDeaths > 0 ? "<br/>deaths: " + totalDeaths : ""),
+    "<strong>" + (c.name || t("ui.case_tooltip.unnamed")) + "</strong><br/>" +
+    t("ui.case_tooltip.confirmed") + ": " + c.confirmed + "  ·  " +
+    t("ui.case_tooltip.suspected") + ": " + c.suspected +
+    (totalDeaths > 0 ? "<br/>" + t("ui.case_tooltip.deaths") + ": " + totalDeaths : ""),
     {direction:"top", offset:[0,-8]}
   );
   caseLayer.addLayer(m);
@@ -3630,13 +3950,11 @@ showCasesBox.addEventListener("change", function() {
 });
 
 // Default: Suspected cases layer, active-case markers ON, centered on Bunia.
-layerSelect.value = "obs::total";
 showCasesBox.checked = true;
 caseLayer.addTo(map);
 
 layerSelect.addEventListener("change", recompute);
 scaleSelect.addEventListener("change", recompute);
-recompute();
 
 // --- modal wiring (Methods + Terms) ---
 function wireModal(modalId, btnId, closeId) {
@@ -3659,13 +3977,6 @@ document.addEventListener("keydown", function(e) {
     document.querySelectorAll(".modal.open").forEach(m => m.classList.remove("open"));
   }
 });
-document.getElementById("methods-content").innerHTML =
-  PAYLOAD.methods_html || "<p style='color:#888'>No methods document available.</p>";
-document.getElementById("terms-content").innerHTML =
-  PAYLOAD.terms_html || "<p style='color:#888'>No terms document available.</p>";
-if (PAYLOAD.terms_updated) {
-  document.getElementById("terms-updated").textContent = "Last updated: " + PAYLOAD.terms_updated;
-}
 wireModal("methods-modal", "methods-btn", "methods-close");
 wireModal("terms-modal", "terms-btn", "terms-close");
 
@@ -3705,14 +4016,25 @@ wireModal("terms-modal", "terms-btn", "terms-close");
 
 // Pre-populate the zone info panel with Mongbwalu.
 (function preloadMongbwalu() {
-  const target = (TRAVEL_FROM || "Mongbwalu").toLowerCase();
   for (const feat of PAYLOAD.geometry.features) {
-    if ((feat.properties.name || "").toLowerCase() === target) {
+    if ((feat.properties.nom || "").toLowerCase() === "mongbalu") {
       document.getElementById("info-body").className = "";
       document.getElementById("info-body").innerHTML = infoHTML(feat);
       return;
     }
   }
+})();
+
+(function initDashboardI18n() {
+  LAYERS = (I18N.layers && I18N.layers[currentLang]) || PAYLOAD.layers;
+  applyStaticI18n();
+  rebuildLayerSelect();
+  buildTitleSub();
+  buildTracker();
+  buildModeledEstimateNote();
+  updateLegalContent();
+  layerSelect.value = "obs::total";
+  recompute();
 })();
 </script>
 </body>
