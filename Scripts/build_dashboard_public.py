@@ -998,8 +998,6 @@ _PHR_ZONE_METRICS = (
     "epidemiological_community_engagement",
     "epidemiological_protection_sexual_exploitation_abuse",
 )
-_PHR_NATIONAL_METRICS = tuple(f"national_{m}" for m in _PHR_ZONE_METRICS)
-_PHR_PROVINCIAL_METRICS = tuple(f"provincial_{m}" for m in _PHR_ZONE_METRICS)
 
 _PHR_METRIC_LABELS: dict[str, str] = {
     "epidemiological_coordination": "Coordination",
@@ -1080,36 +1078,38 @@ def _extract_phr_block(block: object) -> tuple[str | None, str | None]:
     return text, date
 
 
-def load_public_health_context() -> dict:
-    """Extract INSP pillar narratives from the build GeoJSON for the Context tab.
+def _phr_metric_candidates(base_metric: str, scope: str, lang: str) -> list[str]:
+    """GeoJSON metric keys to try: bilingual ``_{lang}`` first, then legacy unsuffixed."""
+    if scope == "national":
+        return [f"national_{base_metric}_{lang}", f"national_{base_metric}"]
+    if scope == "provincial":
+        return [f"provincial_{base_metric}_{lang}", f"provincial_{base_metric}"]
+    return [f"{base_metric}_{lang}", base_metric]
 
-    National and provincial rollup metrics are read once (broadcast to zones in
-    the GeoJSON build). Zone-level metrics are keyed by canonical ``nom``.
-    """
-    empty = {"national": [], "by_nom": {}}
-    if not BUILD_GEOJSON.exists():
-        print(f"  NOTE: {BUILD_GEOJSON.name} not found; context tab unavailable")
-        return empty
 
-    props_by_nom = _load_build_geojson_properties()
-    if not props_by_nom:
-        return empty
+def _phr_extract_from_phr(phr: dict, base_metric: str, scope: str, lang: str) -> tuple[str | None, str | None]:
+    for metric in _phr_metric_candidates(base_metric, scope, lang):
+        text, date = _extract_phr_block(phr.get(metric))
+        if text:
+            return text, date
+    return None, None
 
-    sample_phr = (next(iter(props_by_nom.values())).get(_PHR_DATASET) or {})
-    if not isinstance(sample_phr, dict) or not sample_phr:
-        print(f"  NOTE: no {_PHR_DATASET} block in build GeoJSON; context tab empty")
-        return empty
 
+def _load_public_health_context_for_lang(
+    props_by_nom: dict[str, dict],
+    sample_phr: dict,
+    lang: str,
+) -> dict:
     rollups: list[dict] = []
-    for metric in _PHR_NATIONAL_METRICS:
-        text, date = _extract_phr_block(sample_phr.get(metric))
+    for base_metric in _PHR_ZONE_METRICS:
+        text, date = _phr_extract_from_phr(sample_phr, base_metric, "national", lang)
         if not text:
             continue
         parsed = _parse_phr_date(date)
         rollups.append({
-            "metric": metric,
-            "category": _phr_category(metric),
-            "label": _phr_metric_label(metric),
+            "metric": base_metric,
+            "category": _phr_category(base_metric),
+            "label": _phr_metric_label(base_metric),
             "text": text,
             "date": date,
             "date_iso": parsed.isoformat() if parsed else None,
@@ -1126,19 +1126,19 @@ def load_public_health_context() -> dict:
         phr = props.get(_PHR_DATASET) or {}
         if not isinstance(phr, dict):
             continue
-        for metric in _PHR_PROVINCIAL_METRICS:
-            key = (province, metric)
+        for base_metric in _PHR_ZONE_METRICS:
+            key = (province, base_metric)
             if key in seen_provincial:
                 continue
-            text, date = _extract_phr_block(phr.get(metric))
+            text, date = _phr_extract_from_phr(phr, base_metric, "provincial", lang)
             if not text:
                 continue
             seen_provincial.add(key)
             parsed = _parse_phr_date(date)
             rollups.append({
-                "metric": metric,
-                "category": _phr_category(metric),
-                "label": _phr_metric_label(metric),
+                "metric": base_metric,
+                "category": _phr_category(base_metric),
+                "label": _phr_metric_label(base_metric),
                 "text": text,
                 "date": date,
                 "date_iso": parsed.isoformat() if parsed else None,
@@ -1155,15 +1155,15 @@ def load_public_health_context() -> dict:
         if not isinstance(phr, dict):
             continue
         pillars: list[dict] = []
-        for metric in _PHR_ZONE_METRICS:
-            text, date = _extract_phr_block(phr.get(metric))
+        for base_metric in _PHR_ZONE_METRICS:
+            text, date = _phr_extract_from_phr(phr, base_metric, "zone", lang)
             if not text:
                 continue
             parsed = _parse_phr_date(date)
             pillars.append({
-                "metric": metric,
-                "category": _phr_category(metric),
-                "label": _phr_metric_label(metric),
+                "metric": base_metric,
+                "category": _phr_category(base_metric),
+                "label": _phr_metric_label(base_metric),
                 "text": text,
                 "date": date,
                 "date_iso": parsed.isoformat() if parsed else None,
@@ -1172,13 +1172,42 @@ def load_public_health_context() -> dict:
         if pillars:
             by_nom[nom] = _sort_phr_pillars(pillars)
 
-    n_national = sum(1 for p in rollups if p.get("scope") == "national")
-    n_provincial = sum(1 for p in rollups if p.get("scope") == "provincial")
-    print(
-        f"  public health context: {n_national} national + {n_provincial} provincial "
-        f"pillar(s), {len(by_nom)} zone(s) with local narrative"
-    )
     return {"national": rollups, "by_nom": by_nom}
+
+
+def load_public_health_context() -> dict[str, dict]:
+    """Extract INSP pillar narratives from the build GeoJSON for the Context tab.
+
+    Returns per-language payloads keyed by ``en`` / ``fr``. GeoJSON metrics use
+    bilingual keys (e.g. ``epidemiological_coordination_en``); legacy unsuffixed
+    keys are still accepted as a fallback.
+    """
+    empty = {lang: {"national": [], "by_nom": {}} for lang in SUPPORTED_LANGS}
+    if not BUILD_GEOJSON.exists():
+        print(f"  NOTE: {BUILD_GEOJSON.name} not found; context tab unavailable")
+        return empty
+
+    props_by_nom = _load_build_geojson_properties()
+    if not props_by_nom:
+        return empty
+
+    sample_phr = (next(iter(props_by_nom.values())).get(_PHR_DATASET) or {})
+    if not isinstance(sample_phr, dict) or not sample_phr:
+        print(f"  NOTE: no {_PHR_DATASET} block in build GeoJSON; context tab empty")
+        return empty
+
+    by_lang: dict[str, dict] = {}
+    for lang in SUPPORTED_LANGS:
+        ctx = _load_public_health_context_for_lang(props_by_nom, sample_phr, lang)
+        by_lang[lang] = ctx
+        n_national = sum(1 for p in ctx["national"] if p.get("scope") == "national")
+        n_provincial = sum(1 for p in ctx["national"] if p.get("scope") == "provincial")
+        print(
+            f"  public health context ({lang}): {n_national} national + "
+            f"{n_provincial} provincial pillar(s), "
+            f"{len(ctx['by_nom'])} zone(s) with local narrative"
+        )
+    return by_lang
 
 
 # ---------------------------------------------------------------------------
@@ -2239,7 +2268,7 @@ def localize_layers(layers: list[dict], locale: dict) -> list[dict]:
     return out
 
 
-def build_i18n_payload(layers_en: list[dict]) -> dict:
+def build_i18n_payload(layers_en: list[dict], phr_context: dict[str, dict]) -> dict:
     locales = load_locales()
     layers_by_lang = {
         lang: localize_layers(layers_en, locales.get(lang, {}))
@@ -2261,6 +2290,7 @@ def build_i18n_payload(layers_en: list[dict]) -> dict:
         "langs": list(SUPPORTED_LANGS),
         "strings": locales,
         "layers": layers_by_lang,
+        "phr_context": phr_context,
         "methods_html": methods_html,
         "terms_html": terms_html,
         "terms_updated": terms_updated,
@@ -2335,7 +2365,8 @@ def build_payload() -> dict:
             layer["label_template"] = layer["label"]
             layer["label"] = layer["label"].replace("{origin}", TRAVEL_FROM_ZONE)
 
-    i18n = build_i18n_payload(layers)
+    phr_context_by_lang = load_public_health_context()
+    i18n = build_i18n_payload(layers, phr_context_by_lang)
     methods_html = i18n["methods_html"]["en"]
     print(f"  methods HTML: {len(methods_html)} chars")
     terms_html = i18n["terms_html"]["en"]
@@ -2380,7 +2411,6 @@ def build_payload() -> dict:
     print(f"  province boundaries: {len(province_boundaries['features'])} provinces")
 
     onset_trends = load_dashboard_plots()
-    phr_context = load_public_health_context()
     confirmed_timeseries = load_confirmed_cases_timeseries(set(zone_data.keys()))
 
     asof = detect_asof()
@@ -2430,7 +2460,8 @@ def build_payload() -> dict:
         "active_case_markers": active_case_markers,
         "province_boundaries": province_boundaries,
         "onset_trends": onset_trends,
-        "phr_context": phr_context,
+        "phr_context": phr_context_by_lang.get("en", {"national": [], "by_nom": {}}),
+        "phr_context_by_lang": phr_context_by_lang,
         "confirmed_timeseries": confirmed_timeseries,
     }
 
@@ -4213,8 +4244,18 @@ function zoneProvince(nom) {
   return props ? (props.province || null) : null;
 }
 
+function phrContext() {
+  const byLang = (I18N.phr_context || PAYLOAD.phr_context_by_lang || null);
+  if (byLang && (byLang.en || byLang.fr)) {
+    return byLang[currentLang] || byLang.en || {national: [], by_nom: {}};
+  }
+  const legacy = PAYLOAD.phr_context || {};
+  if (legacy.national || legacy.by_nom) return legacy;
+  return {national: [], by_nom: {}};
+}
+
 function filterRollupsForContext(nom) {
-  const allRollups = (PAYLOAD.phr_context || {}).national || [];
+  const allRollups = phrContext().national || [];
   if (!nom) {
     return allRollups.filter(function(p) { return p.scope === "national"; });
   }
@@ -4281,7 +4322,7 @@ function renderContextPanel(nom) {
     body.innerHTML = "<p>" + t("ui.context_click_zone") + "</p>";
     return;
   }
-  const zonePillars = ((PAYLOAD.phr_context || {}).by_nom || {})[nom] || [];
+  const zonePillars = (phrContext().by_nom || {})[nom] || [];
   const displayName = zoneDisplayName(nom);
   if (title) title.textContent = displayName;
   if (!zonePillars.length) {
