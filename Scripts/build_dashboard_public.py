@@ -81,6 +81,11 @@ BUILD_GEOJSON    = BUILD_DIR / "drc_health_zones.geojson"
 BUILD_MANIFEST   = BUILD_DIR / "manifest.json"
 BUILD_LONG_DIR   = BUILD_DIR / "long"
 EXTERNAL_DATA    = BUILD_DIR.parent / "data"
+FLOWMINDER_PROCESSED = (
+    Path(os.environ["FLOWMINDER_DIR"]).resolve()
+    if os.environ.get("FLOWMINDER_DIR")
+    else (BUILD_DIR.parent / "Data" / "Flowminder" / "Processed")
+)
 DATA_REPO        = os.environ.get("DATA_REPO", "INRB-UMIE/BDBV2026-Data").strip()
 
 METADATA_CSV     = DATA_ROOT / "health_zone_metadata.csv"
@@ -1254,6 +1259,178 @@ def _extract_matrix_row_sums(csv_path: Path) -> dict[str, float | None]:
     return {noms.iloc[i]: _f(sums.iloc[i]) for i in range(len(df))}
 
 
+def _build_matrix_zone_aliases(zones: list[str]) -> dict[str, str]:
+    """Map matrix CSV row/column labels to canonical GeoJSON ``nom`` values."""
+    aliases: dict[str, str] = {}
+    for nom in zones:
+        aliases[nom] = nom
+        aliases[nom.replace(" ", ".")] = nom
+        aliases[nom.replace("-", ".")] = nom
+    for meta_name, nom in _NAME_TO_NOM.items():
+        aliases[meta_name] = nom
+        aliases[meta_name.replace(" ", ".")] = nom
+    return aliases
+
+
+def _matrix_header_to_nom(header: str, aliases: dict[str, str]) -> str | None:
+    if header in aliases:
+        return aliases[header]
+    dotted = header.replace(".", " ")
+    if dotted in aliases:
+        return aliases[dotted]
+    return None
+
+
+def _read_matrix_zone_order(csv_path: Path) -> list[str]:
+    if not csv_path.exists():
+        return []
+    df = pd.read_csv(csv_path)
+    nom_col = "nom" if "nom" in df.columns else df.columns[1]
+    return [str(v) for v in df[nom_col].tolist()]
+
+
+def _load_square_matrix_csv(
+    csv_path: Path,
+    zones: list[str],
+) -> list[list[float | None]]:
+    """Load a zone×zone matrix aligned to ``zones`` (rows = origin, cols = dest)."""
+    n = len(zones)
+    empty = [[None] * n for _ in range(n)]
+    if not csv_path.exists():
+        print(f"  WARNING: {csv_path} not found")
+        return empty
+    df = pd.read_csv(csv_path)
+    nom_col = "nom" if "nom" in df.columns else df.columns[1]
+    skip_cols = {df.columns[0], nom_col}
+    aliases = _build_matrix_zone_aliases(zones)
+    zone_idx = {z: i for i, z in enumerate(zones)}
+
+    col_to_zone_idx: dict[str, int] = {}
+    for col in df.columns:
+        if col in skip_cols:
+            continue
+        dest = _matrix_header_to_nom(str(col), aliases)
+        if dest and dest in zone_idx:
+            col_to_zone_idx[str(col)] = zone_idx[dest]
+
+    out = [[None] * n for _ in range(n)]
+    for _, row in df.iterrows():
+        origin = str(row[nom_col])
+        oi = zone_idx.get(origin)
+        if oi is None:
+            resolved = aliases.get(origin) or aliases.get(origin.replace(".", " "))
+            oi = zone_idx.get(resolved) if resolved else None
+        if oi is None:
+            continue
+        for col_name, di in col_to_zone_idx.items():
+            out[oi][di] = _f(row[col_name])
+    return out
+
+
+def load_zone_matrices(zones: list[str]) -> dict:
+    """Square zone matrices for client-side origin switching (rows = from, cols = to)."""
+    travel = _load_square_matrix_csv(
+        BUILD_LONG_DIR / "osrm__travel_time.csv", zones)
+    road = _load_square_matrix_csv(
+        BUILD_LONG_DIR / "osrm__road_distance.csv", zones)
+    return {
+        "zones": zones,
+        "default_origin": "Mongbalu",
+        "datasets": {
+            "osrm__travel_time": {"values": travel, "scale": 60},
+            "osrm__road_distance": {"values": road, "scale": 1},
+        },
+    }
+
+
+def _flowminder_processed_dir() -> Path:
+    """Resolve Flowminder processed matrices (capitalised Data/ path or lowercase data/)."""
+    for candidate in (
+        FLOWMINDER_PROCESSED,
+        EXTERNAL_DATA / "flowminder" / "processed",
+    ):
+        if candidate.is_dir():
+            return candidate.resolve()
+    return FLOWMINDER_PROCESSED.resolve()
+
+
+def _matrix_count_value(v: float | None) -> int | float | None:
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return None
+    if float(v) <= 0:
+        return None
+    fv = float(v)
+    return int(fv) if fv == int(fv) else round(fv, 2)
+
+
+def _sparse_out_by_origin(
+    matrix: list[list[float | None]],
+    zones: list[str],
+) -> dict[str, list[list]]:
+    """Non-zero OD pairs per origin row: {origin: [[dest, count], ...]}."""
+    out: dict[str, list[list]] = {}
+    for oi, origin in enumerate(zones):
+        pairs: list[list] = []
+        for di, dest in enumerate(zones):
+            if oi == di:
+                continue
+            v = _matrix_count_value(matrix[oi][di])
+            if v is not None:
+                pairs.append([dest, v])
+        if pairs:
+            out[origin] = pairs
+    return out
+
+
+def _sparse_in_by_dest(
+    matrix: list[list[float | None]],
+    zones: list[str],
+) -> dict[str, list[list]]:
+    """Non-zero OD pairs per destination column: {dest: [[origin, count], ...]}."""
+    out: dict[str, list[list]] = {}
+    for di, dest in enumerate(zones):
+        pairs: list[list] = []
+        for oi, origin in enumerate(zones):
+            if oi == di:
+                continue
+            v = _matrix_count_value(matrix[oi][di])
+            if v is not None:
+                pairs.append([origin, v])
+        if pairs:
+            out[dest] = pairs
+    return out
+
+
+def load_flowminder_mar_sparse() -> dict:
+    """Sparse March 2026 Flowminder in/out matrices for arc rendering."""
+    proc = _flowminder_processed_dir()
+    in_path = proc / "flowminder__inflow__static.matrix.csv"
+    out_path = proc / "flowminder__outflow__static.matrix.csv"
+    zones = _read_matrix_zone_order(in_path) or _read_matrix_zone_order(out_path)
+    if not zones:
+        print(f"  WARNING: Flowminder matrices not found under {proc}")
+        return {
+            "zones": [],
+            "default_hub": "Mongbalu",
+            "out_by_origin": {},
+            "in_by_dest": {},
+        }
+    in_matrix = _load_square_matrix_csv(in_path, zones)
+    out_matrix = _load_square_matrix_csv(out_path, zones)
+    out_by_origin = _sparse_out_by_origin(out_matrix, zones)
+    in_by_dest = _sparse_in_by_dest(in_matrix, zones)
+    n_out = sum(len(v) for v in out_by_origin.values())
+    n_in = sum(len(v) for v in in_by_dest.values())
+    print(f"  flowminder sparse: {len(zones)} zones, "
+          f"{n_out} out-pairs, {n_in} in-pairs (from {proc.name}/)")
+    return {
+        "zones": zones,
+        "default_hub": "Mongbalu",
+        "out_by_origin": out_by_origin,
+        "in_by_dest": in_by_dest,
+    }
+
+
 def load_metadata(
     centroids: dict[str, tuple[float, float]],
     field_paths: dict[str, list[str]],
@@ -1904,18 +2081,9 @@ _FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
     ),
 ]
 
-EXTRA_LAYER_DEFS = [
-    ("Observed (epi update)", "obs::total",     "Total cases (confirmed + suspected)", "total_cases",      "reds", "log", "int", False),
-    ("Observed (epi update)", "obs::confirmed", "Confirmed cases",                     "confirmed_cases",  "reds", "log", "int", False),
-    ("Observed (epi update)", "obs::suspected", "Suspected cases",                     "suspected_cases",  "reds", "log", "int", False),
-    ("Observed (epi update)", "obs::conf_d",    "Confirmed deaths",                    "confirmed_deaths", "reds", "log", "int", False),
-    ("Observed (epi update)", "obs::susp_d",    "Suspected deaths",                    "suspected_deaths", "reds", "log", "int", False),
-    ("Modeled projection",    "cal::true",      "Relative risk",                       "relative_risk",    "outbreak", "log", 2, False),
-    ("Incoming Mobility",     "disp::in",       "Incoming displaced persons (12mo)",   "displaced_in_individuals_12mo", "reds", "log", "int", False),
-    ("Incoming Mobility",     "flow::in",       "Flowminder incoming relocations (March 2026)",          "flowminder_in_mar2026",         "reds", "log", "int", True),
-    ("Distance from Mongbwalu","d::travel",      "Travel time from Mongbwalu (hours)",   "travel_time_to_mongbwalu_h",    "plasma_r", "linear", 1, False),
-    ("Distance from Mongbwalu","d::geo",         "Road distance from Mongbwalu (km)",    "geodesic_to_mongbwalu_km",      "plasma_r", "linear", "int", False),
-    *_FLOWMINDER_SHORT_TRIPS_LAYER_DEFS,
+EXTRA_LAYER_DEFS_TRAVEL = [
+    ("Travel distance (OSRM)", "d::travel", "Travel time from {origin} (hours)",   "", "plasma_r", "linear", 1, False, "osrm__travel_time", 60, True),
+    ("Travel distance (OSRM)", "d::geo",    "Road distance from {origin} (km)",    "", "plasma_r", "linear", "int", False, "osrm__road_distance", 1, True),
 ]
 
 
@@ -1929,8 +2097,13 @@ def _make_layer_def(
     legend_round,
     epicenter_highlight: bool = False,
     source: str = "",
+    matrix_id: str = "",
+    matrix_scale: float | int | None = None,
+    origin_highlight: bool = False,
+    viz: str = "",
+    flow_catalog: str = "",
 ) -> dict:
-    return {
+    layer = {
         "group": group,
         "id": layer_id,
         "label": label,
@@ -1941,6 +2114,59 @@ def _make_layer_def(
         "legend_round": legend_round,
         "epicenter_highlight": epicenter_highlight,
     }
+    if matrix_id:
+        layer["matrix_id"] = matrix_id
+        layer["matrix_scale"] = 1 if matrix_scale is None else matrix_scale
+        layer["origin_highlight"] = origin_highlight
+    elif viz:
+        layer["viz"] = viz
+        if flow_catalog:
+            layer["flow_catalog"] = flow_catalog
+        if origin_highlight:
+            layer["origin_highlight"] = True
+    return layer
+
+
+FLOW_ARC_LAYER_DEF = _make_layer_def(
+    "Incoming Mobility",
+    "flow::od_mar",
+    "Flowminder in- and out-flow (March 2026)",
+    "",
+    "reds",
+    "linear",
+    "int",
+    origin_highlight=True,
+    viz="flow_arcs",
+    flow_catalog="flowminder_mar2026",
+)
+
+EXTRA_LAYER_DEFS = [
+    ("Observed (epi update)", "obs::total",     "Total cases (confirmed + suspected)", "total_cases",      "reds", "log", "int", False),
+    ("Observed (epi update)", "obs::confirmed", "Confirmed cases",                     "confirmed_cases",  "reds", "log", "int", False),
+    ("Observed (epi update)", "obs::suspected", "Suspected cases",                     "suspected_cases",  "reds", "log", "int", False),
+    ("Observed (epi update)", "obs::conf_d",    "Confirmed deaths",                    "confirmed_deaths", "reds", "log", "int", False),
+    ("Observed (epi update)", "obs::susp_d",    "Suspected deaths",                    "suspected_deaths", "reds", "log", "int", False),
+    ("Modeled projection",    "cal::true",      "Relative risk",                       "relative_risk",    "outbreak", "log", 2, False),
+    ("Incoming Mobility",     "disp::in",       "Incoming displaced persons (12mo)",   "displaced_in_individuals_12mo", "reds", "log", "int", False),
+    ("Incoming Mobility",     "flow::in",       "Flowminder incoming relocations (March 2026)",          "flowminder_in_mar2026",         "reds", "log", "int", True),
+    *EXTRA_LAYER_DEFS_TRAVEL,
+    *_FLOWMINDER_SHORT_TRIPS_LAYER_DEFS,
+]
+
+
+def _extra_layer_from_def(defn: tuple | dict) -> dict:
+    if isinstance(defn, dict):
+        return dict(defn)
+    (group, lid, label, field, palette, scale, legend_round, epicenter_highlight) = defn[:8]
+    kwargs: dict = {}
+    if len(defn) > 8 and defn[8]:
+        kwargs = {
+            "matrix_id": defn[8],
+            "matrix_scale": defn[9] if len(defn) > 9 else 1,
+            "origin_highlight": defn[10] if len(defn) > 10 else True,
+        }
+    return _make_layer_def(
+        group, lid, label, field, palette, scale, legend_round, epicenter_highlight, **kwargs)
 
 PROJECTION_MASK_LAYERS = {"cal::true"}
 PROJECTION_MASK_FIELD = "relative_risk"
@@ -2001,8 +2227,14 @@ def localize_layers(layers: list[dict], locale: dict) -> list[dict]:
         if en_group in group_map:
             localized["group"] = group_map[en_group]
         layer_id = layer["id"]
+        label_template = None
         if layer_id in label_map:
-            localized["label"] = label_map[layer_id]
+            label_template = label_map[layer_id]
+        elif "{origin}" in layer.get("label", ""):
+            label_template = layer["label"]
+        if label_template:
+            localized["label_template"] = label_template
+            localized["label"] = label_template.replace("{origin}", TRAVEL_FROM_ZONE)
         out.append(localized)
     return out
 
@@ -2090,16 +2322,18 @@ def build_payload() -> dict:
     # Extra layers (computed fields, matrices, local CSV) go first,
     # then auto-discovered GeoJSON layers. Extra defs override discovery labels
     # for the same flat field (e.g. Flowminder short-trip outflow snapshots).
-    extra_layers = [
-        _make_layer_def(group, lid, label, field, palette, scale, legend_round, epicenter_highlight)
-        for (group, lid, label, field, palette, scale, legend_round, epicenter_highlight)
-        in EXTRA_LAYER_DEFS
-    ]
-    extra_fields = {layer["field"] for layer in extra_layers}
+    extra_layers = [_extra_layer_from_def(defn) for defn in EXTRA_LAYER_DEFS]
+    extra_fields = {layer["field"] for layer in extra_layers if layer.get("field")}
     discovered_layers = [
         layer for layer in discovered_layers if layer["field"] not in extra_fields
     ]
     layers = _sort_layers_for_dropdown(extra_layers + discovered_layers)
+    for layer in layers:
+        if layer.get("label_template"):
+            continue
+        if "{origin}" in layer.get("label", ""):
+            layer["label_template"] = layer["label"]
+            layer["label"] = layer["label"].replace("{origin}", TRAVEL_FROM_ZONE)
 
     i18n = build_i18n_payload(layers)
     methods_html = i18n["methods_html"]["en"]
@@ -2153,9 +2387,25 @@ def build_payload() -> dict:
     print(f"  asof: {asof}")
     data_build = load_data_build_info()
 
+    matrix_zones = _read_matrix_zone_order(BUILD_LONG_DIR / "osrm__travel_time.csv")
+    if not matrix_zones:
+        matrix_zones = sorted(zone_data.keys())
+    matrices = load_zone_matrices(matrix_zones)
+    print(f"  zone matrices: {len(matrix_zones)} zones, "
+          f"{len(matrices['datasets'])} datasets")
+    flow_catalogs = {"flowminder_mar2026": load_flowminder_mar_sparse()}
+    flow_arc_layer = _extra_layer_from_def(FLOW_ARC_LAYER_DEF)
+
     return {
         "asof": asof,
         "travel_from": TRAVEL_FROM_ZONE,
+        "matrices": matrices,
+        "matrix_default_origin": matrices.get("default_origin", "Mongbalu"),
+        "flow_catalogs": flow_catalogs,
+        "flow_arc_layer": flow_arc_layer,
+        "flow_arcs_available": bool(flow_catalogs["flowminder_mar2026"].get("zones")),
+        "flow_default_hub": flow_catalogs["flowminder_mar2026"].get(
+            "default_hub", "Mongbalu"),
         "initial_view": initial_view,
         "insp_sitrep_url": latest_insp_url(),
         "data_build": data_build,
@@ -2335,7 +2585,10 @@ HTML_TEMPLATE = r"""<!doctype html>
   .view-tab:hover { background:#333; color:#eee; }
   .view-tab.active { color:#ffd28a; border-color:#ffae42; background:#2a2418; }
   #trends-hint,
-  #context-hint {
+  #context-hint,
+  #travel-hint,
+  #flow-hint,
+  #flow-empty-hint {
     position:absolute; z-index:900;
     top:50%; left:50%; transform:translate(-50%, -50%);
     pointer-events:none; color:#aaa;
@@ -2351,6 +2604,18 @@ HTML_TEMPLATE = r"""<!doctype html>
   body.view-trends #trends-hint { display:flex; }
   body.view-trends.trends-province-hovered #trends-hint,
   body.view-trends.trends-slider-busy #trends-hint { display:none; }
+  body.view-map.matrix-layer-active #travel-hint { display:flex; }
+  body.view-map.flow-layer-active #flow-hint { display:flex; }
+  body.view-map.flow-layer-active.flow-hub-selected #flow-hint { display:none; }
+  body.view-map.flow-layer-active.flow-hub-no-data #flow-empty-hint { display:flex; }
+  .flow-wing-icon {
+    background: transparent !important;
+    border: none !important;
+  }
+  .flow-wing-icon svg {
+    display: block;
+    overflow: visible;
+  }
   #trends-body.trends-empty { color:#888; font-size:12px; }
   #context-national {
     top:12px; left:12px; bottom:auto; right:auto;
@@ -2694,6 +2959,9 @@ HTML_TEMPLATE = r"""<!doctype html>
 <div id="map"></div>
 <div id="trends-hint" data-i18n="ui.hints.trends">Hover over a province to see trends</div>
 <div id="context-hint" data-i18n="ui.hints.context">Click a health zone to see response context</div>
+<div id="travel-hint" data-i18n="ui.hints.travel">Click a health zone to set travel origin (double-click to zoom)</div>
+<div id="flow-hint" data-i18n="ui.hints.flow">Click a health zone to show movement flows (double-click to zoom)</div>
+<div id="flow-empty-hint" data-i18n="ui.hints.flow_no_data">No movement data available for this health zone.</div>
 <div id="partners"></div>
 <div id="title" class="panel">
   <h1 id="page-heading">DRC Ebola Bundibugyo 2026</h1>
@@ -2743,6 +3011,10 @@ HTML_TEMPLATE = r"""<!doctype html>
     <div class="checkbox-row">
       <input type="checkbox" id="show-cases" />
       <label for="show-cases" style="margin:0;color:#eee" data-i18n="ui.show_cases">Show active-case markers</label>
+    </div>
+    <div class="checkbox-row" id="show-flow-arcs-row">
+      <input type="checkbox" id="show-flow-arcs" />
+      <label for="show-flow-arcs" style="margin:0;color:#eee" data-i18n="ui.show_flow_arcs">Show Flowminder in- and out-flow</label>
     </div>
     <div class="footer" id="layer-meta"></div>
   </div>
@@ -2813,6 +3085,22 @@ const ZONE_DATA = PAYLOAD.zone_data;
 const I18N = PAYLOAD.i18n || {};
 let LAYERS = PAYLOAD.layers;
 const TRAVEL_FROM = PAYLOAD.travel_from || "Mongbwalu";
+const MATRICES = PAYLOAD.matrices || {};
+const MATRIX_INDEX = {};
+(function buildMatrixIndex() {
+  (MATRICES.zones || []).forEach(function(nom, i) { MATRIX_INDEX[nom] = i; });
+})();
+let matrixOriginNom = PAYLOAD.matrix_default_origin || "Mongbalu";
+const FLOW_CATALOGS = PAYLOAD.flow_catalogs || {};
+const FLOW_ARC_LAYER = PAYLOAD.flow_arc_layer || null;
+let flowHubNom = PAYLOAD.flow_default_hub || "Mongbalu";
+let flowHubUserSelected = !!(PAYLOAD.flow_arcs_available && FLOW_ARC_LAYER);
+let flowArcStats = null;
+let activeView = "map";
+const MATRIX_ORIGIN_FILL = "#5b9bd5";
+const FLOW_OUT_COLOR = "#b23b2e";
+const FLOW_IN_COLOR = "#5b86b3";
+const FLOW_MUTED_FILL = "#e8e4dc";
 const EPICENTER_NOMS = new Set(PAYLOAD.epicenter_noms || []);
 const EPICENTER_FILL = PAYLOAD.epicenter_fill || "#9b7d4e";
 let currentLang = (function resolveLang() {
@@ -2860,8 +3148,115 @@ function trackerCaveats() {
 function layerEpicenterHighlight(layer) {
   return !!(layer && layer.epicenter_highlight);
 }
+function layerUsesMatrix(layer) {
+  return !!(layer && layer.matrix_id);
+}
+function layerUsesFlowArcs(layer) {
+  return !!(layer && layer.viz === "flow_arcs");
+}
+function flowArcsOverlayActive() {
+  const box = document.getElementById("show-flow-arcs");
+  return !!(box && box.checked && FLOW_ARC_LAYER && activeView === "map");
+}
+function flowArcLayerDef() {
+  return FLOW_ARC_LAYER;
+}
+function layerOriginHighlight(layer) {
+  return !!(layer && layer.origin_highlight);
+}
+function flowCatalogForLayer(layer) {
+  if (!layer || !layer.flow_catalog) return null;
+  return FLOW_CATALOGS[layer.flow_catalog] || null;
+}
 function isEpicenterZone(ref, layer) {
   return layerEpicenterHighlight(layer) && EPICENTER_NOMS.has(ref);
+}
+function isHubZone(ref, layer) {
+  if (layerUsesMatrix(layer) && layerOriginHighlight(layer)) {
+    return !!(matrixOriginNom && ref === matrixOriginNom);
+  }
+  return false;
+}
+function isMatrixOriginZone(ref, layer) {
+  return isHubZone(ref, layer);
+}
+function hubDisplayName(nom) {
+  return zoneDisplayName(nom) || TRAVEL_FROM;
+}
+function matrixOriginDisplayName() {
+  return hubDisplayName(matrixOriginNom);
+}
+function flowHubDisplayName() {
+  return hubDisplayName(flowHubNom);
+}
+function matrixValue(matrixId, originNom, destNom, scaleOverride) {
+  const ds = MATRICES.datasets && MATRICES.datasets[matrixId];
+  if (!ds || !ds.values) return null;
+  const oi = MATRIX_INDEX[originNom];
+  const di = MATRIX_INDEX[destNom];
+  if (oi == null || di == null) return null;
+  const raw = ds.values[oi][di];
+  if (raw == null || Number.isNaN(raw)) return null;
+  const scale = scaleOverride != null ? scaleOverride : (ds.scale || 1);
+  return raw / scale;
+}
+function applyMatrixOriginToLayers() {
+  const origin = matrixOriginDisplayName();
+  LAYERS.forEach(function(L) {
+    if (!L.label_template) return;
+    L.label = L.label_template.split("{origin}").join(origin);
+  });
+}
+function flowHubHasData(nom, layer) {
+  const cat = flowCatalogForLayer(layer);
+  if (!cat || !nom) return false;
+  const outs = (cat.out_by_origin && cat.out_by_origin[nom]) || [];
+  const ins = (cat.in_by_dest && cat.in_by_dest[nom]) || [];
+  return outs.length > 0 || ins.length > 0;
+}
+function syncFlowHintPanels() {
+  const flowLayer = flowArcLayerDef();
+  const flowActive = flowArcsOverlayActive();
+  const selected = flowActive && flowHubUserSelected;
+  const noData = selected && !flowHubHasData(flowHubNom, flowLayer);
+  document.body.classList.toggle("flow-hub-selected", selected);
+  document.body.classList.toggle("flow-hub-no-data", noData);
+  const emptyHint = document.getElementById("flow-empty-hint");
+  if (emptyHint) {
+    emptyHint.textContent = noData
+      ? tf("ui.hints.flow_no_data", {zone: flowHubDisplayName()})
+      : t("ui.hints.flow_no_data");
+  }
+}
+function syncMatrixUi() {
+  const layer = getLayer(layerSelect.value);
+  const travelActive = !!(layer && layerUsesMatrix(layer) && activeView === "map");
+  const flowActive = flowArcsOverlayActive();
+  document.body.classList.toggle("matrix-layer-active", travelActive);
+  document.body.classList.toggle("flow-layer-active", flowActive);
+  if (!flowActive) {
+    document.body.classList.remove("flow-hub-selected", "flow-hub-no-data");
+  }
+  syncFlowHintPanels();
+  if (layer && (layerUsesMatrix(layer) || flowActive)) {
+    updateLayerMeta(layer);
+    updateLegend(layer);
+  }
+}
+function setMatrixOrigin(nom) {
+  if (!nom || nom === matrixOriginNom) return;
+  matrixOriginNom = nom;
+  applyMatrixOriginToLayers();
+  rebuildLayerSelect();
+  recompute();
+  syncMatrixUi();
+}
+function setFlowHub(nom) {
+  if (!nom) return;
+  flowHubNom = nom;
+  flowHubUserSelected = true;
+  recompute();
+  syncMatrixUi();
 }
 
 function applyStaticI18n() {
@@ -3064,7 +3459,10 @@ function setLang(lang) {
   buildTracker();
   buildModeledEstimateNote();
   updateLegalContent();
+  applyMatrixOriginToLayers();
+  rebuildLayerSelect();
   recompute();
+  syncMatrixUi();
   if (activeView === "trends") {
     updateTrendsDateLabel();
     renderTrendsPanel(trendsHoveredProvince);
@@ -3121,10 +3519,13 @@ function rgb(c) { return "rgb(" + Math.round(c[0]) + "," + Math.round(c[1]) + ",
 const PROJ_MASK = PAYLOAD.projection_mask || null;
 const PROJ_MASK_LAYERS = new Set((PROJ_MASK && PROJ_MASK.layers) || []);
 
-function valueForZone(zone, layer) {
+function valueForZone(ref, zone, layer) {
   if (PROJ_MASK && PROJ_MASK_LAYERS.has(layer.id)) {
     const m = zone[PROJ_MASK.field];
     if (m == null || Number.isNaN(m) || Number(m) < PROJ_MASK.min) return null;
+  }
+  if (layerUsesMatrix(layer)) {
+    return matrixValue(layer.matrix_id, matrixOriginNom, ref, layer.matrix_scale);
   }
   const v = zone[layer.field];
   return (v == null || Number.isNaN(v)) ? null : Number(v);
@@ -3137,6 +3538,144 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>',
   subdomains: "abcd", maxZoom: 19
 }).addTo(map);
+
+map.createPane("flow-arcs");
+map.getPane("flow-arcs").style.zIndex = "450";
+const flowArcLayer = L.layerGroup();
+
+function zoneCentroid(nom) {
+  const z = ZONE_DATA[nom];
+  if (!z || z.centroid_lat == null || z.centroid_lon == null) return null;
+  if (!isFinite(z.centroid_lat) || !isFinite(z.centroid_lon)) return null;
+  return [z.centroid_lat, z.centroid_lon];
+}
+
+function clearFlowArcs() {
+  flowArcLayer.clearLayers();
+  if (map.hasLayer(flowArcLayer)) map.removeLayer(flowArcLayer);
+  flowArcStats = null;
+}
+
+function quadraticBezierPoints(lat1, lon1, lat2, lon2, bend) {
+  const steps = 24;
+  const midLat = (lat1 + lat2) / 2;
+  const midLon = (lon1 + lon2) / 2;
+  const dlat = lat2 - lat1;
+  const dlon = lon2 - lon1;
+  const len = Math.sqrt(dlat * dlat + dlon * dlon) || 1;
+  const sign = bend >= 0 ? 1 : -1;
+  const offset = 0.18 * len * sign;
+  // Counterclockwise bow from (lat1,lon1) toward (lat2,lon2) in the map plane.
+  const cpLat = midLat + (dlon / len) * offset;
+  const cpLon = midLon + (-dlat / len) * offset;
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const u = 1 - t;
+    const lat = u * u * lat1 + 2 * u * t * cpLat + t * t * lat2;
+    const lon = u * u * lon1 + 2 * u * t * cpLon + t * t * lon2;
+    pts.push([lat, lon]);
+  }
+  return pts;
+}
+
+function flowArcWeight(count, maxCount) {
+  if (!maxCount || maxCount <= 0) return 1.5;
+  return 1 + 4 * Math.sqrt(count / maxCount);
+}
+
+function addFlowWingMarker(pts, color) {
+  if (!pts || pts.length < 2) return;
+  const midIdx = Math.floor(pts.length / 2);
+  const mid = pts[midIdx];
+  const prev = pts[Math.max(0, midIdx - 1)];
+  const next = pts[Math.min(pts.length - 1, midIdx + 1)];
+  const angle = Math.atan2(next[1] - prev[1], next[0] - prev[0]) * 180 / Math.PI + 90;
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" ' +
+    'style="transform:rotate(' + angle + 'deg)">' +
+    '<line x1="2" y1="3.5" x2="11" y2="8" stroke="' + color + '" stroke-width="1.7" stroke-linecap="round"/>' +
+    '<line x1="2" y1="12.5" x2="11" y2="8" stroke="' + color + '" stroke-width="1.7" stroke-linecap="round"/>' +
+    '</svg>';
+  L.marker([mid[0], mid[1]], {
+    icon: L.divIcon({
+      className: "flow-wing-icon",
+      html: svg,
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    }),
+    interactive: false,
+    pane: "flow-arcs",
+  }).addTo(flowArcLayer);
+}
+
+function renderFlowArcs(hubNom, layer) {
+  clearFlowArcs();
+  const cat = flowCatalogForLayer(layer);
+  if (!cat || !hubNom) return;
+  const hub = zoneCentroid(hubNom);
+  if (!hub) return;
+
+  const outs = (cat.out_by_origin && cat.out_by_origin[hubNom]) || [];
+  const ins = (cat.in_by_dest && cat.in_by_dest[hubNom]) || [];
+  const outSorted = outs.slice().sort(function(a, b) { return b[1] - a[1]; });
+  const inSorted = ins.slice().sort(function(a, b) { return b[1] - a[1]; });
+
+  let maxCount = 1;
+  outSorted.concat(inSorted).forEach(function(p) {
+    if (p[1] > maxCount) maxCount = p[1];
+  });
+
+  outSorted.forEach(function(pair) {
+    const dest = pair[0];
+    const count = pair[1];
+    const end = zoneCentroid(dest);
+    if (!end) return;
+    const pts = quadraticBezierPoints(hub[0], hub[1], end[0], end[1], 1);
+    const line = L.polyline(pts, {
+      color: FLOW_OUT_COLOR,
+      weight: flowArcWeight(count, maxCount),
+      opacity: 0.82,
+      pane: "flow-arcs",
+    });
+    line.bindTooltip(tf("ui.flow_arc_tooltip", {
+      from: flowHubDisplayName(),
+      to: hubDisplayName(dest),
+      count: fmt(count),
+    }), {direction: "top", sticky: true});
+    line.addTo(flowArcLayer);
+    addFlowWingMarker(pts, FLOW_OUT_COLOR);
+  });
+
+  inSorted.forEach(function(pair) {
+    const origin = pair[0];
+    const count = pair[1];
+    const start = zoneCentroid(origin);
+    if (!start) return;
+    const pts = quadraticBezierPoints(start[0], start[1], hub[0], hub[1], 1);
+    const line = L.polyline(pts, {
+      color: FLOW_IN_COLOR,
+      weight: flowArcWeight(count, maxCount),
+      opacity: 0.82,
+      pane: "flow-arcs",
+    });
+    line.bindTooltip(tf("ui.flow_arc_tooltip", {
+      from: hubDisplayName(origin),
+      to: flowHubDisplayName(),
+      count: fmt(count),
+    }), {direction: "top", sticky: true});
+    line.addTo(flowArcLayer);
+    addFlowWingMarker(pts, FLOW_IN_COLOR);
+  });
+
+  flowArcStats = {
+    outTotal: outs.length,
+    outShown: outSorted.length,
+    inTotal: ins.length,
+    inShown: inSorted.length,
+  };
+  flowArcLayer.addTo(map);
+}
 
 const ZERO_FILL    = "#c4bfb6";
 let currentValues = new Map();
@@ -3152,7 +3691,7 @@ function recompute() {
     const ref = feat.properties.nom;
     const zone = ZONE_DATA[ref];
     if (!zone) continue;
-    const v = valueForZone(zone, layer);
+    const v = valueForZone(ref, zone, layer);
     if (v == null || Number.isNaN(v)) {
       if (!highlightEpicenter || !isEpicenterZone(ref, layer)) continue;
       currentValues.set(ref, v);
@@ -3160,6 +3699,7 @@ function recompute() {
     }
     currentValues.set(ref, v);
     if (highlightEpicenter && isEpicenterZone(ref, layer)) continue;
+    if (layerOriginHighlight(layer) && isMatrixOriginZone(ref, layer)) continue;
     if (v < lo) lo = v;
     if (v > hi) hi = v;
     if (v > 0) positives.push(v);
@@ -3177,11 +3717,17 @@ function recompute() {
   }
   currentDomain = {min:dlo, max:dhi, isLog:useLog, palette:PALETTES[layer.palette] || PLASMA};
   geoLayer.setStyle(styleFn);
+  if (flowArcsOverlayActive()) {
+    renderFlowArcs(flowHubNom, flowArcLayerDef());
+  } else {
+    clearFlowArcs();
+  }
   updateLegend(layer);
   updateLayerMeta(layer);
 }
 
 function valueToColor(v, ref, layer) {
+  if (isHubZone(ref, layer)) return MATRIX_ORIGIN_FILL;
   if (isEpicenterZone(ref, layer)) return EPICENTER_FILL;
   const d = currentDomain;
   if (d.isLog && v <= 0) return ZERO_FILL;
@@ -3198,6 +3744,13 @@ function styleFn(feature) {
   const v = currentValues.get(ref);
   const has = v != null && !Number.isNaN(v);
   const layer = getLayer(layerSelect.value);
+  if (isHubZone(ref, layer)) {
+    return {
+      color: "#111", weight: 1.6,
+      fillColor: MATRIX_ORIGIN_FILL,
+      fillOpacity: 0.92
+    };
+  }
   if (isEpicenterZone(ref, layer)) {
     return {
       color: "#111", weight: 0.5,
@@ -3240,7 +3793,34 @@ function fmt(v, kind) {
 }
 
 function updateLayerMeta(layer) {
-  layerMeta.innerHTML = layer.source || "";
+  let html = layer.source || "";
+  if (layerUsesMatrix(layer)) {
+    const originLine = tf("ui.matrix_origin", {origin: matrixOriginDisplayName()});
+    html = (html ? html + "<br>" : "") + originLine;
+  }
+  if (flowArcsOverlayActive()) {
+    const flowLayer = flowArcLayerDef();
+    const hubLine = tf("ui.flow_hub", {hub: flowHubDisplayName()});
+    html = (html ? html + "<br>" : "") + hubLine;
+    if (flowArcStats) {
+      html += "<br>" + tf("ui.flow_arc_summary", {
+        outShown: flowArcStats.outShown,
+        outTotal: flowArcStats.outTotal,
+        inShown: flowArcStats.inShown,
+        inTotal: flowArcStats.inTotal,
+      });
+    } else {
+      const cat = flowCatalogForLayer(flowLayer);
+      const hasHub = cat && (
+        (cat.out_by_origin && cat.out_by_origin[flowHubNom]) ||
+        (cat.in_by_dest && cat.in_by_dest[flowHubNom])
+      );
+      if (!hasHub) {
+        html += "<br>" + t("ui.flow_no_data");
+      }
+    }
+  }
+  layerMeta.innerHTML = html;
 }
 
 function updateLegend(layer) {
@@ -3270,6 +3850,19 @@ function updateLegend(layer) {
     grayParts.push(
       "<span class='swatch' style='background:" + EPICENTER_FILL + "'></span>" + t("ui.legend.epicenter")
     );
+  }
+  if (layerUsesMatrix(layer) && layerOriginHighlight(layer)) {
+    grayParts.push(
+      "<span class='swatch' style='background:" + MATRIX_ORIGIN_FILL + "'></span>" + t("ui.legend.matrix_origin")
+    );
+  }
+  if (flowArcsOverlayActive()) {
+    grayParts.push(
+      "<span class='swatch' style='background:" + FLOW_OUT_COLOR + "'></span>" + t("ui.legend.flow_out"),
+      "<span class='swatch' style='background:" + FLOW_IN_COLOR + "'></span>" + t("ui.legend.flow_in")
+    );
+    const scaleEl = document.getElementById("legend-scale");
+    scaleEl.textContent = (scaleEl.textContent || "") + " · " + t("ui.legend.flow_width");
   }
   document.getElementById("legend-gray").innerHTML = grayParts.join(" · ");
 }
@@ -3325,10 +3918,10 @@ function infoHTML(feature) {
   h += "<tr><td>" + info.flowminder_may + "</td><td>" + fmt(z.flowminder_short_trips__outflow_20260524__outflow_20260524, "cal") + "</td></tr>";
   h += "</table>";
 
-  h += "<h4>" + tf("ui.info.distance_from", {origin: TRAVEL_FROM}) + "</h4>";
+  h += "<h4>" + tf("ui.info.distance_from", {origin: matrixOriginDisplayName()}) + "</h4>";
   h += "<table>";
-  h += "<tr><td>" + info.travel_time_h + "</td><td>" + fmt(z.travel_time_to_mongbwalu_h) + "</td></tr>";
-  h += "<tr><td>" + info.road_distance_km + "</td><td>" + fmt(z.geodesic_to_mongbwalu_km) + "</td></tr>";
+  h += "<tr><td>" + info.travel_time_h + "</td><td>" + fmt(matrixValue("osrm__travel_time", matrixOriginNom, ref, 60)) + "</td></tr>";
+  h += "<tr><td>" + info.road_distance_km + "</td><td>" + fmt(matrixValue("osrm__road_distance", matrixOriginNom, ref, 1)) + "</td></tr>";
   h += "</table>";
   return h;
 }
@@ -3372,6 +3965,22 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
           selectContextZone(feature.properties.nom, e.target);
           return;
         }
+        const layer = getLayer(layerSelect.value);
+        if (activeView === "map" && flowArcsOverlayActive()) {
+          L.DomEvent.stop(e);
+          setFlowHub(feature.properties.nom);
+          return;
+        }
+        if (activeView === "map" && layerUsesMatrix(layer)) {
+          L.DomEvent.stop(e);
+          setMatrixOrigin(feature.properties.nom);
+          return;
+        }
+        map.fitBounds(e.target.getBounds(), {padding:[40,40]});
+      },
+      dblclick: function(e) {
+        if (activeView === "context") return;
+        L.DomEvent.stop(e);
         map.fitBounds(e.target.getBounds(), {padding:[40,40]});
       }
     });
@@ -3702,7 +4311,6 @@ function hideProvinceOutlines() {
 }
 
 // --- Map / Trends / Context tab switching ---
-let activeView = "map";
 let trendsHoverTimer = null;
 let trendsHoveredProvince = null;
 let savedMapLayerId = null;
@@ -3837,8 +4445,21 @@ function restoreCaseMarkersForView(view) {
   else map.removeLayer(caseLayer);
 }
 
+function restoreFlowArcsForView(view) {
+  if (view !== "map") {
+    clearFlowArcs();
+    return;
+  }
+  if (flowArcsOverlayActive()) {
+    renderFlowArcs(flowHubNom, flowArcLayerDef());
+  } else {
+    clearFlowArcs();
+  }
+}
+
 function enterTrendsView() {
   savedMapLayerId = layerSelect.value;
+  clearFlowArcs();
   layerSelect.value = "obs::confirmed";
   map.removeLayer(caseLayer);
   showProvinceOutlines();
@@ -3874,6 +4495,7 @@ function setActiveView(view) {
   if (view === "trends") {
     enterTrendsView();
   } else if (view === "context") {
+    clearFlowArcs();
     if (activeView === "trends") leaveTrendsView();
     else {
       hideProvinceOutlines();
@@ -3889,9 +4511,11 @@ function setActiveView(view) {
   }
   activeView = view;
   restoreCaseMarkersForView(view);
+  restoreFlowArcsForView(view);
   document.body.classList.toggle("view-map", view === "map");
   document.body.classList.toggle("view-trends", view === "trends");
   document.body.classList.toggle("view-context", view === "context");
+  syncMatrixUi();
   document.querySelectorAll(".view-tab").forEach(function(btn) {
     btn.classList.toggle("active", btn.dataset.view === view);
   });
@@ -3949,11 +4573,27 @@ showCasesBox.addEventListener("change", function() {
   else map.removeLayer(caseLayer);
 });
 
-// Default: Suspected cases layer, active-case markers ON, centered on Bunia.
+// --- Flowminder in/out flow arcs (toggle overlay) ---
+const showFlowArcsBox = document.getElementById("show-flow-arcs");
+const showFlowArcsRow = document.getElementById("show-flow-arcs-row");
+if (!PAYLOAD.flow_arcs_available || !FLOW_ARC_LAYER) {
+  if (showFlowArcsRow) showFlowArcsRow.style.display = "none";
+} else if (showFlowArcsBox) {
+  showFlowArcsBox.checked = true;
+  showFlowArcsBox.addEventListener("change", function() {
+    recompute();
+    syncMatrixUi();
+  });
+}
+
+// Default: total cases layer, active-case markers ON, flow arcs ON from Mongbwalu.
 showCasesBox.checked = true;
 caseLayer.addTo(map);
 
-layerSelect.addEventListener("change", recompute);
+layerSelect.addEventListener("change", function() {
+  recompute();
+  syncMatrixUi();
+});
 scaleSelect.addEventListener("change", recompute);
 
 // --- modal wiring (Methods + Terms) ---
@@ -4034,7 +4674,10 @@ wireModal("terms-modal", "terms-btn", "terms-close");
   buildModeledEstimateNote();
   updateLegalContent();
   layerSelect.value = "obs::total";
+  applyMatrixOriginToLayers();
+  rebuildLayerSelect();
   recompute();
+  syncMatrixUi();
 })();
 </script>
 </body>
