@@ -141,7 +141,7 @@ Commits `output/dashboard.html` and `index.html` back to **`main`**.
 **Secret (data repo only):** `DASHBOARD_DISPATCH_TOKEN` — fine-grained PAT with **Contents: Write** on `BDBV2026-Epidemic_Dashboard`. Without it, release dispatch steps warn and skip (local/manual builds still work).
 
 ## Citation
-You can reference this repository by its [Zeondo DOI](https://doi.org/10.5281/zenodo.20347624) and the accompannying publication on [Lancet Infectious Diseases by Mbulayi et al](https://www.thelancet.com/journals/laninf/article/PIIS1473-3099(26)00330-0/fulltext). Please cite the original data providers (links above) if any code or derived data is reused.
+You can reference this repository by its [Zenodo DOI](https://doi.org/10.5281/zenodo.20347624) and the accompannying publication on [Lancet Infectious Diseases by Mbulayi et al](https://www.thelancet.com/journals/laninf/article/PIIS1473-3099(26)00330-0/fulltext). Please cite the original data providers (links above) if any code or derived data is reused.
 
 INRB/INOHA/INSP DRC Data Dashboard DOI: 10.5281/zenodo.20347624
 
