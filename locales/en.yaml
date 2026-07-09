@@ -206,3 +206,5 @@ ui:
     collapse_context_national: "Collapse / expand national and provincial context"
     toggle_context_zone: "Toggle health zone context panel"
     collapse_context_zone: "Collapse / expand zone context"
+    toggle_title: "Toggle title panel"
+    collapse_title: "Collapse / expand title panel"
