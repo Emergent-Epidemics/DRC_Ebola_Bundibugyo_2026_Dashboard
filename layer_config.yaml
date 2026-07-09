@@ -15,6 +15,8 @@ exclude:
   - gdp_pc
   - epi_mve_inrb_app
   - aggregated_insp_linelist
+  - flowminder_short_trips
+  - genomic_surveillance
   # - healthsites_io                  # entire group
   # - cross_border__poe_passengers__n_poes   # single leaf
 
@@ -44,8 +46,8 @@ groups:
     scale: log
     legend_round: int
   flowminder_short_trips:
-    label: "Movements from epicentre"
-    label_fr: "Mouvements depuis l'épicentre"
+    label: "Movements from epicentres (Flowminder)"
+    label_fr: "Mouvements depuis les épicentres (Flowminder)"
     palette: reds
     scale: log
     legend_round: 1

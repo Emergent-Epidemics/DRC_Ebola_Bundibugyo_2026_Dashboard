@@ -86,6 +86,13 @@ FLOWMINDER_PROCESSED = (
     if os.environ.get("FLOWMINDER_DIR")
     else (BUILD_DIR.parent / "Data" / "Flowminder" / "Processed")
 )
+GENOMIC_SEQUENCE_CSV = (
+    EXTERNAL_DATA / "genomic_surveillance" / "processed"
+    / "genomic_surveillance__sequence_count__static.csv"
+)
+FLOWMINDER_SHORT_TRIPS_PROCESSED = (
+    EXTERNAL_DATA / "flowminder_short_trips" / "processed"
+)
 DATA_REPO        = os.environ.get("DATA_REPO", "INRB-UMIE/BDBV2026-Data").strip()
 
 METADATA_CSV     = DATA_ROOT / "health_zone_metadata.csv"
@@ -113,7 +120,10 @@ SIMPLIFY_TOL = 0.001     # ~110 m at the equator; ~10× fewer vertices than raw
 COORD_DECIMALS = 5
 TRAVEL_FROM_ZONE = "Mongbwalu"
 # Canonical ``nom`` values for outbreak epicentres (Flowminder outflow sources).
-EPICENTER_SOURCE_NOMS = ("Bunia", "Mongbalu", "Rwampara")
+EPICENTER_ITURI_SINGLE = ("Bunia", "Mongbalu", "Rwampara")
+EPICENTER_ITURI_COHORT = ("Bunia", "Mongbalu", "Rwampara", "Nyakunde")
+EPICENTER_NK_COHORT = ("Beni", "Butembo", "Katwa")
+EPICENTER_SOURCE_NOMS = EPICENTER_ITURI_SINGLE
 EPICENTER_FILL = "#7695E1"
 ASOF_FALLBACK = ""
 INSP_BASE_URL = "https://insp.cd/"
@@ -1288,6 +1298,31 @@ def _extract_matrix_row_sums(csv_path: Path) -> dict[str, float | None]:
     return {noms.iloc[i]: _f(sums.iloc[i]) for i in range(len(df))}
 
 
+def _load_flowminder_short_trips_vector(
+    csv_path: Path,
+    flat_field: str,
+) -> dict[str, float | None]:
+    """Load a long-format flowminder_short_trips vector into {nom: value}."""
+    if not csv_path.exists():
+        print(f"  WARNING: {csv_path} not found")
+        return {}
+    df = pd.read_csv(csv_path)
+    if "nom" not in df.columns:
+        print(f"  WARNING: {csv_path.name} missing nom column")
+        return {}
+    value_cols = [c for c in df.columns if c != "nom"]
+    if len(value_cols) != 1:
+        print(f"  WARNING: {csv_path.name} expected one value column, got {value_cols}")
+        return {}
+    value_col = value_cols[0]
+    out: dict[str, float | None] = {}
+    for _, row in df.iterrows():
+        raw_nom = str(row["nom"]).strip()
+        nom = _NAME_TO_NOM.get(raw_nom, raw_nom)
+        out[nom] = _f(row[value_col])
+    return out
+
+
 def _build_matrix_zone_aliases(zones: list[str]) -> dict[str, str]:
     """Map matrix CSV row/column labels to canonical GeoJSON ``nom`` values."""
     aliases: dict[str, str] = {}
@@ -1519,11 +1554,51 @@ def load_metadata(
         rec["displaced_in_individuals_12mo"] = _i(idp_incoming.get(nom))
         rec["flowminder_in_mar2026"] = _i(flowminder_incoming.get(nom))
 
-        # Local-CSV-only fields
+        zone_data[nom] = rec
+
+    # HDX cohort subscriber-day vectors (not yet in build GeoJSON).
+    _SHORT_TRIPS_VECTOR_FILES = (
+        (
+            "flowminder_short_trips__ituri_subscriber_days_followup_20260608__ituri_subscriber_days_followup_20260608",
+            "flowminder_short_trips__ituri_subscriber_days_followup_20260608__static.csv",
+        ),
+        (
+            "flowminder_short_trips__ituri_subscriber_days_prior_20260503__ituri_subscriber_days_prior_20260503",
+            "flowminder_short_trips__ituri_subscriber_days_prior_20260503__static.csv",
+        ),
+        (
+            "flowminder_short_trips__nk_subscriber_days_followup_20260608__nk_subscriber_days_followup_20260608",
+            "flowminder_short_trips__nk_subscriber_days_followup_20260608__static.csv",
+        ),
+        (
+            "flowminder_short_trips__nk_subscriber_days_prior_20260503__nk_subscriber_days_prior_20260503",
+            "flowminder_short_trips__nk_subscriber_days_prior_20260503__static.csv",
+        ),
+    )
+    for flat_field, filename in _SHORT_TRIPS_VECTOR_FILES:
+        values = _load_flowminder_short_trips_vector(
+            FLOWMINDER_SHORT_TRIPS_PROCESSED / filename,
+            flat_field,
+        )
+        for nom, value in values.items():
+            zone_data.setdefault(nom, {"name": nom})
+            zone_data[nom][flat_field] = value
+
+    # Local-CSV-only fields (applied after zone_data loop for zones only in build_props)
+    for nom, rec in zone_data.items():
         local = local_fields.get(nom, {})
         rec["relative_risk"] = local.get("relative_risk")
 
-        zone_data[nom] = rec
+    if GENOMIC_SEQUENCE_CSV.exists():
+        df = pd.read_csv(GENOMIC_SEQUENCE_CSV)
+        if "nom" in df.columns and "sequence_count" in df.columns:
+            for _, row in df.iterrows():
+                raw_nom = str(row["nom"]).strip()
+                nom = _NAME_TO_NOM.get(raw_nom, raw_nom)
+                count = _i(row["sequence_count"])
+                if count and count > 0:
+                    zone_data.setdefault(nom, {"name": nom})
+                    zone_data[nom]["genomic_sequence_count"] = count
 
     # Case totals
     totals: dict = {}
@@ -1658,6 +1733,35 @@ def build_active_case_markers(zone_data: dict[str, dict],
             "confirmed_deaths": int(rec.get("confirmed_deaths") or 0),
             "suspected_deaths": int(rec.get("suspected_deaths") or 0),
             "total": total,
+        })
+    return out
+
+
+def build_genome_sequence_markers(
+    centroids: dict[str, tuple[float, float]],
+) -> list[dict]:
+    """One marker per zone with at least one genome sequence."""
+    if not GENOMIC_SEQUENCE_CSV.exists():
+        print(f"  WARNING: {GENOMIC_SEQUENCE_CSV} not found")
+        return []
+    df = pd.read_csv(GENOMIC_SEQUENCE_CSV)
+    if "nom" not in df.columns or "sequence_count" not in df.columns:
+        print(f"  WARNING: {GENOMIC_SEQUENCE_CSV.name} missing nom / sequence_count")
+        return []
+    out: list[dict] = []
+    for _, row in df.iterrows():
+        raw_nom = str(row["nom"]).strip()
+        nom = _NAME_TO_NOM.get(raw_nom, raw_nom)
+        count = _i(row["sequence_count"])
+        if not count or count <= 0 or nom not in centroids:
+            continue
+        lon, lat = centroids[nom]
+        out.append({
+            "nom": nom,
+            "name": _NOM_TO_NAME.get(nom, nom),
+            "lat": lat,
+            "lon": lon,
+            "count": count,
         })
     return out
 
@@ -2054,62 +2158,6 @@ def extract_geojson_fields(
 # extra (non-GeoJSON) layers: matrices, local CSV, computed fields
 # ---------------------------------------------------------------------------
 
-# Flowminder short-trip cohort proportions (Bunia / Mongbalu / Rwampara).
-# Flat field names match build GeoJSON: flowminder_short_trips.<metric>.<metric>.
-# Tuple: group, id, label, field, palette, scale, legend_round, epicenter_highlight
-_FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
-    (
-        "Incoming Mobility",
-        "fmst::20260430",
-        "Flowminder movements from epicentre until April 30",
-        "flowminder_short_trips__outflow_20260430__outflow_20260430",
-        "reds",
-        "log",
-        1,
-        True,
-    ),
-    (
-        "Incoming Mobility",
-        "fmst::20260507",
-        "Flowminder movements from epicentre until May 7",
-        "flowminder_short_trips__outflow_20260507__outflow_20260507",
-        "reds",
-        "log",
-        1,
-        True,
-    ),
-    (
-        "Incoming Mobility",
-        "fmst::20260514",
-        "Flowminder movements from epicentre until May 14",
-        "flowminder_short_trips__outflow_20260514__outflow_20260514",
-        "reds",
-        "log",
-        1,
-        True,
-    ),
-    (
-        "Incoming Mobility",
-        "fmst::20260521",
-        "Flowminder movements from epicentre until May 21",
-        "flowminder_short_trips__outflow_20260521__outflow_20260521",
-        "reds",
-        "log",
-        1,
-        True,
-    ),
-    (
-        "Incoming Mobility",
-        "fmst::20260524",
-        "Flowminder movements from epicentre until May 24",
-        "flowminder_short_trips__outflow_20260524__outflow_20260524",
-        "reds",
-        "log",
-        1,
-        True,
-    ),
-]
-
 EXTRA_LAYER_DEFS_TRAVEL = [
     ("Travel distance (OSRM)", "d::travel", "Travel time from {origin} (hours)",   "", "plasma_r", "linear", 1, False, "osrm__travel_time", 60, True),
     ("Travel distance (OSRM)", "d::geo",    "Road distance from {origin} (km)",    "", "plasma_r", "linear", "int", False, "osrm__road_distance", 1, True),
@@ -2131,6 +2179,8 @@ def _make_layer_def(
     origin_highlight: bool = False,
     viz: str = "",
     flow_catalog: str = "",
+    epicenter_noms: list[str] | None = None,
+    legend_caption: str = "",
 ) -> dict:
     layer = {
         "group": group,
@@ -2143,6 +2193,10 @@ def _make_layer_def(
         "legend_round": legend_round,
         "epicenter_highlight": epicenter_highlight,
     }
+    if epicenter_noms:
+        layer["epicenter_noms"] = list(epicenter_noms)
+    if legend_caption:
+        layer["legend_caption"] = legend_caption
     if matrix_id:
         layer["matrix_id"] = matrix_id
         layer["matrix_scale"] = 1 if matrix_scale is None else matrix_scale
@@ -2154,6 +2208,102 @@ def _make_layer_def(
         if origin_highlight:
             layer["origin_highlight"] = True
     return layer
+
+
+# Flowminder short-trip layers (Annex A proportions + HDX cohort subscriber-days).
+_FLOWMINDER_SHORT_TRIPS_GROUP = "Movements from epicentres (Flowminder)"
+_FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
+    _make_layer_def(
+        _FLOWMINDER_SHORT_TRIPS_GROUP,
+        "fmst::20260430",
+        "Percentage of persons from Ituri epicentre* observed in new health zone by April 30",
+        "flowminder_short_trips__outflow_20260430__outflow_20260430",
+        "reds", "log", 1,
+        epicenter_highlight=True,
+        epicenter_noms=list(EPICENTER_ITURI_SINGLE),
+        legend_caption="Persons detected in new health zones",
+    ),
+    _make_layer_def(
+        _FLOWMINDER_SHORT_TRIPS_GROUP,
+        "fmst::20260507",
+        "Percentage of persons from Ituri epicentre* observed in new health zone by May 7",
+        "flowminder_short_trips__outflow_20260507__outflow_20260507",
+        "reds", "log", 1,
+        epicenter_highlight=True,
+        epicenter_noms=list(EPICENTER_ITURI_SINGLE),
+        legend_caption="Persons detected in new health zones",
+    ),
+    _make_layer_def(
+        _FLOWMINDER_SHORT_TRIPS_GROUP,
+        "fmst::20260514",
+        "Percentage of persons from Ituri epicentre* observed in new health zone by May 14",
+        "flowminder_short_trips__outflow_20260514__outflow_20260514",
+        "reds", "log", 1,
+        epicenter_highlight=True,
+        epicenter_noms=list(EPICENTER_ITURI_SINGLE),
+        legend_caption="Persons detected in new health zones",
+    ),
+    _make_layer_def(
+        _FLOWMINDER_SHORT_TRIPS_GROUP,
+        "fmst::20260521",
+        "Percentage of persons from Ituri epicentre* observed in new health zone by May 21",
+        "flowminder_short_trips__outflow_20260521__outflow_20260521",
+        "reds", "log", 1,
+        epicenter_highlight=True,
+        epicenter_noms=list(EPICENTER_ITURI_SINGLE),
+        legend_caption="Persons detected in new health zones",
+    ),
+    _make_layer_def(
+        _FLOWMINDER_SHORT_TRIPS_GROUP,
+        "fmst::20260524",
+        "Percentage of persons from Ituri epicentre* observed in new health zone by May 24",
+        "flowminder_short_trips__outflow_20260524__outflow_20260524",
+        "reds", "log", 1,
+        epicenter_highlight=True,
+        epicenter_noms=list(EPICENTER_ITURI_SINGLE),
+        legend_caption="Persons detected in new health zones",
+    ),
+    _make_layer_def(
+        _FLOWMINDER_SHORT_TRIPS_GROUP,
+        "fmst::ituri_followup",
+        "Avg subscriber-days of Ituri epicentre** persons spent in new health zone by June 8",
+        "flowminder_short_trips__ituri_subscriber_days_followup_20260608__ituri_subscriber_days_followup_20260608",
+        "reds", "log", 2,
+        epicenter_highlight=True,
+        epicenter_noms=list(EPICENTER_ITURI_COHORT),
+        legend_caption="Average subscriber-days",
+    ),
+    _make_layer_def(
+        _FLOWMINDER_SHORT_TRIPS_GROUP,
+        "fmst::ituri_prior",
+        "Avg subscriber-days of Ituri epicentre** persons spent in new health zone by May 3",
+        "flowminder_short_trips__ituri_subscriber_days_prior_20260503__ituri_subscriber_days_prior_20260503",
+        "reds", "log", 2,
+        epicenter_highlight=True,
+        epicenter_noms=list(EPICENTER_ITURI_COHORT),
+        legend_caption="Average subscriber-days",
+    ),
+    _make_layer_def(
+        _FLOWMINDER_SHORT_TRIPS_GROUP,
+        "fmst::nk_followup",
+        "Avg subscriber-days of Nord-Kivu epicentre** persons spent in new health zone by June 8",
+        "flowminder_short_trips__nk_subscriber_days_followup_20260608__nk_subscriber_days_followup_20260608",
+        "reds", "log", 2,
+        epicenter_highlight=True,
+        epicenter_noms=list(EPICENTER_NK_COHORT),
+        legend_caption="Average subscriber-days",
+    ),
+    _make_layer_def(
+        _FLOWMINDER_SHORT_TRIPS_GROUP,
+        "fmst::nk_prior",
+        "Avg subscriber-days of Nord-Kivu epicentre** persons spent in new health zone by May 3",
+        "flowminder_short_trips__nk_subscriber_days_prior_20260503__nk_subscriber_days_prior_20260503",
+        "reds", "log", 2,
+        epicenter_highlight=True,
+        epicenter_noms=list(EPICENTER_NK_COHORT),
+        legend_caption="Average subscriber-days",
+    ),
+]
 
 
 FLOW_ARC_LAYER_DEF = _make_layer_def(
@@ -2176,8 +2326,23 @@ EXTRA_LAYER_DEFS = [
     ("Observed (epi update)", "obs::conf_d",    "Confirmed deaths",                    "confirmed_deaths", "reds", "log", "int", False),
     ("Observed (epi update)", "obs::susp_d",    "Suspected deaths",                    "suspected_deaths", "reds", "log", "int", False),
     ("Modeled projection",    "cal::true",      "Relative risk",                       "relative_risk",    "outbreak", "log", 2, False),
-    ("Incoming Mobility",     "disp::in",       "Incoming displaced persons (12mo)",   "displaced_in_individuals_12mo", "reds", "log", "int", False),
-    ("Incoming Mobility",     "flow::in",       "Flowminder incoming relocations (March 2026)",          "flowminder_in_mar2026",         "reds", "log", "int", True),
+    _make_layer_def(
+        "Incoming Mobility",
+        "disp::in",
+        "Internally displaced persons (IOM)",
+        "displaced_in_individuals_12mo",
+        "reds", "log", "int",
+    ),
+    _make_layer_def(
+        "Incoming Mobility",
+        "flow::in",
+        "Relocated persons between Feb 2026 and Mar 2026 (Flowminder)",
+        "flowminder_in_mar2026",
+        "reds", "log", "int",
+        epicenter_highlight=True,
+        epicenter_noms=list(EPICENTER_ITURI_SINGLE),
+        legend_caption="Number of relocated persons",
+    ),
     *EXTRA_LAYER_DEFS_TRAVEL,
     *_FLOWMINDER_SHORT_TRIPS_LAYER_DEFS,
 ]
@@ -2206,6 +2371,8 @@ PROJECTION_MASK_MIN = 0.005
 LAYER_GROUP_ORDER = [
     "Observed (epi update)",
     "Testing capacity",
+    "Incoming Mobility",
+    "Movements from epicentres (Flowminder)",
 ]
 
 
@@ -2264,6 +2431,9 @@ def localize_layers(layers: list[dict], locale: dict) -> list[dict]:
         if label_template:
             localized["label_template"] = label_template
             localized["label"] = label_template.replace("{origin}", TRAVEL_FROM_ZONE)
+        caption_map = locale.get("layer_legend_captions") or {}
+        if layer_id in caption_map:
+            localized["legend_caption"] = caption_map[layer_id]
         out.append(localized)
     return out
 
@@ -2406,6 +2576,8 @@ def build_payload() -> dict:
           f"affected zones={totals.get('affected_zones', 0)}")
     active_case_markers = build_active_case_markers(zone_data, centroids_by_nom)
     print(f"  active-case markers: {len(active_case_markers)} zones")
+    genome_sequence_markers = build_genome_sequence_markers(centroids_by_nom)
+    print(f"  genome-sequence markers: {len(genome_sequence_markers)} zones")
 
     province_boundaries = build_province_boundaries()
     print(f"  province boundaries: {len(province_boundaries['features'])} provinces")
@@ -2458,6 +2630,8 @@ def build_payload() -> dict:
         "ic_model": ic_model,
         "tracker_caveats": tracker_caveats,
         "active_case_markers": active_case_markers,
+        "genome_sequence_markers": genome_sequence_markers,
+        "genome_markers_available": bool(genome_sequence_markers),
         "province_boundaries": province_boundaries,
         "onset_trends": onset_trends,
         "phr_context": phr_context_by_lang.get("en", {"national": [], "by_nom": {}}),
@@ -2930,6 +3104,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   .footer { font-size:10px; color:#888; margin-top:8px; }
   .checkbox-row { display:flex; align-items:center; margin-top:6px; gap:6px; }
   .case-icon { width:14px; height:14px; border-radius:50%; background:rgba(91,134,179,0.85); border:1.5px solid #fff; box-shadow:0 0 6px rgba(91,134,179,0.45); }
+  .genome-icon { border-radius:50%; background:rgba(91,134,179,0.42); border:1.5px solid rgba(255,255,255,0.75); box-shadow:0 0 4px rgba(91,134,179,0.25); box-sizing:border-box; }
   /* Trends / Context: marker dots must not steal pointer events from the map. */
   body.view-trends .leaflet-marker-pane .leaflet-marker-icon,
   body.view-context .leaflet-marker-pane .leaflet-marker-icon { pointer-events: none !important; }
@@ -3042,6 +3217,10 @@ HTML_TEMPLATE = r"""<!doctype html>
     <div class="checkbox-row">
       <input type="checkbox" id="show-cases" />
       <label for="show-cases" style="margin:0;color:#eee" data-i18n="ui.show_cases">Show active-case markers</label>
+    </div>
+    <div class="checkbox-row" id="show-genomes-row">
+      <input type="checkbox" id="show-genomes" />
+      <label for="show-genomes" style="margin:0;color:#eee" data-i18n="ui.show_genomes">Show numbers of genome sequences</label>
     </div>
     <div class="checkbox-row" id="show-flow-arcs-row">
       <input type="checkbox" id="show-flow-arcs" />
@@ -3199,8 +3378,14 @@ function flowCatalogForLayer(layer) {
   if (!layer || !layer.flow_catalog) return null;
   return FLOW_CATALOGS[layer.flow_catalog] || null;
 }
+function layerEpicenterNoms(layer) {
+  if (layer && layer.epicenter_noms && layer.epicenter_noms.length) {
+    return new Set(layer.epicenter_noms);
+  }
+  return EPICENTER_NOMS;
+}
 function isEpicenterZone(ref, layer) {
-  return layerEpicenterHighlight(layer) && EPICENTER_NOMS.has(ref);
+  return layerEpicenterHighlight(layer) && layerEpicenterNoms(layer).has(ref);
 }
 function isHubZone(ref, layer) {
   if (layerUsesMatrix(layer) && layerOriginHighlight(layer)) {
@@ -3494,6 +3679,7 @@ function setLang(lang) {
   rebuildLayerSelect();
   recompute();
   syncMatrixUi();
+  refreshMarkerTooltips();
   if (activeView === "trends") {
     updateTrendsDateLabel();
     renderTrendsPanel(trendsHoveredProvince);
@@ -3872,7 +4058,9 @@ function updateLegend(layer) {
     "<span>" + fmtLegend(mid, lr) + "</span>" +
     "<span>" + fmtLegend(hi,  lr) + "</span>";
   document.getElementById("legend-scale").textContent =
-    currentDomain.isLog ? t("ui.legend.log_scale") : t("ui.legend.linear_scale");
+    layer.legend_caption
+      ? layer.legend_caption
+      : (currentDomain.isLog ? t("ui.legend.log_scale") : t("ui.legend.linear_scale"));
   var grayParts = [
     "<span class='swatch' style='background:" + ZERO_FILL + "'></span>" + t("ui.legend.zero"),
     "<span class='swatch swatch-no-data'></span>" + t("ui.legend.no_data")
@@ -3948,6 +4136,13 @@ function infoHTML(feature) {
   h += "<tr><td>" + info.flowminder_mar + "</td><td>" + fmt(z.flowminder_in_mar2026) + "</td></tr>";
   h += "<tr><td>" + info.flowminder_may + "</td><td>" + fmt(z.flowminder_short_trips__outflow_20260524__outflow_20260524, "cal") + "</td></tr>";
   h += "</table>";
+
+  if (z.genomic_sequence_count) {
+    h += "<h4>" + info.genomic_surveillance + "</h4>";
+    h += "<table>";
+    h += "<tr><td>" + info.genome_sequences + "</td><td>" + fmt(z.genomic_sequence_count) + "</td></tr>";
+    h += "</table>";
+  }
 
   h += "<h4>" + tf("ui.info.distance_from", {origin: matrixOriginDisplayName()}) + "</h4>";
   h += "<table>";
@@ -4593,25 +4788,99 @@ document.querySelectorAll(".view-tab").forEach(function(btn) {
 
 // --- active-case markers ---
 const ACTIVE_CASES = PAYLOAD.active_case_markers || [];
+const GENOME_SEQUENCES = PAYLOAD.genome_sequence_markers || [];
+const GENOME_MAX_COUNT = GENOME_SEQUENCES.reduce(function(max, g) {
+  return Math.max(max, g.count || 0);
+}, 1);
 const caseIcon = L.divIcon({className:"", html:"<div class='case-icon'></div>", iconSize:[14,14]});
 const caseLayer = L.layerGroup();
+const genomeLayer = L.layerGroup();
 const showCasesBox = document.getElementById("show-cases");
-for (const c of ACTIVE_CASES) {
-  if (!isFinite(c.lat) || !isFinite(c.lon)) continue;
-  const m = L.marker([c.lat, c.lon], {icon: caseIcon});
+const showGenomesBox = document.getElementById("show-genomes");
+const showGenomesRow = document.getElementById("show-genomes-row");
+
+function genomeIcon(count) {
+  const minD = 10;
+  const maxD = 38;
+  const t = GENOME_MAX_COUNT > 1 ? (count - 1) / (GENOME_MAX_COUNT - 1) : 1;
+  const d = Math.round(minD + t * (maxD - minD));
+  return L.divIcon({
+    className: "",
+    html: "<div class='genome-icon' style='width:" + d + "px;height:" + d + "px;'></div>",
+    iconSize: [d, d],
+    iconAnchor: [d / 2, d / 2],
+  });
+}
+
+function syncMarkerToggles(from) {
+  if (from === "cases" && showCasesBox.checked) {
+    showGenomesBox.checked = false;
+    map.removeLayer(genomeLayer);
+    caseLayer.addTo(map);
+    return;
+  }
+  if (from === "genomes" && showGenomesBox.checked) {
+    showCasesBox.checked = false;
+    map.removeLayer(caseLayer);
+    genomeLayer.addTo(map);
+    return;
+  }
+  if (from === "cases") map.removeLayer(caseLayer);
+  if (from === "genomes") map.removeLayer(genomeLayer);
+}
+
+function caseMarkerTooltip(c) {
   const totalDeaths = (c.confirmed_deaths || 0) + (c.suspected_deaths || 0);
-  m.bindTooltip(
+  return (
     "<strong>" + (c.name || t("ui.case_tooltip.unnamed")) + "</strong><br/>" +
     t("ui.case_tooltip.confirmed") + ": " + c.confirmed + "  ·  " +
     t("ui.case_tooltip.suspected") + ": " + c.suspected +
-    (totalDeaths > 0 ? "<br/>" + t("ui.case_tooltip.deaths") + ": " + totalDeaths : ""),
-    {direction:"top", offset:[0,-8]}
+    (totalDeaths > 0 ? "<br/>" + t("ui.case_tooltip.deaths") + ": " + totalDeaths : "")
   );
+}
+
+function genomeMarkerTooltip(g) {
+  return (
+    "<strong>" + (g.name || t("ui.case_tooltip.unnamed")) + "</strong><br/>" +
+    t("ui.genome_tooltip").replace("{n}", g.count)
+  );
+}
+
+function refreshMarkerTooltips() {
+  caseLayer.eachLayer(function(m) {
+    if (m._bdbvCase) m.setTooltipContent(caseMarkerTooltip(m._bdbvCase));
+  });
+  genomeLayer.eachLayer(function(m) {
+    if (m._bdbvGenome) m.setTooltipContent(genomeMarkerTooltip(m._bdbvGenome));
+  });
+}
+
+for (const c of ACTIVE_CASES) {
+  if (!isFinite(c.lat) || !isFinite(c.lon)) continue;
+  const m = L.marker([c.lat, c.lon], {icon: caseIcon});
+  m._bdbvCase = c;
+  m.bindTooltip(caseMarkerTooltip(c), {direction:"top", offset:[0,-8]});
   caseLayer.addLayer(m);
 }
+
+for (const g of GENOME_SEQUENCES) {
+  if (!isFinite(g.lat) || !isFinite(g.lon)) continue;
+  const m = L.marker([g.lat, g.lon], {icon: genomeIcon(g.count)});
+  m._bdbvGenome = g;
+  m.bindTooltip(genomeMarkerTooltip(g), {direction:"top", offset:[0,-8]});
+  genomeLayer.addLayer(m);
+}
+
+if (!PAYLOAD.genome_markers_available || !GENOME_SEQUENCES.length) {
+  if (showGenomesRow) showGenomesRow.style.display = "none";
+} else if (showGenomesBox) {
+  showGenomesBox.addEventListener("change", function() {
+    syncMarkerToggles("genomes");
+  });
+}
+
 showCasesBox.addEventListener("change", function() {
-  if (showCasesBox.checked) caseLayer.addTo(map);
-  else map.removeLayer(caseLayer);
+  syncMarkerToggles("cases");
 });
 
 // --- Flowminder in/out flow arcs (toggle overlay) ---
