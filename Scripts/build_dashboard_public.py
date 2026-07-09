@@ -2879,17 +2879,27 @@ HTML_TEMPLATE = r"""<!doctype html>
   .onset-chart-wrap { width:100%; margin-top:4px; }
   .onset-chart-wrap svg { width:100%; max-width:100%; height:auto; display:block; }
 
-    /* Style du header du panneau title (identique aux autres) */
+    /* Style du header du panneau title */
   #title .panel-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    justify-content: center;
+    gap: 12px;
   }
 
-  /* Le bouton toggle utilise déjà les styles existants : */
-  /* .panel-toggle est déjà défini dans votre CSS */
-  .panel-toggle {
+  /* Le titre est centré */
+  #title .panel-header h1 {
+    margin: 0;
+    text-align: center;
+    flex: 1;
+    font-size: clamp(16px, 3.4vw, 22px);
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+
+  /* Le bouton toggle garde sa taille et ne pousse pas le titre */
+  #title .panel-toggle {
+    flex-shrink: 0;
     background: transparent;
     color: #ffd28a;
     border: 1px solid #555;
@@ -2900,15 +2910,14 @@ HTML_TEMPLATE = r"""<!doctype html>
     cursor: pointer;
     font-size: 14px;
     line-height: 1;
-    flex-shrink: 0;
   }
 
-  .panel-toggle:hover {
+  #title .panel-toggle:hover {
     background: #333;
     color: #ffae42;
   }
 
-  /* Cacher le contenu quand réduit (déjà dans votre CSS) */
+  /* Cacher le contenu quand réduit */
   .panel.collapsed .panel-body {
     display: none;
   }
@@ -2918,7 +2927,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     display: flex !important;
   }
 
-  /* Ajustement pour le titre en mode trends/context (déjà dans votre CSS) */
+  /* Ajustement pour le titre en mode trends/context */
   body.view-trends #title,
   body.view-context #title {
     padding: 8px 12px;
@@ -2936,7 +2945,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     font-size: 10px;
   }
 
-  /* Pour les petits écrans (déjà dans votre CSS) */
+  /* Pour les petits écrans */
   @media (max-width: 700px) {
     #title {
       min-width: unset;
@@ -2948,6 +2957,10 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
     #title .sub {
       font-size: 10px;
+    }
+    /* Ajuster le gap sur mobile */
+    #title .panel-header {
+      gap: 8px;
     }
   }
   
