@@ -206,3 +206,5 @@ ui:
     collapse_context_national: "Réduire / développer le contexte national et provincial"
     toggle_context_zone: "Afficher/masquer le contexte de la zone de santé"
     collapse_context_zone: "Réduire / développer le contexte de zone"
+    toggle_title: "Basculer le panneau titre"
+    collapse_title: "Réduire / Agrandir le panneau titre"
