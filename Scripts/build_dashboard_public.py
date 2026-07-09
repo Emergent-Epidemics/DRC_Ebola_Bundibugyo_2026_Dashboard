@@ -4883,6 +4883,29 @@ showCasesBox.addEventListener("change", function() {
   syncMarkerToggles("cases");
 });
 
+// --- deep-linking via URL params, e.g. ?genomes=1 or ?cases=1 ---
+(function applyMarkerUrlParams() {
+  const params = new URLSearchParams(window.location.search);
+  function isTruthy(v) {
+    return v !== null && !["0", "false", "no"].includes(v.toLowerCase());
+  }
+  const genomesParam = params.get("genomes");
+  if (
+    isTruthy(genomesParam) &&
+    PAYLOAD.genome_markers_available &&
+    GENOME_SEQUENCES.length &&
+    showGenomesBox
+  ) {
+    showGenomesBox.checked = true;
+    syncMarkerToggles("genomes");
+  }
+  const casesParam = params.get("cases");
+  if (isTruthy(casesParam) && showCasesBox) {
+    showCasesBox.checked = true;
+    syncMarkerToggles("cases");
+  }
+})();
+
 // --- Flowminder in/out flow arcs (toggle overlay) ---
 const showFlowArcsBox = document.getElementById("show-flow-arcs");
 const showFlowArcsRow = document.getElementById("show-flow-arcs-row");
