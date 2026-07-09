@@ -2878,6 +2878,79 @@ HTML_TEMPLATE = r"""<!doctype html>
   .context-pillar.pillar-epidemiological-protection-sexual-exploitation-abuse { border-left-color:#c39bd3; }
   .onset-chart-wrap { width:100%; margin-top:4px; }
   .onset-chart-wrap svg { width:100%; max-width:100%; height:auto; display:block; }
+
+    /* Style du header du panneau title (identique aux autres) */
+  #title .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  /* Le bouton toggle utilise déjà les styles existants : */
+  /* .panel-toggle est déjà défini dans votre CSS */
+  .panel-toggle {
+    background: transparent;
+    color: #ffd28a;
+    border: 1px solid #555;
+    border-radius: 4px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .panel-toggle:hover {
+    background: #333;
+    color: #ffae42;
+  }
+
+  /* Cacher le contenu quand réduit (déjà dans votre CSS) */
+  .panel.collapsed .panel-body {
+    display: none;
+  }
+
+  /* S'assurer que le header reste visible */
+  #title.collapsed .panel-header {
+    display: flex !important;
+  }
+
+  /* Ajustement pour le titre en mode trends/context (déjà dans votre CSS) */
+  body.view-trends #title,
+  body.view-context #title {
+    padding: 8px 12px;
+    min-width: min(420px, calc(100vw - 24px));
+  }
+
+  body.view-trends #title h1,
+  body.view-context #title h1 {
+    margin-bottom: 2px;
+    font-size: clamp(15px, 2.8vw, 20px);
+  }
+
+  body.view-trends #title .sub,
+  body.view-context #title .sub {
+    font-size: 10px;
+  }
+
+  /* Pour les petits écrans (déjà dans votre CSS) */
+  @media (max-width: 700px) {
+    #title {
+      min-width: unset;
+      max-width: calc(100vw - 24px);
+      padding: 6px 8px;
+    }
+    #title h1 {
+      margin-bottom: 2px;
+    }
+    #title .sub {
+      font-size: 10px;
+    }
+  }
+  
   @media (min-width: 1024px) {
     body.view-trends.trends-province-hovered #trends {
       width:min(720px, calc(100vw - 24px));
@@ -3170,21 +3243,31 @@ HTML_TEMPLATE = r"""<!doctype html>
 <div id="flow-empty-hint" data-i18n="ui.hints.flow_no_data">No movement data available for this health zone.</div>
 <div id="partners"></div>
 <div id="title" class="panel">
-  <h1 id="page-heading">DRC Ebola Bundibugyo 2026</h1>
-  <div id="lang-switcher" class="lang-switcher" role="group" aria-label="Language">
-    <div class="lang-toggle-track">
-      <span class="lang-toggle-thumb" aria-hidden="true"></span>
-      <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true">EN</button>
-      <button type="button" class="lang-btn" data-lang="fr" aria-pressed="false">FR</button>
+  <div class="panel-header">
+    <h1 id="page-heading" style="margin:0; font-size:clamp(16px, 3.4vw, 22px); font-weight:700; letter-spacing:0.3px;">DRC Ebola Bundibugyo 2026</h1>
+    <button class="panel-toggle" data-target="title" type="button" 
+            data-i18n-aria="ui.aria.toggle_title" 
+            data-i18n-title="ui.aria.collapse_title" 
+            aria-label="Toggle title panel" 
+            title="Collapse / expand title panel">−</button>
+  </div>
+  <div class="panel-body">
+    <div id="lang-switcher" class="lang-switcher" role="group" aria-label="Language">
+      <div class="lang-toggle-track">
+        <span class="lang-toggle-thumb" aria-hidden="true"></span>
+        <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true">EN</button>
+        <button type="button" class="lang-btn" data-lang="fr" aria-pressed="false">FR</button>
+      </div>
+    </div>
+    <div class="sub" id="title-sub"></div>
+    <div id="tracker"></div>
+    <div class="sub" id="imperial-model-estimates"></div>
+    <div style="margin-top:4px">
+      <button id="methods-btn" class="link-btn" type="button" data-i18n="ui.methods_btn">Contributors, Data, and Methods</button>
+      <button id="terms-btn"   class="link-btn" type="button" data-i18n="ui.terms_btn">Terms of Use</button>
     </div>
   </div>
-  <div class="sub" id="title-sub"></div>
-  <div id="tracker"></div>
-  <div class="sub" id="imperial-model-estimates"></div>
-  <div style="margin-top:4px">
-    <button id="methods-btn" class="link-btn" type="button" data-i18n="ui.methods_btn">Contributors, Data, and Methods</button>
-    <button id="terms-btn"   class="link-btn" type="button" data-i18n="ui.terms_btn">Terms of Use</button>
-  </div>
+</div>
 </div>
 <div id="methods-modal" class="modal" role="dialog" aria-label="Contributors, Data, and Methods" aria-modal="true">
   <div class="sheet">
