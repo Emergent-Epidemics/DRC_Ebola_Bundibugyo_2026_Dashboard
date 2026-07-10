@@ -2674,6 +2674,33 @@ HTML_TEMPLATE = r"""<!doctype html>
     max-width:100%;
     box-sizing:border-box;
   }
+  #zone-search-wrap { position:relative; margin-top:2px; }
+  #zone-search-input {
+    display:block; width:100%; max-width:100%; box-sizing:border-box;
+    background:#222; color:#eee; border:1px solid #444; padding:5px 8px;
+    border-radius:4px; font-size:12px;
+  }
+  #zone-search-input:focus {
+    outline:none; border-color:#9b7d4e; box-shadow:0 0 0 1px rgba(155,125,78,0.35);
+  }
+  #zone-search-results {
+    position:absolute; left:0; right:0; top:100%;
+    margin-top:2px; max-height:220px; overflow-y:auto;
+    background:#1a1a1a; border:1px solid #444; border-radius:4px;
+    box-shadow:0 4px 14px rgba(0,0,0,0.45); z-index:1100;
+  }
+  #zone-search-results[hidden] { display:none !important; }
+  .zone-search-option {
+    display:block; width:100%; text-align:left;
+    background:transparent; color:#eee; border:none; border-bottom:1px solid #2a2a2a;
+    padding:7px 8px; font-size:12px; cursor:pointer; border-radius:0;
+  }
+  .zone-search-option:last-child { border-bottom:none; }
+  .zone-search-option:hover,
+  .zone-search-option.active { background:#2a2a2a; color:#ffd28a; }
+  .zone-search-empty {
+    padding:8px; font-size:12px; color:#888; font-style:italic;
+  }
   #legend       { bottom:24px; left:12px; max-width:300px; }
   #info         { top:12px; right:12px; max-width:340px; max-height:80vh; overflow-y:auto; }
   #trends       {
@@ -3303,6 +3330,14 @@ HTML_TEMPLATE = r"""<!doctype html>
     <button class="panel-toggle" data-target="controls" type="button" data-i18n-aria="ui.aria.toggle_layer" data-i18n-title="ui.aria.collapse_layer" aria-label="Toggle layer controls" title="Collapse / expand layer controls">−</button>
   </div>
   <div class="panel-body">
+    <label for="zone-search-input" data-i18n="ui.zone_search">Search health zone</label>
+    <div id="zone-search-wrap">
+      <input type="search" id="zone-search-input" autocomplete="off" spellcheck="false"
+             data-i18n-placeholder="ui.zone_search_placeholder"
+             placeholder="Type a health zone name…"
+             aria-autocomplete="list" aria-controls="zone-search-results" aria-expanded="false" />
+      <div id="zone-search-results" role="listbox" hidden></div>
+    </div>
     <label for="layer-select" data-i18n="ui.source">Source</label>
     <select id="layer-select"></select>
     <label for="scale-select" data-i18n="ui.color_scale">Color scale</label>
@@ -3589,6 +3624,9 @@ function applyStaticI18n() {
   document.querySelectorAll("[data-i18n-title]").forEach(function(el) {
     el.setAttribute("title", t(el.getAttribute("data-i18n-title")));
   });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach(function(el) {
+    el.setAttribute("placeholder", t(el.getAttribute("data-i18n-placeholder")));
+  });
   document.querySelectorAll(".lang-btn").forEach(function(btn) {
     const on = btn.dataset.lang === currentLang;
     btn.classList.toggle("active", on);
@@ -3776,6 +3814,9 @@ function setLang(lang) {
   recompute();
   syncMatrixUi();
   refreshMarkerTooltips();
+  if (zoneSearchInput && zoneSearchResults && !zoneSearchResults.hidden) {
+    renderZoneSearchResults(zoneSearchInput.value);
+  }
   if (activeView === "trends") {
     updateTrendsDateLabel();
     renderTrendsPanel(trendsHoveredProvince);
@@ -4312,6 +4353,181 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
 map.on("click", function() {
   if (activeView === "context") clearContextSelection();
 });
+
+// --- health-zone search ---
+const ZONE_SEARCH_INDEX = (PAYLOAD.geometry.features || []).map(function(feat) {
+  const props = feat.properties || {};
+  const name = props.name || props.nom || "";
+  const nom = props.nom || "";
+  return {
+    nom: nom,
+    name: name,
+    label: name,
+    haystack: (name + " " + nom).toLowerCase(),
+  };
+}).filter(function(z) { return !!z.nom; })
+  .sort(function(a, b) {
+    return String(a.name).localeCompare(String(b.name), undefined, {sensitivity: "base"});
+  });
+
+const zoneSearchInput = document.getElementById("zone-search-input");
+const zoneSearchResults = document.getElementById("zone-search-results");
+const zoneSearchWrap = document.getElementById("zone-search-wrap");
+let zoneSearchMatches = [];
+let zoneSearchActiveIdx = -1;
+let searchHighlightLayer = null;
+let searchHighlightTimer = null;
+
+function findGeoLayerByNom(nom) {
+  let found = null;
+  geoLayer.eachLayer(function(layer) {
+    if (!found && layer.feature && layer.feature.properties && layer.feature.properties.nom === nom) {
+      found = layer;
+    }
+  });
+  return found;
+}
+
+function clearSearchHighlight() {
+  if (searchHighlightTimer) {
+    clearTimeout(searchHighlightTimer);
+    searchHighlightTimer = null;
+  }
+  if (searchHighlightLayer && searchHighlightLayer !== contextSelectedLayer) {
+    geoLayer.resetStyle(searchHighlightLayer);
+  }
+  searchHighlightLayer = null;
+}
+
+function closeZoneSearchResults() {
+  if (!zoneSearchResults) return;
+  zoneSearchResults.hidden = true;
+  zoneSearchResults.innerHTML = "";
+  zoneSearchMatches = [];
+  zoneSearchActiveIdx = -1;
+  if (zoneSearchInput) zoneSearchInput.setAttribute("aria-expanded", "false");
+}
+
+function renderZoneSearchResults(query) {
+  if (!zoneSearchResults) return;
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) {
+    closeZoneSearchResults();
+    return;
+  }
+  zoneSearchMatches = ZONE_SEARCH_INDEX.filter(function(z) {
+    return z.haystack.indexOf(q) !== -1;
+  }).slice(0, 12);
+  zoneSearchActiveIdx = zoneSearchMatches.length ? 0 : -1;
+  if (!zoneSearchMatches.length) {
+    zoneSearchResults.innerHTML =
+      "<div class='zone-search-empty' data-i18n-live='1'>" + t("ui.zone_search_no_matches") + "</div>";
+    zoneSearchResults.hidden = false;
+    if (zoneSearchInput) zoneSearchInput.setAttribute("aria-expanded", "true");
+    return;
+  }
+  zoneSearchResults.innerHTML = zoneSearchMatches.map(function(z, i) {
+    return (
+      "<button type='button' class='zone-search-option" + (i === 0 ? " active" : "") +
+      "' role='option' data-nom='" + escHtml(z.nom) + "'>" + escHtml(z.label) + "</button>"
+    );
+  }).join("");
+  zoneSearchResults.hidden = false;
+  if (zoneSearchInput) zoneSearchInput.setAttribute("aria-expanded", "true");
+}
+
+function setZoneSearchActive(idx) {
+  if (!zoneSearchMatches.length) return;
+  zoneSearchActiveIdx = Math.max(0, Math.min(idx, zoneSearchMatches.length - 1));
+  const opts = zoneSearchResults.querySelectorAll(".zone-search-option");
+  opts.forEach(function(el, i) {
+    el.classList.toggle("active", i === zoneSearchActiveIdx);
+  });
+  const active = opts[zoneSearchActiveIdx];
+  if (active && active.scrollIntoView) active.scrollIntoView({block: "nearest"});
+}
+
+function selectHealthZone(nom) {
+  const layer = findGeoLayerByNom(nom);
+  if (!layer || !layer.feature) return;
+  const feature = layer.feature;
+  const displayName = feature.properties.name || nom;
+
+  if (activeView === "context") {
+    selectContextZone(nom, layer);
+    map.fitBounds(layer.getBounds(), {padding: [40, 40], maxZoom: 10});
+  } else if (activeView === "map") {
+    clearSearchHighlight();
+    if (flowArcsOverlayActive()) {
+      setFlowHub(nom);
+    } else if (layerUsesMatrix(getLayer(layerSelect.value))) {
+      setMatrixOrigin(nom);
+    }
+    map.fitBounds(layer.getBounds(), {padding: [40, 40], maxZoom: 10});
+    layer.setStyle({weight: 1.6, color: "#ffae42"});
+    layer.bringToFront();
+    searchHighlightLayer = layer;
+    const infoBody = document.getElementById("info-body");
+    if (infoBody) {
+      infoBody.className = "";
+      infoBody.innerHTML = infoHTML(feature);
+    }
+    searchHighlightTimer = setTimeout(function() {
+      if (searchHighlightLayer === layer && layer !== contextSelectedLayer) {
+        geoLayer.resetStyle(layer);
+      }
+      searchHighlightLayer = null;
+      searchHighlightTimer = null;
+    }, 2500);
+  }
+
+  if (zoneSearchInput) zoneSearchInput.value = displayName;
+  closeZoneSearchResults();
+}
+
+if (zoneSearchWrap) {
+  L.DomEvent.disableClickPropagation(zoneSearchWrap);
+  L.DomEvent.disableScrollPropagation(zoneSearchWrap);
+}
+
+if (zoneSearchInput && zoneSearchResults) {
+  zoneSearchInput.addEventListener("input", function() {
+    renderZoneSearchResults(zoneSearchInput.value);
+  });
+  zoneSearchInput.addEventListener("focus", function() {
+    if (zoneSearchInput.value.trim()) renderZoneSearchResults(zoneSearchInput.value);
+  });
+  zoneSearchInput.addEventListener("keydown", function(e) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (zoneSearchResults.hidden) renderZoneSearchResults(zoneSearchInput.value);
+      setZoneSearchActive(zoneSearchActiveIdx + 1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setZoneSearchActive(zoneSearchActiveIdx - 1);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (zoneSearchActiveIdx >= 0 && zoneSearchMatches[zoneSearchActiveIdx]) {
+        selectHealthZone(zoneSearchMatches[zoneSearchActiveIdx].nom);
+      } else if (!zoneSearchResults.hidden && zoneSearchMatches[0]) {
+        selectHealthZone(zoneSearchMatches[0].nom);
+      }
+    } else if (e.key === "Escape") {
+      closeZoneSearchResults();
+      zoneSearchInput.blur();
+    }
+  });
+  zoneSearchResults.addEventListener("mousedown", function(e) {
+    const btn = e.target.closest(".zone-search-option");
+    if (!btn) return;
+    e.preventDefault();
+    selectHealthZone(btn.getAttribute("data-nom"));
+  });
+  document.addEventListener("click", function(e) {
+    if (!zoneSearchWrap) return;
+    if (!zoneSearchWrap.contains(e.target)) closeZoneSearchResults();
+  });
+}
 
 // --- province outlines (Trends view) ---
 function themeVar(name, fallback) {
