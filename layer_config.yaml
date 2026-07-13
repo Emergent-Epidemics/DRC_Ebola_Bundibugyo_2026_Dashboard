@@ -30,7 +30,7 @@ exclude:
 #   int  — round to nearest integer (default)
 #   0-6  — number of decimal places (e.g. 2 → "0.51")
 #
-# epicenter_highlight (optional): when true, Bunia / Mongbalu / Rwampara use a
+# epicenter_highlight (optional): when true, Bunia / Mongbwalu / Rwampara use a
 # fixed map colour and appear in the legend as "epicenter" (with zero / no data).
 groups:
   insp_sitrep:
@@ -51,7 +51,7 @@ groups:
     palette: reds
     scale: log
     legend_round: 1
-    # Highlight source zones (Bunia, Mongbalu, Rwampara) with a fixed map colour.
+    # Highlight source zones (Bunia, Mongbwalu, Rwampara) with a fixed map colour.
     epicenter_highlight: true
   worldpop:
     label: "Population"

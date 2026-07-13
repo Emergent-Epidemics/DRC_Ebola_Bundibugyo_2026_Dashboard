@@ -86,13 +86,15 @@ FLOWMINDER_PROCESSED = (
     if os.environ.get("FLOWMINDER_DIR")
     else (BUILD_DIR.parent / "Data" / "Flowminder" / "Processed")
 )
-GENOMIC_SEQUENCE_CSV = (
-    EXTERNAL_DATA / "genomic_surveillance" / "processed"
-    / "genomic_surveillance__sequence_count__static.csv"
-)
 FLOWMINDER_SHORT_TRIPS_PROCESSED = (
     EXTERNAL_DATA / "flowminder_short_trips" / "processed"
 )
+# NOTE: read directly from data/osrm/processed/, not build/long/. Matrices are
+# deliberately excluded from tools.build_geojson (see that script's docstring),
+# so build/long/osrm__*.csv is never regenerated and goes stale silently.
+OSRM_PROCESSED   = EXTERNAL_DATA / "osrm" / "processed"
+OSRM_TRAVEL_TIME_CSV = OSRM_PROCESSED / "osrm__travel_time__static.matrix.csv"
+OSRM_ROAD_DISTANCE_CSV = OSRM_PROCESSED / "osrm__road_distance__static.matrix.csv"
 DATA_REPO        = os.environ.get("DATA_REPO", "INRB-UMIE/BDBV2026-Data").strip()
 
 METADATA_CSV     = DATA_ROOT / "health_zone_metadata.csv"
@@ -120,8 +122,8 @@ SIMPLIFY_TOL = 0.001     # ~110 m at the equator; ~10× fewer vertices than raw
 COORD_DECIMALS = 5
 TRAVEL_FROM_ZONE = "Mongbwalu"
 # Canonical ``nom`` values for outbreak epicentres (Flowminder outflow sources).
-EPICENTER_ITURI_SINGLE = ("Bunia", "Mongbalu", "Rwampara")
-EPICENTER_ITURI_COHORT = ("Bunia", "Mongbalu", "Rwampara", "Nyakunde")
+EPICENTER_ITURI_SINGLE = ("Bunia", "Mongbwalu", "Rwampara")
+EPICENTER_ITURI_COHORT = ("Bunia", "Mongbwalu", "Rwampara", "Nyankunde")
 EPICENTER_NK_COHORT = ("Beni", "Butembo", "Katwa")
 EPICENTER_SOURCE_NOMS = EPICENTER_ITURI_SINGLE
 EPICENTER_FILL = "#7695E1"
@@ -145,28 +147,21 @@ _INSP_SITREP_PATH_RE = re.compile(
 )
 
 # Maps metadata CSV names → build GeoJSON nom values where they differ.
+# NOTE: the 2026-07 shapefile update renamed 13 zones to match what this
+# metadata CSV already called them (e.g. "Mongbwalu" was an alias for the old
+# canonical "Mongbalu"; the shapefile switch made "Mongbwalu" canonical), so
+# those entries were removed as redundant. The remaining entries are either
+# unrelated metadata-CSV spelling variants, or (Nsona-Pangu, Pendjua) updated
+# to point at the new canonical noms.
 _NAME_TO_NOM = {
-    "Banzow Moke": "Banjow Moke",
-    "Bogosenubea": "Bogosenubia",
-    "Busanga": "Bosanga",
-    "Citenge": "Tshitenge",
-    "Gety": "Gethy",
     "Gungu (Secteur)": "Gungu",
     "Idiofa (Secteur)": "Idiofa",
-    "Kabeya Kamwanga": "Kabeya Kamuanga",
     "Kabondo-Dianda": "Kabondo Dianda",
     "Kasongo-Lunda": "Kasongo Lunda",
-    "Kiambi": "Kiyambi",
-    "Kimbao": "Kimbau",
     "Lubunga": "Lubunga (Tshopo)",
-    "Malemba Nkulu": "Malemba",
-    "Mongbwalu": "Mongbalu",
-    "Nia Nia": "Nia-Nia",
-    "Nsona-Pangu": "Nsona-Mpangu",
-    "Nyankunde": "Nyakunde",
+    "Nsona-Pangu": "Nsona Mpangu",
     "Nyirangongo": "Nyiragongo",
-    "Pendjua": "Penjwa",
-    "Yalifafu": "Yalifafo",
+    "Pendjua": "Pendjwa",
 }
 _NOM_TO_NAME = {v: k for k, v in _NAME_TO_NOM.items()}
 
@@ -1393,13 +1388,11 @@ def _load_square_matrix_csv(
 
 def load_zone_matrices(zones: list[str]) -> dict:
     """Square zone matrices for client-side origin switching (rows = from, cols = to)."""
-    travel = _load_square_matrix_csv(
-        BUILD_LONG_DIR / "osrm__travel_time.csv", zones)
-    road = _load_square_matrix_csv(
-        BUILD_LONG_DIR / "osrm__road_distance.csv", zones)
+    travel = _load_square_matrix_csv(OSRM_TRAVEL_TIME_CSV, zones)
+    road = _load_square_matrix_csv(OSRM_ROAD_DISTANCE_CSV, zones)
     return {
         "zones": zones,
-        "default_origin": "Mongbalu",
+        "default_origin": "Mongbwalu",
         "datasets": {
             "osrm__travel_time": {"values": travel, "scale": 60},
             "osrm__road_distance": {"values": road, "scale": 1},
@@ -1475,7 +1468,7 @@ def load_flowminder_mar_sparse() -> dict:
         print(f"  WARNING: Flowminder matrices not found under {proc}")
         return {
             "zones": [],
-            "default_hub": "Mongbalu",
+            "default_hub": "Mongbwalu",
             "out_by_origin": {},
             "in_by_dest": {},
         }
@@ -1489,7 +1482,7 @@ def load_flowminder_mar_sparse() -> dict:
           f"{n_out} out-pairs, {n_in} in-pairs (from {proc.name}/)")
     return {
         "zones": zones,
-        "default_hub": "Mongbalu",
+        "default_hub": "Mongbwalu",
         "out_by_origin": out_by_origin,
         "in_by_dest": in_by_dest,
     }
@@ -1505,10 +1498,8 @@ def load_metadata(
     local_fields = _load_local_csv_fields()
 
     # OSRM matrices
-    travel_times = _extract_matrix_column(
-        BUILD_LONG_DIR / "osrm__travel_time.csv", "Mongbalu")
-    road_dists = _extract_matrix_column(
-        BUILD_LONG_DIR / "osrm__road_distance.csv", "Mongbalu")
+    travel_times = _extract_matrix_column(OSRM_TRAVEL_TIME_CSV, "Mongbwalu")
+    road_dists = _extract_matrix_column(OSRM_ROAD_DISTANCE_CSV, "Mongbwalu")
 
     # IDP and Flowminder matrices (row sums = incoming totals)
     idp_incoming = _extract_matrix_row_sums(
@@ -1554,6 +1545,15 @@ def load_metadata(
         rec["displaced_in_individuals_12mo"] = _i(idp_incoming.get(nom))
         rec["flowminder_in_mar2026"] = _i(flowminder_incoming.get(nom))
 
+        # Genomic surveillance (embedded per-zone in the build GeoJSON).
+        seq_count = _i(
+            props.get("genomic_surveillance", {})
+            .get("sequence_count", {})
+            .get("sequence_count")
+        )
+        if seq_count and seq_count > 0:
+            rec["genomic_sequence_count"] = seq_count
+
         zone_data[nom] = rec
 
     # HDX cohort subscriber-day vectors (not yet in build GeoJSON).
@@ -1588,17 +1588,6 @@ def load_metadata(
     for nom, rec in zone_data.items():
         local = local_fields.get(nom, {})
         rec["relative_risk"] = local.get("relative_risk")
-
-    if GENOMIC_SEQUENCE_CSV.exists():
-        df = pd.read_csv(GENOMIC_SEQUENCE_CSV)
-        if "nom" in df.columns and "sequence_count" in df.columns:
-            for _, row in df.iterrows():
-                raw_nom = str(row["nom"]).strip()
-                nom = _NAME_TO_NOM.get(raw_nom, raw_nom)
-                count = _i(row["sequence_count"])
-                if count and count > 0:
-                    zone_data.setdefault(nom, {"name": nom})
-                    zone_data[nom]["genomic_sequence_count"] = count
 
     # Case totals
     totals: dict = {}
@@ -1738,22 +1727,20 @@ def build_active_case_markers(zone_data: dict[str, dict],
 
 
 def build_genome_sequence_markers(
+    zone_data: dict[str, dict],
     centroids: dict[str, tuple[float, float]],
 ) -> list[dict]:
-    """One marker per zone with at least one genome sequence."""
-    if not GENOMIC_SEQUENCE_CSV.exists():
-        print(f"  WARNING: {GENOMIC_SEQUENCE_CSV} not found")
-        return []
-    df = pd.read_csv(GENOMIC_SEQUENCE_CSV)
-    if "nom" not in df.columns or "sequence_count" not in df.columns:
-        print(f"  WARNING: {GENOMIC_SEQUENCE_CSV.name} missing nom / sequence_count")
-        return []
+    """One marker per zone with at least one genome sequence.
+
+    Reads ``genomic_sequence_count`` from ``zone_data``, which load_metadata()
+    already populates from the build GeoJSON's embedded genomic_surveillance
+    properties (no separate CSV read needed)."""
     out: list[dict] = []
-    for _, row in df.iterrows():
-        raw_nom = str(row["nom"]).strip()
-        nom = _NAME_TO_NOM.get(raw_nom, raw_nom)
-        count = _i(row["sequence_count"])
-        if not count or count <= 0 or nom not in centroids:
+    for nom, rec in zone_data.items():
+        if nom not in centroids:
+            continue
+        count = rec.get("genomic_sequence_count")
+        if not count or count <= 0:
             continue
         lon, lat = centroids[nom]
         out.append({
@@ -2576,7 +2563,7 @@ def build_payload() -> dict:
           f"affected zones={totals.get('affected_zones', 0)}")
     active_case_markers = build_active_case_markers(zone_data, centroids_by_nom)
     print(f"  active-case markers: {len(active_case_markers)} zones")
-    genome_sequence_markers = build_genome_sequence_markers(centroids_by_nom)
+    genome_sequence_markers = build_genome_sequence_markers(zone_data, centroids_by_nom)
     print(f"  genome-sequence markers: {len(genome_sequence_markers)} zones")
 
     province_boundaries = build_province_boundaries()
@@ -2589,7 +2576,7 @@ def build_payload() -> dict:
     print(f"  asof: {asof}")
     data_build = load_data_build_info()
 
-    matrix_zones = _read_matrix_zone_order(BUILD_LONG_DIR / "osrm__travel_time.csv")
+    matrix_zones = _read_matrix_zone_order(OSRM_TRAVEL_TIME_CSV)
     if not matrix_zones:
         matrix_zones = sorted(zone_data.keys())
     matrices = load_zone_matrices(matrix_zones)
@@ -2602,12 +2589,12 @@ def build_payload() -> dict:
         "asof": asof,
         "travel_from": TRAVEL_FROM_ZONE,
         "matrices": matrices,
-        "matrix_default_origin": matrices.get("default_origin", "Mongbalu"),
+        "matrix_default_origin": matrices.get("default_origin", "Mongbwalu"),
         "flow_catalogs": flow_catalogs,
         "flow_arc_layer": flow_arc_layer,
         "flow_arcs_available": bool(flow_catalogs["flowminder_mar2026"].get("zones")),
         "flow_default_hub": flow_catalogs["flowminder_mar2026"].get(
-            "default_hub", "Mongbalu"),
+            "default_hub", "Mongbwalu"),
         "initial_view": initial_view,
         "insp_sitrep_url": latest_insp_url(),
         "data_build": data_build,
@@ -3431,10 +3418,10 @@ const MATRIX_INDEX = {};
 (function buildMatrixIndex() {
   (MATRICES.zones || []).forEach(function(nom, i) { MATRIX_INDEX[nom] = i; });
 })();
-let matrixOriginNom = PAYLOAD.matrix_default_origin || "Mongbalu";
+let matrixOriginNom = PAYLOAD.matrix_default_origin || "Mongbwalu";
 const FLOW_CATALOGS = PAYLOAD.flow_catalogs || {};
 const FLOW_ARC_LAYER = PAYLOAD.flow_arc_layer || null;
-let flowHubNom = PAYLOAD.flow_default_hub || "Mongbalu";
+let flowHubNom = PAYLOAD.flow_default_hub || "Mongbwalu";
 let flowHubUserSelected = !!(PAYLOAD.flow_arcs_available && FLOW_ARC_LAYER);
 let flowArcStats = null;
 let activeView = "map";
@@ -5213,6 +5200,12 @@ showCasesBox.checked = true;
 caseLayer.addTo(map);
 
 layerSelect.addEventListener("change", function() {
+  // OSRM layers (travel time / road distance) render from the origin zone's
+  // matrix row, which visually competes with the Flowminder in/out-flow arcs
+  // radiating from the same origin — turn the arcs off automatically.
+  if (layerUsesMatrix(getLayer(layerSelect.value)) && showFlowArcsBox && showFlowArcsBox.checked) {
+    showFlowArcsBox.checked = false;
+  }
   recompute();
   syncMatrixUi();
 });
