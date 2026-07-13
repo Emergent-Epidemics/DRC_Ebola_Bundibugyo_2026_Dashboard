@@ -15,7 +15,6 @@ exclude:
   - gdp_pc
   - epi_mve_inrb_app
   - aggregated_insp_linelist
-  - flowminder_short_trips
   - genomic_surveillance
   # - healthsites_io                  # entire group
   # - cross_border__poe_passengers__n_poes   # single leaf
