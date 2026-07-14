@@ -26,7 +26,8 @@ layer_labels:
   "cal::true": "Risque relatif"
   "disp::in": "Personnes déplacées internes (OIM)"
   "flow::in": "Personnes relocalisées entre fév. et mars 2026 (Flowminder)"
-  "flow::od_mar": "Flux Flowminder entrants et sortants (mars 2026)"
+  "flow::in_apr": "Personnes relocalisées entre mars 2026 et avril 2026 (Flowminder)"
+  "flow::od": "Flux Flowminder entrants et sortants (avril 2026)"
   "d::travel": "Temps de trajet depuis {origin} (heures)"
   "d::geo": "Distance routière depuis {origin} (km)"
   "fmst::20260430": "Pourcentage de personnes de l'épicentre Ituri* observées dans une nouvelle zone de santé au 30 avril"
@@ -52,6 +53,7 @@ layer_labels:
 
 layer_legend_captions:
   "flow::in": "Nombre de personnes relocalisées"
+  "flow::in_apr": "Nombre de personnes relocalisées"
   "fmst::20260430": "Personnes détectées dans de nouvelles zones de santé"
   "fmst::20260507": "Personnes détectées dans de nouvelles zones de santé"
   "fmst::20260514": "Personnes détectées dans de nouvelles zones de santé"
@@ -187,6 +189,7 @@ ui:
     incoming_mobility: "Mobilité entrante"
     displaced_12mo: "personnes déplacées internes (OIM)"
     flowminder_mar: "personnes relocalisées fév.–mars 2026 (Flowminder)"
+    flowminder_apr: "personnes relocalisées mars–avril 2026 (Flowminder)"
     flowminder_may: "épicentre Ituri* — nouvelles zones de santé (24 mai)"
     genomic_surveillance: "Surveillance génomique"
     genome_sequences: "séquences génomiques"

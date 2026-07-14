@@ -84,7 +84,7 @@ EXTERNAL_DATA    = BUILD_DIR.parent / "data"
 FLOWMINDER_PROCESSED = (
     Path(os.environ["FLOWMINDER_DIR"]).resolve()
     if os.environ.get("FLOWMINDER_DIR")
-    else (BUILD_DIR.parent / "Data" / "Flowminder" / "Processed")
+    else (BUILD_DIR.parent / "data" / "flowminder" / "processed")
 )
 FLOWMINDER_SHORT_TRIPS_PROCESSED = (
     EXTERNAL_DATA / "flowminder_short_trips" / "processed"
@@ -1401,10 +1401,11 @@ def load_zone_matrices(zones: list[str]) -> dict:
 
 
 def _flowminder_processed_dir() -> Path:
-    """Resolve Flowminder processed matrices (capitalised Data/ path or lowercase data/)."""
+    """Resolve Flowminder processed matrices (env override, data/, or legacy path)."""
     for candidate in (
         FLOWMINDER_PROCESSED,
         EXTERNAL_DATA / "flowminder" / "processed",
+        BUILD_DIR.parent / "Data" / "Flowminder" / "Processed",
     ):
         if candidate.is_dir():
             return candidate.resolve()
@@ -1458,19 +1459,100 @@ def _sparse_in_by_dest(
     return out
 
 
-def load_flowminder_mar_sparse() -> dict:
-    """Sparse March 2026 Flowminder in/out matrices for arc rendering."""
-    proc = _flowminder_processed_dir()
-    in_path = proc / "flowminder__inflow__static.matrix.csv"
-    out_path = proc / "flowminder__outflow__static.matrix.csv"
+_FLOWMINDER_DATED_MATRIX_RE = re.compile(
+    r"^flowminder__(inflow|outflow)_(\d{6})__static\.matrix\.csv$"
+)
+_MONTH_NAME_EN = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
+_MONTH_NAME_FR = (
+    "janvier", "février", "mars", "avril", "mai", "juin",
+    "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+)
+
+
+def _yyyymm_prev(yyyymm: str) -> tuple[int, int]:
+    year = int(yyyymm[:4])
+    month = int(yyyymm[4:6])
+    if month == 1:
+        return year - 1, 12
+    return year, month - 1
+
+
+def _format_month_en(year: int, month: int) -> str:
+    return f"{_MONTH_NAME_EN[month - 1]} {year}"
+
+
+def _format_month_fr(year: int, month: int) -> str:
+    return f"{_MONTH_NAME_FR[month - 1]} {year}"
+
+
+def _flowminder_period_labels(yyyymm: str) -> dict[str, str]:
+    """Human labels for a Flowminder ``_YYYYMM`` snapshot (window end month)."""
+    end_y, end_m = int(yyyymm[:4]), int(yyyymm[4:6])
+    start_y, start_m = _yyyymm_prev(yyyymm)
+    start_en = _format_month_en(start_y, start_m)
+    end_en = _format_month_en(end_y, end_m)
+    start_fr = _format_month_fr(start_y, start_m)
+    end_fr = _format_month_fr(end_y, end_m)
+    return {
+        "yyyymm": yyyymm,
+        "choropleth_en": (
+            f"Relocated persons between {start_en} and {end_en} (Flowminder)"
+        ),
+        "choropleth_fr": (
+            f"Personnes relocalisées entre {start_fr} et {end_fr} (Flowminder)"
+        ),
+        "info_en": f"relocated persons {start_en}–{end_en} (Flowminder)",
+        "info_fr": f"personnes relocalisées {start_fr}–{end_fr} (Flowminder)",
+        "arcs_en": f"Flowminder in- and out-flow ({end_en})",
+        "arcs_fr": f"Flux Flowminder entrants et sortants ({end_fr})",
+        "end_month_en": end_en,
+        "end_month_fr": end_fr,
+    }
+
+
+def discover_latest_flowminder_yyyymm(proc: Path | None = None) -> str | None:
+    """Return the latest ``YYYYMM`` that has both inflow and outflow matrices."""
+    directory = proc or _flowminder_processed_dir()
+    if not directory.is_dir():
+        return None
+    by_tag: dict[str, set[str]] = {}
+    for path in directory.iterdir():
+        m = _FLOWMINDER_DATED_MATRIX_RE.match(path.name)
+        if not m:
+            continue
+        direction, yyyymm = m.group(1), m.group(2)
+        by_tag.setdefault(yyyymm, set()).add(direction)
+    complete = [tag for tag, dirs in by_tag.items() if {"inflow", "outflow"} <= dirs]
+    return max(complete) if complete else None
+
+
+def flowminder_dated_matrix_paths(yyyymm: str, proc: Path | None = None) -> tuple[Path, Path]:
+    directory = proc or _flowminder_processed_dir()
+    return (
+        directory / f"flowminder__inflow_{yyyymm}__static.matrix.csv",
+        directory / f"flowminder__outflow_{yyyymm}__static.matrix.csv",
+    )
+
+
+def load_flowminder_sparse_from_paths(
+    in_path: Path,
+    out_path: Path,
+    *,
+    label: str = "flowminder",
+) -> dict:
+    """Sparse in/out catalogs for arc rendering from a pair of OD matrices."""
     zones = _read_matrix_zone_order(in_path) or _read_matrix_zone_order(out_path)
     if not zones:
-        print(f"  WARNING: Flowminder matrices not found under {proc}")
+        print(f"  WARNING: Flowminder matrices not found ({label})")
         return {
             "zones": [],
             "default_hub": "Mongbwalu",
             "out_by_origin": {},
             "in_by_dest": {},
+            "yyyymm": None,
         }
     in_matrix = _load_square_matrix_csv(in_path, zones)
     out_matrix = _load_square_matrix_csv(out_path, zones)
@@ -1478,14 +1560,49 @@ def load_flowminder_mar_sparse() -> dict:
     in_by_dest = _sparse_in_by_dest(in_matrix, zones)
     n_out = sum(len(v) for v in out_by_origin.values())
     n_in = sum(len(v) for v in in_by_dest.values())
-    print(f"  flowminder sparse: {len(zones)} zones, "
-          f"{n_out} out-pairs, {n_in} in-pairs (from {proc.name}/)")
+    print(
+        f"  flowminder sparse ({label}): {len(zones)} zones, "
+        f"{n_out} out-pairs, {n_in} in-pairs"
+    )
     return {
         "zones": zones,
         "default_hub": "Mongbwalu",
         "out_by_origin": out_by_origin,
         "in_by_dest": in_by_dest,
     }
+
+
+def load_flowminder_mar_sparse() -> dict:
+    """Sparse March 2026 Flowminder in/out matrices (undated ``__static`` pair)."""
+    proc = _flowminder_processed_dir()
+    return load_flowminder_sparse_from_paths(
+        proc / "flowminder__inflow__static.matrix.csv",
+        proc / "flowminder__outflow__static.matrix.csv",
+        label="mar2026/undated",
+    )
+
+
+def load_flowminder_latest_sparse() -> tuple[dict, str | None]:
+    """Load the newest ``_YYYYMM`` Flowminder inflow/outflow pair for flow arcs."""
+    proc = _flowminder_processed_dir()
+    yyyymm = discover_latest_flowminder_yyyymm(proc)
+    if not yyyymm:
+        print(f"  WARNING: no dated Flowminder matrices under {proc}")
+        return (
+            {
+                "zones": [],
+                "default_hub": "Mongbwalu",
+                "out_by_origin": {},
+                "in_by_dest": {},
+            },
+            None,
+        )
+    in_path, out_path = flowminder_dated_matrix_paths(yyyymm, proc)
+    catalog = load_flowminder_sparse_from_paths(
+        in_path, out_path, label=f"latest/{yyyymm}"
+    )
+    catalog["yyyymm"] = yyyymm
+    return catalog, yyyymm
 
 
 def load_metadata(
@@ -1504,8 +1621,13 @@ def load_metadata(
     # IDP and Flowminder matrices (row sums = incoming totals)
     idp_incoming = _extract_matrix_row_sums(
         EXTERNAL_DATA / "IDP" / "processed" / "idp__individuals__static.matrix.csv")
-    flowminder_incoming = _extract_matrix_row_sums(
-        EXTERNAL_DATA / "flowminder" / "processed" / "flowminder__inflow__static.matrix.csv")
+    flowminder_proc = _flowminder_processed_dir()
+    flowminder_incoming_mar = _extract_matrix_row_sums(
+        flowminder_proc / "flowminder__inflow__static.matrix.csv"
+    )
+    flowminder_incoming_202604 = _extract_matrix_row_sums(
+        flowminder_proc / "flowminder__inflow_202604__static.matrix.csv"
+    )
 
     zone_data: dict[str, dict] = {}
     for nom, props in build_props.items():
@@ -1543,7 +1665,8 @@ def load_metadata(
 
         # IDP / Flowminder
         rec["displaced_in_individuals_12mo"] = _i(idp_incoming.get(nom))
-        rec["flowminder_in_mar2026"] = _i(flowminder_incoming.get(nom))
+        rec["flowminder_in_mar2026"] = _i(flowminder_incoming_mar.get(nom))
+        rec["flowminder_in_202604"] = _i(flowminder_incoming_202604.get(nom))
 
         # Genomic surveillance (embedded per-zone in the build GeoJSON).
         seq_count = _i(
@@ -2295,15 +2418,15 @@ _FLOWMINDER_SHORT_TRIPS_LAYER_DEFS = [
 
 FLOW_ARC_LAYER_DEF = _make_layer_def(
     "Incoming Mobility",
-    "flow::od_mar",
-    "Flowminder in- and out-flow (March 2026)",
+    "flow::od",
+    "Flowminder in- and out-flow",
     "",
     "reds",
     "linear",
     "int",
     origin_highlight=True,
     viz="flow_arcs",
-    flow_catalog="flowminder_mar2026",
+    flow_catalog="flowminder_latest",
 )
 
 EXTRA_LAYER_DEFS = [
@@ -2325,6 +2448,16 @@ EXTRA_LAYER_DEFS = [
         "flow::in",
         "Relocated persons between Feb 2026 and Mar 2026 (Flowminder)",
         "flowminder_in_mar2026",
+        "reds", "log", "int",
+        epicenter_highlight=True,
+        epicenter_noms=list(EPICENTER_ITURI_SINGLE),
+        legend_caption="Number of relocated persons",
+    ),
+    _make_layer_def(
+        "Incoming Mobility",
+        "flow::in_apr",
+        "Relocated persons between March 2026 and April 2026 (Flowminder)",
+        "flowminder_in_202604",
         "reds", "log", "int",
         epicenter_highlight=True,
         epicenter_noms=list(EPICENTER_ITURI_SINGLE),
@@ -2582,8 +2715,18 @@ def build_payload() -> dict:
     matrices = load_zone_matrices(matrix_zones)
     print(f"  zone matrices: {len(matrix_zones)} zones, "
           f"{len(matrices['datasets'])} datasets")
-    flow_catalogs = {"flowminder_mar2026": load_flowminder_mar_sparse()}
+    flow_latest, flow_yyyymm = load_flowminder_latest_sparse()
+    flow_catalogs = {"flowminder_latest": flow_latest}
     flow_arc_layer = _extra_layer_from_def(FLOW_ARC_LAYER_DEF)
+    if flow_yyyymm:
+        period = _flowminder_period_labels(flow_yyyymm)
+        flow_arc_layer["label"] = period["arcs_en"]
+        flow_arc_layer["yyyymm"] = flow_yyyymm
+        # Keep EN/FR layer label maps in sync with whichever _YYYYMM is latest.
+        for lang, key in (("en", "arcs_en"), ("fr", "arcs_fr")):
+            locale = i18n["strings"].setdefault(lang, {})
+            labels = locale.setdefault("layer_labels", {})
+            labels["flow::od"] = period[key]
 
     return {
         "asof": asof,
@@ -2592,9 +2735,10 @@ def build_payload() -> dict:
         "matrix_default_origin": matrices.get("default_origin", "Mongbwalu"),
         "flow_catalogs": flow_catalogs,
         "flow_arc_layer": flow_arc_layer,
-        "flow_arcs_available": bool(flow_catalogs["flowminder_mar2026"].get("zones")),
-        "flow_default_hub": flow_catalogs["flowminder_mar2026"].get(
+        "flow_arcs_available": bool(flow_catalogs["flowminder_latest"].get("zones")),
+        "flow_default_hub": flow_catalogs["flowminder_latest"].get(
             "default_hub", "Mongbwalu"),
+        "flowminder_latest_yyyymm": flow_yyyymm,
         "initial_view": initial_view,
         "insp_sitrep_url": latest_insp_url(),
         "data_build": data_build,
@@ -4258,6 +4402,7 @@ function infoHTML(feature) {
   h += "<table>";
   h += "<tr><td>" + info.displaced_12mo + "</td><td>" + fmt(z.displaced_in_individuals_12mo) + "</td></tr>";
   h += "<tr><td>" + info.flowminder_mar + "</td><td>" + fmt(z.flowminder_in_mar2026) + "</td></tr>";
+  h += "<tr><td>" + info.flowminder_apr + "</td><td>" + fmt(z.flowminder_in_202604) + "</td></tr>";
   h += "<tr><td>" + info.flowminder_may + "</td><td>" + fmt(z.flowminder_short_trips__outflow_20260524__outflow_20260524, "cal") + "</td></tr>";
   h += "</table>";
 

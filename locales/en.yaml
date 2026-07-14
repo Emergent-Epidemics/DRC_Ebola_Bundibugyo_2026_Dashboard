@@ -26,7 +26,8 @@ layer_labels:
   "cal::true": "Relative risk"
   "disp::in": "Internally displaced persons (IOM)"
   "flow::in": "Relocated persons between Feb 2026 and Mar 2026 (Flowminder)"
-  "flow::od_mar": "Flowminder in- and out-flow (March 2026)"
+  "flow::in_apr": "Relocated persons between March 2026 and April 2026 (Flowminder)"
+  "flow::od": "Flowminder in- and out-flow (April 2026)"
   "d::travel": "Travel time from {origin} (hours)"
   "d::geo": "Road distance from {origin} (km)"
   "fmst::20260430": "Percentage of persons from Ituri epicentre* observed in new health zone by April 30"
@@ -52,6 +53,7 @@ layer_labels:
 
 layer_legend_captions:
   "flow::in": "Number of relocated persons"
+  "flow::in_apr": "Number of relocated persons"
   "fmst::20260430": "Persons detected in new health zones"
   "fmst::20260507": "Persons detected in new health zones"
   "fmst::20260514": "Persons detected in new health zones"
@@ -187,6 +189,7 @@ ui:
     incoming_mobility: "Incoming Mobility"
     displaced_12mo: "internally displaced persons (IOM)"
     flowminder_mar: "relocated persons Feb–Mar 2026 (Flowminder)"
+    flowminder_apr: "relocated persons Mar–Apr 2026 (Flowminder)"
     flowminder_may: "Ituri epicentre* — new health zones (May 24)"
     genomic_surveillance: "Genomic surveillance"
     genome_sequences: "genome sequences"
