@@ -2449,8 +2449,6 @@ EXTRA_LAYER_DEFS = [
         "Relocated persons between Feb 2026 and Mar 2026 (Flowminder)",
         "flowminder_in_mar2026",
         "reds", "log", "int",
-        epicenter_highlight=True,
-        epicenter_noms=list(EPICENTER_ITURI_SINGLE),
         legend_caption="Number of relocated persons",
     ),
     _make_layer_def(
@@ -2459,8 +2457,6 @@ EXTRA_LAYER_DEFS = [
         "Relocated persons between March 2026 and April 2026 (Flowminder)",
         "flowminder_in_202604",
         "reds", "log", "int",
-        epicenter_highlight=True,
-        epicenter_noms=list(EPICENTER_ITURI_SINGLE),
         legend_caption="Number of relocated persons",
     ),
     *EXTRA_LAYER_DEFS_TRAVEL,
