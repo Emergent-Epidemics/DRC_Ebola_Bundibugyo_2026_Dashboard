@@ -1,6 +1,19 @@
 # Build output/dashboard.html and sync index.html for GitHub Pages.
 # Triggered on dashboard pushes to main, via repository_dispatch from BDBV2026-Data or
-# BDBV2026-Linelist_Processing, or manually.
+# BDBV2026-Processed_Sensitive_Data, or manually.
+#
+# The "linelist" naming below (LINELIST_REF, linelist_repo_ref, the
+# linelist-updated dispatch type, client_payload.linelist_ref) is historical --
+# this used to source dashboard_plots/ from BDBV2026-Linelist_Processing. That
+# source has since moved to BDBV2026-Processed_Sensitive_Data (its
+# trigger-dashboard-rebuild.yml is what actually sends the linelist-updated
+# dispatch), but the field/type names are a contract with that sender, so
+# they're kept as-is here rather than renamed independently.
+#
+# MANUAL FOLLOW-UP NEEDED (not done by this change):
+#   EXTERNAL_REPO_TOKEN must grant Contents: Read on
+#   INRB-UMIE/BDBV2026-Processed_Sensitive_Data (not the old
+#   BDBV2026-Linelist_Processing) for the checkout step below to work.
 
 name: Build dashboard
 
@@ -18,7 +31,7 @@ on:
         required: false
         default: ""
       linelist_repo_ref:
-        description: "BDBV2026-Linelist_Processing git ref for dashboard_plots/. Default: main."
+        description: "BDBV2026-Processed_Sensitive_Data git ref for outputs/dashboard_plots. Default: main."
         required: false
         default: "main"
   repository_dispatch:
@@ -33,7 +46,8 @@ concurrency:
 
 env:
   DATA_REPO: INRB-UMIE/BDBV2026-Data
-  LINELIST_REPO: INRB-UMIE/BDBV2026-Linelist_Processing
+  # Historically BDBV2026-Linelist_Processing -- see header comment.
+  PROCESSED_DATA_REPO: INRB-UMIE/BDBV2026-Processed_Sensitive_Data
 
 jobs:
   build:
@@ -122,28 +136,41 @@ jobs:
           lfs: true
           path: BDBV2026-Data
 
-      - name: Checkout linelist repo
+      - name: Checkout processed data repo
         uses: actions/checkout@v4
         with:
-          repository: ${{ env.LINELIST_REPO }}
+          repository: ${{ env.PROCESSED_DATA_REPO }}
           ref: ${{ steps.refs.outputs.linelist_ref }}
-          path: BDBV2026-Linelist_Processing
+          path: BDBV2026-Processed_Sensitive_Data
           token: ${{ secrets.EXTERNAL_REPO_TOKEN }}
 
-      - name: Sync dashboard plots from linelist
+      - name: Sync dashboard plots from processed data
         run: |
           set -euo pipefail
-          src="${{ github.workspace }}/BDBV2026-Linelist_Processing/outputs/dashboard_plots"
+          src="${{ github.workspace }}/BDBV2026-Processed_Sensitive_Data/outputs"
           dest="${{ github.workspace }}/dashboard/Data/dashboard_plots"
           if [ ! -f "${src}/manifest.json" ]; then
-            echo "::warning::No dashboard_plots/manifest.json in linelist repo; trends plots may be unavailable."
+            echo "::warning::No outputs/manifest.json in processed data repo; trends plots may be unavailable."
             exit 0
           fi
           rm -rf "${dest}"
           mkdir -p "${dest}"
-          rsync -a --exclude='palette_options/' "${src}/" "${dest}/"
-          echo "Synced dashboard plots:"
-          ls -la "${dest}"
+          cp "${src}/manifest.json" "${dest}/manifest.json"
+          # manifest.json's "file" paths are relative to outputs/ (e.g.
+          # "2026-07-15/dashboard_plots/daily_onset_ituri.svg"), so only that
+          # run's date folder actually needs to land next to it here -- not
+          # all of outputs/, which also holds per-date CSVs and unrelated
+          # residence/alert report outputs.
+          date="$(jq -r '.date // empty' "${src}/manifest.json")"
+          if [ -z "${date}" ]; then
+            echo "::warning::manifest.json has no 'date' field; falling back to syncing all of outputs/."
+            rsync -a --exclude='manifest.json' "${src}/" "${dest}/"
+          else
+            mkdir -p "${dest}/${date}/dashboard_plots"
+            rsync -a --exclude='palette_options/' "${src}/${date}/dashboard_plots/" "${dest}/${date}/dashboard_plots/"
+          fi
+          echo "Synced dashboard plots (date: ${date:-all}):"
+          find "${dest}" -maxdepth 3
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -171,7 +198,7 @@ jobs:
           DATA_REF: ${{ steps.refs.outputs.data_ref }}
           LINELIST_REF: ${{ steps.refs.outputs.linelist_ref }}
           DATA_REPO: ${{ env.DATA_REPO }}
-          LINELIST_REPO: ${{ env.LINELIST_REPO }}
+          PROCESSED_DATA_REPO: ${{ env.PROCESSED_DATA_REPO }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -181,5 +208,5 @@ jobs:
             echo "No HTML changes to commit."
             exit 0
           fi
-          git commit -m "CI: rebuild dashboard from ${DATA_REPO}@${DATA_REF} and ${LINELIST_REPO}@${LINELIST_REF}"
+          git commit -m "CI: rebuild dashboard from ${DATA_REPO}@${DATA_REF} and ${PROCESSED_DATA_REPO}@${LINELIST_REF}"
           git push origin "HEAD:${{ steps.refs.outputs.dashboard_ref }}"
