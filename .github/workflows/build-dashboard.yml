@@ -31,7 +31,7 @@ on:
         required: false
         default: ""
       linelist_repo_ref:
-        description: "BDBV2026-Processed_Sensitive_Data git ref for outputs/dashboard_plots. Default: main."
+        description: "BDBV2026-Processed_Sensitive_Data git ref for outputs/*/dashboard_plots. Default: main."
         required: false
         default: "main"
   repository_dispatch:
