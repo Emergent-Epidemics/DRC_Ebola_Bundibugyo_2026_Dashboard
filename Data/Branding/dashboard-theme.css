@@ -189,11 +189,14 @@ h4 {
   border-color: var(--terracotta) !important;
 }
 
-/* ── View switcher + trends ─────────────────────────────── */
+/* ── View switcher (full-width bottom chrome) ─────────────── */
 #view-switcher {
   background: var(--card) !important;
-  border: 1px solid var(--border) !important;
-  box-shadow: 0 1px 3px rgba(30, 25, 18, 0.08) !important;
+  border-top: 1px solid var(--border) !important;
+  border-left: none !important;
+  border-right: none !important;
+  border-bottom: none !important;
+  box-shadow: 0 -1px 3px rgba(30, 25, 18, 0.08) !important;
 }
 .view-tab {
   background: var(--card) !important;
@@ -210,7 +213,12 @@ h4 {
   background: rgba(155, 125, 78, 0.12) !important;
 }
 
-#trends-hint,
+#view-switcher #partners {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: none !important;
+}
+
 #context-hint,
 #travel-hint,
 #flow-hint,
@@ -280,7 +288,7 @@ h4 {
 #partners {
   background: var(--card) !important;
   border: 1px solid var(--border) !important;
-  box-shadow: 0 1px 3px rgba(30, 25, 18, 0.08) !important;
+  box-shadow: none !important;
 }
 
 /* ── Active-case markers ──────────────────────────────────── */
@@ -314,3 +322,81 @@ h4 {
 .leaflet-container path:focus {
   outline: none;
 }
+
+/* ── Epidemiological trends panel / float ─────────────────── */
+#epi-trends-panel {
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  border-left-color: var(--border) !important;
+}
+#epi-trends-panel h2 { color: var(--ink) !important; }
+#epi-trends-panel .epi-controls label,
+#epi-trends-method { color: var(--muted) !important; }
+#epi-trends-method a {
+  color: var(--link) !important;
+}
+#epi-trends-method a:hover { color: var(--maroon) !important; }
+#epi-trends-subtitle { color: var(--muted) !important; }
+#epi-trends-downloads button {
+  background: var(--card) !important;
+  color: var(--terracotta) !important;
+  border-color: var(--border) !important;
+}
+#epi-trends-downloads button:hover {
+  background: rgba(155, 125, 78, 0.08) !important;
+  color: var(--maroon) !important;
+  border-color: var(--terracotta) !important;
+}
+#epi-trends-panel select,
+#epi-trends-panel button.epi-rank-btn {
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  border-color: var(--border) !important;
+}
+#epi-trends-panel button.epi-rank-btn { color: var(--terracotta) !important; }
+#epi-trends-panel button.epi-rank-btn:hover {
+  background: rgba(155, 125, 78, 0.08) !important;
+  color: var(--maroon) !important;
+  border-color: var(--terracotta) !important;
+}
+#epi-trends-panel button.epi-rank-btn.active {
+  background: rgba(155, 125, 78, 0.12) !important;
+  color: var(--maroon) !important;
+  border-color: var(--terracotta) !important;
+}
+#epi-trends-table-wrap { border-color: var(--border) !important; background: var(--card) !important; }
+#epi-trends-table { color: var(--ink) !important; }
+#epi-trends-table th,
+#epi-trends-table td { border-bottom-color: var(--border) !important; }
+#epi-trends-table th {
+  background: #faf9f7 !important;
+  color: var(--muted) !important;
+}
+#epi-trends-table tr:hover td { background: #f3f1ec !important; }
+#epi-trends-table tr.selected td {
+  background: rgba(155, 125, 78, 0.12) !important;
+  color: var(--maroon) !important;
+}
+#epi-float.panel {
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  border-color: var(--border) !important;
+}
+#epi-float strong { color: var(--ink) !important; }
+#epi-float td { color: var(--ink) !important; }
+#epi-float td:first-child { color: var(--muted) !important; }
+
+#epi-split-handle::before {
+  background: var(--grip) !important;
+}
+#epi-split-handle:hover::before,
+body.epi-splitting #epi-split-handle::before {
+  background: var(--terracotta) !important;
+}
+
+body.view-epi-trends #title {
+  left: calc((100% - var(--epi-panel-width)) / 2) !important;
+  transform: translateX(-50%) !important;
+  max-width: min(520px, calc(100% - var(--epi-panel-width) - 24px)) !important;
+}
+

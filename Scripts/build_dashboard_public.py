@@ -51,12 +51,14 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 import re
 import ssl
+import unicodedata
 import urllib.error
 import urllib.request
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -100,6 +102,7 @@ DATA_REPO        = os.environ.get("DATA_REPO", "INRB-UMIE/BDBV2026-Data").strip(
 METADATA_CSV     = DATA_ROOT / "health_zone_metadata.csv"
 IC_MODEL_CSV     = DATA_ROOT / "ic_model_estimates.csv"
 CAVEATS_CSV      = DATA_ROOT / "caveats.csv"
+INVASION_RISK_CSV = DATA_ROOT / "invasion_risk_model_estimates.csv"
 DASHBOARD_PLOTS_DIR = DATA_ROOT / "dashboard_plots"
 SIT_REPS_DIR     = DATA_ROOT / "Epidemiological Data"
 METHODS_DOCX     = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website.docx"
@@ -817,44 +820,428 @@ def load_ic_model_estimates(country: str = "DRC") -> dict:
     return out
 
 
-# Pre-built province plots for the Trends panel (from EBOV2026_Linelist_Processing).
-def load_dashboard_plots() -> dict | None:
-    """Load dashboard_plots/manifest.json and embed SVG content by province."""
-    manifest_path = DASHBOARD_PLOTS_DIR / "manifest.json"
-    if not manifest_path.exists():
-        print(f"  NOTE: {manifest_path} not found; trends plots unavailable")
+def _slugify_plot_key(text: str) -> str:
+    """Normalize labels for matching plot filenames (e.g. Kasaï → kasai)."""
+    text = unicodedata.normalize("NFKD", str(text or ""))
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")
+
+
+def _read_plot_svg(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    svg = path.read_text(encoding="utf-8").strip()
+    if svg.startswith("<?xml"):
+        svg = svg.split("?>", 1)[-1].strip()
+    return svg or None
+
+
+def _svg_plot_title(svg: str, fallback: str) -> str:
+    match = re.search(
+        r">\s*(Daily Cases by Symptom Onset[^<]*?)\s*<",
+        svg,
+        flags=re.I,
+    )
+    if match:
+        return re.sub(r"\s+", " ", match.group(1)).strip()
+    match = re.search(
+        r">\s*(5-day Rolling Test Positivity[^<]*?)\s*<",
+        svg,
+        flags=re.I,
+    )
+    if match:
+        return re.sub(r"\s+", " ", match.group(1)).strip()
+    return fallback
+
+
+def _load_lab_name_map() -> dict[str, str]:
+    """Map lab plot keys / codes to display labels."""
+    path = DASHBOARD_PLOTS_DIR / "lab_name_map.csv"
+    out: dict[str, str] = {}
+    if not path.exists():
+        return out
+    try:
+        df = pd.read_csv(path)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  WARNING: could not read {path.name}: {exc}")
+        return out
+    if df.shape[1] < 2:
+        return out
+    key_col, val_col = df.columns[0], df.columns[1]
+    for _, row in df.iterrows():
+        key = str(row.get(key_col) or "").strip()
+        val = str(row.get(val_col) or "").strip()
+        if not key or not val:
+            continue
+        out[_slugify_plot_key(key)] = val
+        out[_slugify_plot_key(key.replace(" ", ""))] = val
+        out[key.upper()] = val
+    return out
+
+
+def _lab_label_from_stem(stem: str, name_map: dict[str, str]) -> str:
+    raw = stem[4:] if stem.lower().startswith("lab_") else stem
+    slug = _slugify_plot_key(raw)
+    if slug in name_map:
+        return name_map[slug]
+    compact = slug.replace("-", "")
+    if compact in name_map:
+        return name_map[compact]
+    upper = raw.upper().replace("_", "-")
+    if upper in name_map:
+        return name_map[upper]
+    # Fall back to the plot-name token (e.g. inrbk → INRBK).
+    return re.sub(r"[-_]+", "-", raw).upper()
+
+
+# Pre-built onset / lab plots for the Epidemiological trends panel.
+def load_dashboard_plots(
+    zone_noms: list[str] | None = None,
+    provinces: list[str] | None = None,
+) -> dict | None:
+    """Load national, province, health-zone, and lab SVG plots.
+
+    Supports the Processed_Sensitive_Data layout::
+
+        dashboard_plots/
+          daily_onset_<province>.svg
+          national/daily_onset_national.svg
+          healthzone/daily_onset_<zone>.svg
+          lab/lab_<code>.svg
+          lab_name_map.csv   (optional)
+          manifest.json      (optional; series metadata)
+    """
+    if not DASHBOARD_PLOTS_DIR.exists():
+        print(f"  NOTE: {DASHBOARD_PLOTS_DIR} not found; trends plots unavailable")
         return None
 
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    plots: dict[str, dict] = {}
+    manifest: dict = {}
+    manifest_path = DASHBOARD_PLOTS_DIR / "manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            print(f"  WARNING: invalid {manifest_path.name}: {exc}")
+
+    zone_noms = list(zone_noms or [])
+    provinces = list(provinces or [])
+    nom_by_slug = {_slugify_plot_key(n): n for n in zone_noms if n}
+    province_by_slug = {_slugify_plot_key(p): p for p in provinces if p}
+
+    national = None
+    national_path = DASHBOARD_PLOTS_DIR / "national" / "daily_onset_national.svg"
+    if not national_path.exists():
+        national_path = DASHBOARD_PLOTS_DIR / "daily_onset_national.svg"
+    nat_svg = _read_plot_svg(national_path)
+    if nat_svg:
+        national = {
+            "id": "national",
+            "label": "National",
+            "file": str(national_path.relative_to(DASHBOARD_PLOTS_DIR)),
+            "title": _svg_plot_title(nat_svg, "Daily Cases by Symptom Onset - National"),
+            "caption": "",
+            "svg": nat_svg,
+        }
+
+    province_plots: dict[str, dict] = {}
+    for svg_path in sorted(DASHBOARD_PLOTS_DIR.glob("daily_onset_*.svg")):
+        stem = svg_path.stem  # daily_onset_ituri
+        slug = stem.removeprefix("daily_onset_")
+        if slug == "national":
+            continue
+        svg = _read_plot_svg(svg_path)
+        if not svg:
+            continue
+        label = province_by_slug.get(slug) or slug.replace("-", " ").title()
+        province_plots[label] = {
+            "id": label,
+            "label": label,
+            "slug": slug,
+            "file": svg_path.name,
+            "title": _svg_plot_title(svg, f"Daily Cases by Symptom Onset - {label}"),
+            "caption": "",
+            "svg": svg,
+        }
+
+    # Legacy manifest province entries (fill gaps only).
     for province, meta in (manifest.get("plots") or {}).items():
-        if not isinstance(meta, dict):
+        if not isinstance(meta, dict) or province in province_plots:
             continue
         filename = meta.get("file")
         if not filename:
             continue
         svg_path = DASHBOARD_PLOTS_DIR / filename
-        if not svg_path.exists():
-            print(f"  WARNING: missing plot SVG for {province!r}: {svg_path.name}")
+        svg = _read_plot_svg(svg_path)
+        if not svg:
             continue
-        svg = svg_path.read_text(encoding="utf-8").strip()
-        if svg.startswith("<?xml"):
-            svg = svg.split("?>", 1)[-1].strip()
-        plots[province] = {
+        province_plots[province] = {
+            "id": province,
+            "label": province,
+            "slug": _slugify_plot_key(province),
             "file": filename,
             "title": meta.get("title") or f"Daily onset — {province}",
             "caption": meta.get("caption") or "",
             "svg": svg,
         }
 
-    if not plots:
-        print(f"  WARNING: {manifest_path.name} listed no loadable plots")
+    hz_plots: dict[str, dict] = {}
+    hz_dir = DASHBOARD_PLOTS_DIR / "healthzone"
+    if hz_dir.exists():
+        for svg_path in sorted(hz_dir.glob("daily_onset_*.svg")):
+            slug = svg_path.stem.removeprefix("daily_onset_")
+            svg = _read_plot_svg(svg_path)
+            if not svg:
+                continue
+            nom = nom_by_slug.get(slug) or slug.replace("-", " ").title()
+            hz_plots[nom] = {
+                "id": nom,
+                "label": nom,
+                "slug": slug,
+                "file": f"healthzone/{svg_path.name}",
+                "title": _svg_plot_title(svg, f"Daily Cases by Symptom Onset - {nom}"),
+                "caption": "",
+                "svg": svg,
+            }
+
+    lab_name_map = _load_lab_name_map()
+    labs: list[dict] = []
+    lab_dir = DASHBOARD_PLOTS_DIR / "lab"
+    if lab_dir.exists():
+        for svg_path in sorted(lab_dir.glob("lab_*.svg")):
+            svg = _read_plot_svg(svg_path)
+            if not svg:
+                continue
+            lab_id = svg_path.stem  # lab_inrbk
+            label = _lab_label_from_stem(lab_id, lab_name_map)
+            labs.append({
+                "id": lab_id,
+                "label": label,
+                "slug": _slugify_plot_key(lab_id.removeprefix("lab_")),
+                "file": f"lab/{svg_path.name}",
+                "title": _svg_plot_title(svg, f"Lab positivity — {label}"),
+                "caption": "",
+                "svg": svg,
+            })
+        labs.sort(key=lambda x: str(x["label"]).lower())
+
+    if not national and not province_plots and not hz_plots and not labs:
+        print(f"  WARNING: no loadable plots under {DASHBOARD_PLOTS_DIR.name}/")
         return None
 
-    print(f"  dashboard plots: {len(plots)} province(s) from {DASHBOARD_PLOTS_DIR.name}/")
+    print(
+        "  dashboard plots: "
+        + f"national={'yes' if national else 'no'}"
+        + f", {len(province_plots)} province(s)"
+        + f", {len(hz_plots)} health zone(s)"
+        + f", {len(labs)} lab(s)"
+        + f" from {DASHBOARD_PLOTS_DIR.name}/"
+    )
     return {
         "series": manifest.get("series") or [],
-        "plots": plots,
+        "incomplete_styling": manifest.get("incomplete_styling") or {},
+        "national": national,
+        "provinces": province_plots,
+        # Backward-compatible alias used by older panel code.
+        "plots": province_plots,
+        "health_zones": hz_plots,
+        "labs": labs,
+    }
+
+
+def _parse_optional_float(value) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+            return None
+        return float(value)
+    text = str(value).strip()
+    if not text or text.upper() in {"NA", "NAN", "NULL", "NONE", "."}:
+        return None
+    try:
+        out = float(text)
+    except ValueError:
+        return None
+    if math.isnan(out) or math.isinf(out):
+        return None
+    return out
+
+
+def _parse_optional_int(value) -> int | None:
+    num = _parse_optional_float(value)
+    if num is None:
+        return None
+    return int(round(num))
+
+
+def _parse_boolish(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().upper()
+    return text in {"TRUE", "T", "1", "YES", "Y"}
+
+
+def _parse_flexible_date(value):
+    """Parse cutoff dates from CSV (DD/MM/YYYY, YYYY-MM-DD, etc.)."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return None
+    if hasattr(value, "date") and callable(getattr(value, "date", None)):
+        try:
+            return value.date() if hasattr(value, "hour") else value
+        except Exception:
+            pass
+    text = str(value).strip()
+    if not text or text.upper() in {"NA", "NAN", "NULL", "NONE", "."}:
+        return None
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%m/%d/%Y", "%d %b %Y", "%d %B %Y"):
+        try:
+            return datetime.strptime(text[:32], fmt).date()
+        except ValueError:
+            continue
+    try:
+        parsed = pd.to_datetime(text, dayfirst=True, errors="coerce")
+        if pd.notna(parsed):
+            return parsed.date()
+    except Exception:
+        pass
+    return None
+
+
+def load_invasion_risk_estimates() -> dict | None:
+    """Load Bayesian invasion-risk scores for the Epidemiological trends tab.
+
+    Prefers ``horizon == 1`` (next forecast window). Zone names are expected to
+    match GeoJSON ``nom`` values.
+    """
+    if not INVASION_RISK_CSV.exists():
+        print(
+            f"  NOTE: {INVASION_RISK_CSV.name} not found; "
+            "Epidemiological trends tab unavailable"
+        )
+        return None
+
+    df = pd.read_csv(INVASION_RISK_CSV)
+    if df.empty:
+        print(f"  WARNING: {INVASION_RISK_CSV.name} is empty")
+        return None
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    if "health_zone" not in df.columns:
+        print(f"  WARNING: {INVASION_RISK_CSV.name} missing health_zone column")
+        return None
+
+    # Keep a full-file snapshot for CSV download (all horizons / columns).
+    download_csv = df.to_csv(index=False)
+
+    horizon_used = None
+    if "horizon" in df.columns:
+        as_str = df["horizon"].astype(str).str.strip()
+        for candidate in ("1", "2"):
+            subset = df[as_str == candidate]
+            if not subset.empty:
+                df = subset
+                horizon_used = int(candidate)
+                break
+
+    cutoff_dates = []
+    if "cutoff_date" in df.columns:
+        for raw in df["cutoff_date"].tolist():
+            parsed = _parse_flexible_date(raw)
+            if parsed is not None:
+                cutoff_dates.append(parsed)
+    cutoff_date = max(cutoff_dates) if cutoff_dates else None
+
+    horizon_windows = []
+    window_col = next(
+        (c for c in ("forecasting_window", "horizon_window") if c in df.columns),
+        None,
+    )
+    if window_col is not None:
+        for raw in df[window_col].tolist():
+            hw = _parse_optional_float(raw)
+            if hw is not None:
+                horizon_windows.append(hw)
+    elif horizon_used is not None:
+        horizon_windows.append(float(horizon_used))
+    horizon_window = None
+    if horizon_windows:
+        # Prefer the modal / first unique value for the filtered horizon slice.
+        uniq = sorted({int(round(x)) for x in horizon_windows})
+        horizon_window = uniq[0]
+
+    forecast_end_date = None
+    if cutoff_date is not None and horizon_window is not None:
+        forecast_end_date = cutoff_date + timedelta(weeks=int(horizon_window))
+
+    zones: dict[str, dict] = {}
+    for _, row in df.iterrows():
+        nom = str(row.get("health_zone") or "").strip()
+        if not nom:
+            continue
+        zones[nom] = {
+            "health_zone": nom,
+            "province": str(row.get("province") or "").strip(),
+            "was_active_before": _parse_boolish(row.get("was_active_before")),
+            "p_case_invasion": _parse_optional_float(row.get("p_case_invasion")),
+            "p_case_lo": _parse_optional_float(row.get("p_case_lo")),
+            "p_case_hi": _parse_optional_float(
+                row["p_case_hi"] if "p_case_hi" in df.columns else row.get("p_case_high")
+            ),
+            "rr_nat": _parse_optional_float(row.get("rr_nat")),
+            "rr_nat_rank": _parse_optional_int(row.get("rr_nat_rank")),
+            "rr_ituri": _parse_optional_float(row.get("rr_ituri")),
+            "rr_ituri_rank": _parse_optional_int(row.get("rr_ituri_rank")),
+            "rr_nordkivu": _parse_optional_float(row.get("rr_nordkivu")),
+            "rr_nordkivu_rank": _parse_optional_int(row.get("rr_nordkivu_rank")),
+            "rr_hautuele": _parse_optional_float(row.get("rr_hautuele")),
+            "rr_hautuele_rank": _parse_optional_int(row.get("rr_hautuele_rank")),
+            "priority": _parse_optional_float(row.get("priority")),
+            "priority_rank": _parse_optional_int(row.get("priority_rank")),
+            "surveillance_gap": _parse_optional_float(row.get("surveillance_gap")),
+            "access_gap": _parse_optional_float(row.get("access_gap")),
+            "social_vulnerability": _parse_optional_float(
+                row.get("social_vulnerability")
+            ),
+            "method": str(row.get("method") or "").strip(),
+        }
+
+    methods = sorted({z["method"] for z in zones.values() if z.get("method")})
+    method_note = methods[0] if len(methods) == 1 else "; ".join(methods)
+    print(
+        f"  invasion risk: {len(zones)} zones"
+        + (f" (horizon={horizon_used})" if horizon_used is not None else "")
+        + (f", cutoff={cutoff_date.isoformat()}" if cutoff_date else "")
+        + (f", horizon_window={horizon_window}w" if horizon_window is not None else "")
+        + (f", method={method_note!r}" if method_note else "")
+    )
+    return {
+        "horizon": horizon_used,
+        "horizon_window": horizon_window,
+        "forecasting_window": horizon_window,
+        "cutoff_date": cutoff_date.isoformat() if cutoff_date else None,
+        "forecast_end_date": (
+            forecast_end_date.isoformat() if forecast_end_date else None
+        ),
+        "method": method_note,
+        "method_label": "Mobility-epidemiological model of risk",
+        "method_url": (
+            "https://www.epidemiological.org/t/"
+            "real-time-spatiotemporal-risk-modelling-of-the-bundibugyo-ebola-virus-outbreak-2026/16"
+        ),
+        "download_csv": download_csv,
+        "p_case_invasion_label": (
+            "Probability of invasion (defined as the probability of observing "
+            "one new case within the next forecast window)"
+        ),
+        "scopes": [
+            {"id": "national", "label": "National", "rr": "rr_nat", "rank": "rr_nat_rank", "province": None},
+            {"id": "ituri", "label": "Ituri", "rr": "rr_ituri", "rank": "rr_ituri_rank", "province": "Ituri"},
+            {"id": "nordkivu", "label": "Nord-Kivu", "rr": "rr_nordkivu", "rank": "rr_nordkivu_rank", "province": "Nord-Kivu"},
+            {"id": "hautuele", "label": "Haut-Uele", "rr": "rr_hautuele", "rank": "rr_hautuele_rank", "province": "Haut-Uele"},
+        ],
+        "zones": zones,
     }
 
 
@@ -1823,17 +2210,18 @@ def compute_global_sitrep_totals() -> dict | None:
 def build_active_case_markers(zone_data: dict[str, dict],
                               centroids: dict[str, tuple[float, float]]
                               ) -> list[dict]:
-    """One marker per zone with one or more observed cases, placed at the
-    real centroid for that zone."""
+    """One marker per zone with ≥1 confirmed case (from GeoJSON-derived fields).
+
+    Suspected-only zones are excluded — markers track confirmed burden only.
+    """
     out: list[dict] = []
     for nom, rec in zone_data.items():
         if nom not in centroids:
             continue
-        susp = int(rec.get("suspected_cases") or 0)
         conf = int(rec.get("confirmed_cases") or 0)
-        total = susp + conf
-        if total <= 0:
+        if conf <= 0:
             continue
+        susp = int(rec.get("suspected_cases") or 0)
         lon, lat = centroids[nom]
         out.append({
             "nom": nom,
@@ -1844,7 +2232,7 @@ def build_active_case_markers(zone_data: dict[str, dict],
             "suspected": susp,
             "confirmed_deaths": int(rec.get("confirmed_deaths") or 0),
             "suspected_deaths": int(rec.get("suspected_deaths") or 0),
-            "total": total,
+            "total": conf + susp,
         })
     return out
 
@@ -2691,14 +3079,25 @@ def build_payload() -> dict:
           f"suspected={totals.get('suspected_cases', 0)}, "
           f"affected zones={totals.get('affected_zones', 0)}")
     active_case_markers = build_active_case_markers(zone_data, centroids_by_nom)
-    print(f"  active-case markers: {len(active_case_markers)} zones")
+    print(f"  active-case markers: {len(active_case_markers)} zones "
+          f"(confirmed ≥ 1 from GeoJSON)")
     genome_sequence_markers = build_genome_sequence_markers(zone_data, centroids_by_nom)
     print(f"  genome-sequence markers: {len(genome_sequence_markers)} zones")
 
     province_boundaries = build_province_boundaries()
     print(f"  province boundaries: {len(province_boundaries['features'])} provinces")
 
-    onset_trends = load_dashboard_plots()
+    zone_noms = sorted(zone_data.keys())
+    province_names = sorted({
+        str((feat.get("properties") or {}).get("province") or "").strip()
+        for feat in (province_boundaries.get("features") or [])
+        if (feat.get("properties") or {}).get("province")
+    })
+    onset_trends = load_dashboard_plots(
+        zone_noms=zone_noms,
+        provinces=province_names,
+    )
+    invasion_risk = load_invasion_risk_estimates()
     confirmed_timeseries = load_confirmed_cases_timeseries(set(zone_data.keys()))
 
     asof = detect_asof()
@@ -2761,6 +3160,7 @@ def build_payload() -> dict:
         "genome_markers_available": bool(genome_sequence_markers),
         "province_boundaries": province_boundaries,
         "onset_trends": onset_trends,
+        "invasion_risk": invasion_risk,
         "phr_context": phr_context_by_lang.get("en", {"national": [], "by_nom": {}}),
         "phr_context_by_lang": phr_context_by_lang,
         "confirmed_timeseries": confirmed_timeseries,
@@ -2780,7 +3180,11 @@ HTML_TEMPLATE = r"""<!doctype html>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   html, body { margin:0; padding:0; height:100%; font-family: -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif; background:#111; color:#eee; }
-  #map { position:absolute; top:0; right:0; bottom:0; left:0; }
+  :root {
+    --view-chrome-height: 52px;
+    --epi-panel-width: 50%;
+  }
+  #map { position:absolute; top:0; right:0; bottom:var(--view-chrome-height); left:0; }
   .panel {
     position:absolute; z-index:1000;
     background:rgba(20,20,20,0.92); color:#f4f4f4;
@@ -2828,24 +3232,274 @@ HTML_TEMPLATE = r"""<!doctype html>
   .zone-search-empty {
     padding:8px; font-size:12px; color:#888; font-style:italic;
   }
-  #legend       { bottom:24px; left:12px; max-width:300px; }
+  #legend       { bottom:calc(var(--view-chrome-height) + 12px); left:12px; max-width:300px; }
   #info         { top:12px; right:12px; max-width:340px; max-height:80vh; overflow-y:auto; }
-  #trends       {
+  #trends {
+    display:none;
     top:auto; right:8px;
-    bottom:calc(12px + clamp(28px, 5vmin, 48px) + 10px);
+    bottom:calc(var(--view-chrome-height) + 12px);
+    /* Match the former province-selected panel size for every scope. */
     width:min(480px, calc(100vw - 16px));
     max-width:min(480px, calc(100vw - 16px));
     max-height:min(78vh, calc(100vh - 200px));
-    overflow-y:auto; display:none;
+    overflow-y:auto;
     box-sizing:border-box;
+  }
+  @media (min-width: 1024px) {
+    #trends {
+      width:min(720px, calc(100vw - 24px));
+      max-width:min(720px, calc(100vw - 24px));
+    }
+  }
+  @media (min-width: 1400px) {
+    #trends {
+      width:min(760px, calc(100vw - 24px));
+      max-width:min(760px, calc(100vw - 24px));
+    }
+  }
+  #trends-controls {
+    display:none;
+    top:12px; right:12px;
+    width:min(320px, calc(100vw - 24px));
+    max-width:min(320px, calc(100vw - 24px));
+    max-height:80vh;
+    overflow-y:auto;
   }
   body.view-trends #controls,
   body.view-trends #legend,
   body.view-trends #info { display:none !important; }
   body.view-trends #trends { display:block; }
+  body.view-trends #trends-controls { display:block; }
+  body.view-epi-trends #controls,
+  body.view-epi-trends #legend,
+  body.view-epi-trends #info,
+  body.view-epi-trends #trends,
+  body.view-epi-trends #trends-controls,
+  body.view-epi-trends #trends-legend,
+  body.view-epi-trends #context,
+  body.view-epi-trends #context-national { display:none !important; }
+  body.view-epi-trends #map {
+    right: var(--epi-panel-width);
+  }
+  /* Keep title centred in the map half. */
+  body.view-epi-trends #title {
+    left: calc((100% - var(--epi-panel-width)) / 2);
+    transform: translateX(-50%);
+    min-width: unset;
+    max-width: min(520px, calc(100% - var(--epi-panel-width) - 24px));
+    width: max-content;
+  }
+  #epi-trends-panel {
+    display:none;
+    position:absolute; z-index:1000;
+    top:0; right:0; bottom:var(--view-chrome-height);
+    width:var(--epi-panel-width);
+    background:#ffffff; color:#2a2a27;
+    border-left:1px solid #e7e3db;
+    box-shadow:-2px 0 12px rgba(42,42,39,0.06);
+    box-sizing:border-box;
+    padding:12px 14px 16px;
+    overflow:auto;
+    font-size:13px; line-height:1.4;
+  }
+  #epi-split-handle {
+    display:none;
+    position:absolute;
+    top:0;
+    right:var(--epi-panel-width);
+    bottom:var(--view-chrome-height);
+    width:10px;
+    margin-right:-5px;
+    z-index:1200;
+    cursor:col-resize;
+    touch-action:none;
+    background:transparent;
+  }
+  #epi-split-handle::before {
+    content:"";
+    position:absolute;
+    top:0; bottom:0;
+    left:50%;
+    width:2px;
+    transform:translateX(-50%);
+    background:#d8d3c9;
+    transition:background .12s ease, width .12s ease;
+  }
+  #epi-split-handle:hover::before,
+  body.epi-splitting #epi-split-handle::before {
+    width:3px;
+    background:#9b7d4e;
+  }
+  body.view-epi-trends #epi-split-handle { display:block; }
+  body.epi-splitting { cursor:col-resize; user-select:none; }
+  body.epi-splitting #map,
+  body.epi-splitting #epi-trends-panel { pointer-events:none; }
+  body.view-epi-trends #epi-trends-panel { display:flex; flex-direction:column; gap:8px; }
+  body.view-trends #epi-trends-panel,
+  body.view-trends #epi-split-handle,
+  body.view-trends #epi-trends-legend,
+  body.view-trends #epi-float { display:none !important; }
+  #trends-controls.collapsed #trends-controls-body { display:none; }
+  #trends-controls .trends-controls {
+    display:flex; flex-direction:column; gap:8px;
+  }
+  #trends-controls .trends-controls label {
+    display:flex; flex-direction:column; gap:3px; font-size:11px; color:#bbb; margin:0;
+  }
+  #trends-controls select,
+  #trends-controls input[type="search"] {
+    background:#222; color:#eee; border:1px solid #444; border-radius:4px;
+    padding:6px 8px; font-size:12px; width:100%; box-sizing:border-box;
+  }
+  #trends-controls select:focus,
+  #trends-controls input[type="search"]:focus {
+    outline:none; border-color:#9b7d4e; box-shadow:0 0 0 1px rgba(155,125,78,0.35);
+  }
+  #trends-search-wrap { position:relative; }
+  /* In-flow results so the Scope panel grows (absolute dropdowns were clipped
+     by #trends-controls { overflow-y:auto }). Tall enough for ≥5 hits. */
+  #trends-search-results {
+    display:none;
+    position:static;
+    margin-top:6px;
+    max-height:calc(5 * 32px);
+    overflow-y:auto;
+    background:#1a1a1a; border:1px solid #444; border-radius:4px;
+  }
+  #trends-search-results.open { display:block; }
+  #trends-search-results button {
+    display:block; width:100%; text-align:left; border:none; border-bottom:1px solid #2a2a2a;
+    background:#1a1a1a; color:#eee; padding:7px 8px; font-size:12px; line-height:1.35;
+    min-height:32px; box-sizing:border-box; cursor:pointer;
+  }
+  #trends-search-results button:hover,
+  #trends-search-results button.active { background:#2a2a2a; color:#ffd28a; }
+  #trends-search-results .zone-search-empty {
+    padding:8px; font-size:12px; color:#888; font-style:italic;
+  }
+  #trends-lab-list {
+    display:none; max-height:160px; overflow:auto;
+    border:1px solid #444; border-radius:4px; background:#1a1a1a;
+  }
+  #trends-lab-list.visible { display:block; }
+  #trends-lab-list button {
+    display:block; width:100%; text-align:left; border:none; border-bottom:1px solid #2a2a2a;
+    background:#1a1a1a; color:#eee; padding:7px 8px; font-size:12px; cursor:pointer;
+  }
+  #trends-lab-list button:hover { background:#2a2a2a; }
+  #trends-lab-list button.active {
+    background:rgba(155,125,78,0.22); color:#ffd28a; font-weight:600;
+  }
+  #epi-trends-panel h2 {
+    margin:0; font-size:14px; color:#2a2a27; font-weight:700;
+  }
+  #epi-trends-panel .epi-controls {
+    display:flex; flex-wrap:nowrap; gap:8px; align-items:flex-end;
+  }
+  #epi-trends-panel .epi-controls label {
+    display:flex; flex-direction:column; gap:3px; font-size:11px; color:#9c968b; margin:0;
+    flex:1 1 0; min-width:0;
+  }
+  #epi-trends-panel select, #epi-trends-panel button.epi-rank-btn {
+    background:#ffffff; color:#2a2a27; border:1px solid #e7e3db; border-radius:4px;
+    padding:6px 8px; font-size:12px; width:100%;
+    box-sizing:border-box;
+  }
+  #epi-trends-panel button.epi-rank-btn {
+    flex:1 1 0; min-width:0; cursor:pointer; font-weight:600;
+    white-space:normal; line-height:1.25; height:auto; min-height:34px;
+    color:#9b7d4e;
+  }
+  #epi-trends-panel button.epi-rank-btn:hover {
+    background:rgba(155,125,78,0.08); color:#7c1d1d; border-color:#9b7d4e;
+  }
+  #epi-trends-panel button.epi-rank-btn.active {
+    color:#7c1d1d; background:rgba(155,125,78,0.12); border-color:#9b7d4e;
+  }
+  #epi-trends-table-wrap {
+    flex:1 1 auto; overflow:auto; border:1px solid #e7e3db; border-radius:6px;
+    min-height:180px; background:#ffffff;
+  }
+  #epi-trends-table {
+    width:100%; border-collapse:collapse; font-size:12px; color:#2a2a27;
+  }
+  #epi-trends-table th, #epi-trends-table td {
+    padding:6px 8px; border-bottom:1px solid #e7e3db; text-align:left;
+    white-space:nowrap;
+  }
+  #epi-trends-table th {
+    position:sticky; top:0; background:#faf9f7; color:#9c968b; font-weight:600;
+    z-index:1;
+  }
+  #epi-trends-table tr { cursor:pointer; }
+  #epi-trends-table tr:hover td { background:#f3f1ec; }
+  #epi-trends-table tr.selected td {
+    background:rgba(155,125,78,0.12); color:#7c1d1d;
+  }
+  #epi-trends-table .num { font-variant-numeric:tabular-nums; text-align:center; }
+  #epi-trends-method {
+    font-size:11px; color:#9c968b; margin-top:4px; line-height:1.35;
+  }
+  #epi-trends-method a { color:#7c4a12; text-decoration:underline; }
+  #epi-trends-method a:hover { color:#7c1d1d; }
+  #epi-trends-subtitle {
+    margin:2px 0 0 0; font-size:12px; color:#9c968b; line-height:1.35;
+  }
+  #epi-trends-downloads {
+    display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;
+  }
+  #epi-trends-downloads button {
+    background:#ffffff; color:#2a2a27; border:1px solid #e7e3db; border-radius:4px;
+    padding:6px 10px; font-size:12px; cursor:pointer; font-weight:600; color:#9b7d4e;
+  }
+  #epi-trends-downloads button:hover {
+    background:rgba(155,125,78,0.08); color:#7c1d1d; border-color:#9b7d4e;
+  }
+  body.epi-map-exporting #epi-trends-legend,
+  body.epi-map-exporting #epi-float,
+  body.epi-map-exporting #epi-split-handle,
+  body.epi-map-exporting #epi-trends-panel,
+  body.epi-map-exporting #view-switcher,
+  body.epi-map-exporting #title,
+  body.epi-map-exporting .leaflet-control-container {
+    display:none !important;
+  }
+  /* Full-bleed map framed on DRC for JPG export. */
+  body.epi-map-exporting #map {
+    right:0 !important;
+    bottom:0 !important;
+  }
+  #epi-trends-legend {
+    display:none;
+    position:absolute; z-index:1000;
+    bottom:calc(var(--view-chrome-height) + 12px); left:12px; max-width:min(340px, calc(100vw - 36px));
+    background:#ffffff; color:#2a2a27;
+    padding:12px 14px; border-radius:8px;
+    border:1px solid #e7e3db;
+    box-shadow:0 2px 10px rgba(42,42,39,0.08);
+    font-size:13px; line-height:1.4;
+  }
+  body.view-epi-trends #epi-trends-legend { display:block; }
+  #epi-trends-legend .legend-row { margin-top:6px; color:#9c968b; }
+  #epi-trends-legend .checkbox-row label { color:#2a2a27 !important; }
+  #epi-float {
+    display:none;
+    position:absolute; z-index:1100;
+    min-width:200px; max-width:280px;
+    background:#ffffff; color:#2a2a27;
+    border:1px solid #e7e3db; border-radius:8px;
+    padding:10px 12px; box-shadow:0 4px 16px rgba(42,42,39,0.12);
+    font-size:12px; pointer-events:none;
+  }
+  body.view-epi-trends #epi-float.visible { display:block; }
+  #epi-float strong { color:#2a2a27; }
+  #epi-float table { width:100%; border-collapse:collapse; margin-top:6px; }
+  #epi-float td { padding:2px 0; color:#2a2a27; }
+  #epi-float td:first-child { color:#9c968b; }
+  #epi-float td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
   #trends-legend {
     position:absolute; z-index:1000;
-    bottom:24px; left:12px; max-width:300px;
+    bottom:calc(var(--view-chrome-height) + 12px); left:12px; max-width:300px;
     background:rgba(20,20,20,0.92); color:#f4f4f4;
     padding:12px 14px; border-radius:8px;
     box-shadow:0 2px 10px rgba(0,0,0,0.4);
@@ -2895,8 +3549,20 @@ HTML_TEMPLATE = r"""<!doctype html>
     cursor:pointer;
   }
   #trends-date-label {
-    display:block; margin-top:10px; font-size:12px; color:#bbb;
+    display:block; margin-top:8px; font-size:12px; color:#bbb;
   }
+  #trends-time-caption {
+    display:block; margin-top:10px; font-size:12px; color:#ddd; line-height:1.35;
+  }
+  #trends-play-row {
+    display:flex; gap:8px; align-items:center; margin-top:8px;
+  }
+  #trends-play-btn {
+    background:#5b86b3; color:#fff; border:1px solid #6f98c0; border-radius:4px;
+    padding:5px 10px; font-size:12px; cursor:pointer; font-weight:600;
+  }
+  #trends-play-btn:hover { background:#4d769f; }
+  #trends-play-btn.playing { background:#9b7d4e; border-color:#9b7d4e; }
   #trends-legend-desc {
     font-size:10px; color:#888; line-height:1.35; margin:4px 0 8px 0;
   }
@@ -2925,25 +3591,59 @@ HTML_TEMPLATE = r"""<!doctype html>
   body.view-context #tracker .global-row { gap:clamp(12px, 4vw, 28px); }
   body.view-trends #tracker .global-cell .num,
   body.view-context #tracker .global-cell .num { font-size:clamp(18px, 4.5vw, 26px); }
-  body.view-trends.trends-province-hovered #trends {
-    width:min(480px, calc(100vw - 16px));
-    max-width:min(480px, calc(100vw - 16px));
-  }
+  /* Full-width bottom chrome: tabs centered in remaining space, partners right. */
   #view-switcher {
-    position:absolute; bottom:12px; left:50%; transform:translateX(-50%);
-    z-index:1000;
-    background:rgba(20,20,20,0.92); color:#f4f4f4;
-    padding:8px 12px; border-radius:8px;
-    box-shadow:0 2px 10px rgba(0,0,0,0.4);
+    position:absolute; left:0; right:0; bottom:0;
+    height:var(--view-chrome-height);
+    z-index:1100;
+    display:grid;
+    grid-template-columns:minmax(0, 1fr) auto;
+    align-items:center;
+    gap:10px;
+    box-sizing:border-box;
+    padding:6px 10px 6px 12px;
+    background:rgba(20,20,20,0.96); color:#f4f4f4;
+    border-radius:0;
+    border-top:1px solid #333;
+    box-shadow:0 -2px 10px rgba(0,0,0,0.35);
   }
-  .view-tabs { display:flex; justify-content:center; gap:6px; }
+  #view-switcher .view-tabs-wrap {
+    min-width:0;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+  }
+  .view-tabs {
+    display:flex; justify-content:center; align-items:center;
+    flex-wrap:wrap; gap:6px;
+  }
   .view-tab {
     background:#222; color:#ccc; border:1px solid #555; border-radius:4px;
     padding:4px 14px; font-size:12px; cursor:pointer; line-height:1.3;
+    white-space:nowrap;
   }
   .view-tab:hover { background:#333; color:#eee; }
   .view-tab.active { color:#ffd28a; border-color:#ffae42; background:#2a2418; }
-  #trends-hint,
+  #view-switcher #partners {
+    position:static;
+    z-index:auto;
+    justify-self:end;
+    flex-shrink:0;
+    max-width:none;
+    margin:0;
+    padding:2px 4px;
+    background:#ffffff;
+    border-radius:4px;
+    box-shadow:none;
+    display:flex; flex-wrap:nowrap; align-items:center;
+    justify-content:center; gap:2px;
+  }
+  #view-switcher #partners a { display:inline-flex; align-items:center; transition:opacity .15s ease; }
+  #view-switcher #partners a:hover { opacity:0.78; }
+  #view-switcher #partners img {
+    height:clamp(20px, 3.6vmin, 36px); width:auto;
+    max-width:min(14vmin, 110px); display:block; object-fit:contain;
+  }
   #context-hint,
   #travel-hint,
   #flow-hint,
@@ -2960,9 +3660,6 @@ HTML_TEMPLATE = r"""<!doctype html>
     max-width:min(420px, calc(100vw - 48px));
     line-height:1.4;
   }
-  body.view-trends #trends-hint { display:flex; }
-  body.view-trends.trends-province-hovered #trends-hint,
-  body.view-trends.trends-slider-busy #trends-hint { display:none; }
   body.view-map.matrix-layer-active #travel-hint { display:flex; }
   body.view-map.flow-layer-active #flow-hint { display:flex; }
   body.view-map.flow-layer-active.flow-hub-selected #flow-hint { display:none; }
@@ -3118,19 +3815,8 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
   }
   
-  @media (min-width: 1024px) {
-    body.view-trends.trends-province-hovered #trends {
-      width:min(720px, calc(100vw - 24px));
-      max-width:min(720px, calc(100vw - 24px));
-    }
-  }
-  @media (min-width: 1400px) {
-    body.view-trends.trends-province-hovered #trends {
-      width:min(760px, calc(100vw - 24px));
-      max-width:min(760px, calc(100vw - 24px));
-    }
-  }
   #info-header,
+  #trends-controls-header,
   .panel-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
   #info-toggle,
   .panel-toggle { background:transparent; color:#ffd28a; border:1px solid #555; border-radius:4px;
@@ -3140,8 +3826,15 @@ HTML_TEMPLATE = r"""<!doctype html>
   #info.collapsed #info-body,
   .panel.collapsed .panel-body { display:none; }
   @media (max-width: 700px) {
+    :root { --view-chrome-height: 72px; }
     .panel          { font-size:12px; padding:6px 8px; }
     #title          { min-width:unset; max-width:calc(100vw - 24px); padding:6px 8px; }
+    #view-switcher { padding:4px 8px; gap:6px; }
+    .view-tab { padding:3px 9px; font-size:11px; }
+    #view-switcher #partners img {
+      height:clamp(16px, 4vmin, 26px);
+      max-width:min(12vmin, 80px);
+    }
     #title h1       { margin-bottom:2px; }
     #title .sub     { font-size:10px; }
     #tracker        { margin-top:4px; padding:4px 2px 0; }
@@ -3149,9 +3842,11 @@ HTML_TEMPLATE = r"""<!doctype html>
     #tracker .countries-row { gap:2px; margin-top:6px; }
     #tracker .country { gap:3px 6px; }
     #info           { max-width:60vw; }
+    #trends-controls { width:min(280px, calc(100vw - 24px)); max-width:min(280px, calc(100vw - 24px));
+                       top:clamp(150px, 28vh, 240px); }
     #trends         { width:min(520px, calc(100vw - 12px)); max-width:min(520px, calc(100vw - 12px));
                       right:6px;
-                      bottom:calc(8px + clamp(40px, 12vw, 72px) + 8px); }
+                      bottom:calc(var(--view-chrome-height) + 8px); }
     body.view-context #context-national {
       top:clamp(128px, 24vh, 200px);
       left:6px; bottom:auto;
@@ -3181,15 +3876,18 @@ HTML_TEMPLATE = r"""<!doctype html>
     #tracker .global-cell .sub { font-size:9px; margin-top:0; }
     #tracker .countries-row { margin-top:3px; font-size:10px; gap:1px; }
     #info           { max-height:70vh; }
-    #legend         { max-height:60vh; bottom:56px; }
+    #legend         { max-height:60vh; bottom:calc(var(--view-chrome-height) + 8px); }
     #trends         { max-height:min(55vh, calc(100vh - 180px)); }
     body.view-context #context-national { max-height:min(28vh, calc(50vh - 80px)); }
     body.view-context #context { max-height:min(55vh, calc(100vh - 200px)); }
-    #partners      { bottom:8px; right:6px; padding:2px 3px; gap:2px;
-                      width:auto; max-width:min(38vw, 260px); }
-    #partners a    { flex:0 0 calc(50% - 1px); }
-    #partners img  { max-width:100%; max-height:clamp(18px, 5vh, 28px);
-                      height:auto; width:auto; object-fit:contain; }
+    :root { --view-chrome-height: 58px; }
+    #view-switcher { padding:4px 8px; gap:6px; }
+    #view-switcher #partners { padding:1px 2px; gap:1px; }
+    #view-switcher #partners img {
+      max-height:clamp(16px, 4vh, 24px); height:clamp(16px, 4vh, 24px);
+      max-width:min(12vmin, 72px);
+    }
+    .view-tab { padding:3px 8px; font-size:11px; }
   }
   #title        { top:12px; left:50%; transform:translateX(-50%); text-align:center; min-width:min(520px, calc(100vw - 24px)); max-width:calc(100vw - 24px); box-sizing:border-box; }
   #title .title-row { display:flex; align-items:center; justify-content:center; gap:14px; }
@@ -3389,26 +4087,14 @@ HTML_TEMPLATE = r"""<!doctype html>
   }
   .modal .methods-table th { background:#262626; color:#ffd28a; font-weight:600; }
   .modal .methods-table tr:nth-child(even) td { background:#1f1f1f; }
-  #partners { position:absolute; bottom:12px; right:8px; z-index:1000;
-              background:#ffffff; border-radius:4px; padding:2px 3px;
-              box-shadow:0 2px 8px rgba(0,0,0,0.4);
-              display:flex; flex-wrap:wrap; align-items:center;
-              justify-content:center; gap:2px;
-              max-width:min(80vw, 720px); }
-  #partners a { display:inline-flex; align-items:center; transition:opacity .15s ease; }
-  #partners a:hover { opacity:0.78; }
-  #partners img { height:clamp(24px, 5vmin, 44px); width:auto;
-                  max-width:min(22vmin, 140px); display:block; object-fit:contain; }
 </style>
 </head>
 <body class="view-map">
 <div id="map"></div>
-<div id="trends-hint" data-i18n="ui.hints.trends">Hover over a province to see trends</div>
 <div id="context-hint" data-i18n="ui.hints.context">Click a health zone to see response context</div>
 <div id="travel-hint" data-i18n="ui.hints.travel">Click a health zone to set travel origin (double-click to zoom)</div>
 <div id="flow-hint" data-i18n="ui.hints.flow">Click a health zone to show movement flows (double-click to zoom)</div>
 <div id="flow-empty-hint" data-i18n="ui.hints.flow_no_data">No movement data available for this health zone.</div>
-<div id="partners"></div>
 <div id="title" class="panel">
   <div class="panel-header">
     <h1 id="page-heading" style="margin:0; font-size:clamp(16px, 3.4vw, 22px); font-weight:700; letter-spacing:0.3px;">DRC Ebola Bundibugyo 2026</h1>
@@ -3505,7 +4191,11 @@ HTML_TEMPLATE = r"""<!doctype html>
   <div class="legend-bar" id="trends-legend-bar"></div>
   <div class="legend-ticks" id="trends-legend-ticks"></div>
   <div class="legend-scale" id="trends-legend-scale" data-i18n="ui.trends_scale_log">(log scale)</div>
-  <label for="trends-date-slider" id="trends-date-label" data-i18n="ui.trends_as_of">As of —</label>
+  <div id="trends-time-caption" data-i18n="ui.trends_time_caption">Time representation of health zones reporting cases</div>
+  <div id="trends-play-row">
+    <button type="button" id="trends-play-btn" data-i18n="ui.trends_play">Play</button>
+    <span id="trends-date-label" data-i18n="ui.trends_as_of">As of —</span>
+  </div>
   <input type="range" id="trends-date-slider" min="0" max="0" value="0"
          data-i18n-aria="ui.trends_slider_aria" aria-label="SitRep date for confirmed cases map" />
 </div>
@@ -3517,16 +4207,111 @@ HTML_TEMPLATE = r"""<!doctype html>
   <div id="info-body" class="info-empty" data-i18n="ui.hover_zone">Hover a health zone.</div>
 </div>
 <div id="view-switcher">
-  <div id="view-tabs" class="view-tabs">
-    <button type="button" class="view-tab active" data-view="map" data-i18n="ui.view_map">Current snapshot</button>
-    <button type="button" class="view-tab" data-view="trends" data-i18n="ui.view_trends">Trends</button>
-    <button type="button" class="view-tab" data-view="context" data-i18n="ui.view_context">Context</button>
+  <div class="view-tabs-wrap">
+    <div id="view-tabs" class="view-tabs">
+      <button type="button" class="view-tab active" data-view="map" data-i18n="ui.view_map">Current snapshot</button>
+      <button type="button" class="view-tab" data-view="trends" data-i18n="ui.view_trends">Epidemiological trends</button>
+      <button type="button" class="view-tab" data-view="epi-trends" data-i18n="ui.view_epi_trends">Spatial risk</button>
+      <button type="button" class="view-tab" data-view="context" data-i18n="ui.view_context">Context</button>
+    </div>
+  </div>
+  <div id="partners"></div>
+</div>
+<div id="epi-split-handle" role="separator" aria-orientation="vertical"
+     data-i18n-aria="ui.aria.epi_split" aria-label="Resize map and table panels"
+     tabindex="0"></div>
+<div id="epi-trends-panel">
+  <h2 id="epi-trends-title" data-i18n="ui.epi_trends_title">Health zones ranked by national relative risk of invasion</h2>
+  <p id="epi-trends-subtitle"></p>
+  <div class="epi-controls">
+    <label for="epi-scope-select">
+      <span data-i18n="ui.epi_scope">Geographic scope</span>
+      <select id="epi-scope-select"></select>
+    </label>
+    <button type="button" class="epi-rank-btn active" id="epi-rank-rr" data-rank="rr" data-i18n="ui.epi_rank_rr">Rank by relative risk</button>
+    <button type="button" class="epi-rank-btn" id="epi-rank-priority" data-rank="priority" data-i18n="ui.epi_rank_priority">Rank by vulnerability-based priority</button>
+  </div>
+  <div id="epi-trends-table-wrap">
+    <table id="epi-trends-table">
+      <thead>
+        <tr>
+          <th data-i18n="ui.epi_col_province">Province</th>
+          <th data-i18n="ui.epi_col_zone">Health zone</th>
+          <th class="num" data-i18n="ui.epi_col_p_invasion">Invasion probability</th>
+          <th class="num" data-i18n="ui.epi_col_p_ci">95% CI</th>
+          <th class="num" data-i18n="ui.epi_col_norm_rr">Normalised Relative Risk</th>
+          <th class="num" data-i18n="ui.epi_col_rr">Relative risk</th>
+          <th class="num" data-i18n="ui.epi_col_rr_rank">Rank</th>
+          <th class="num" data-i18n="ui.epi_col_priority">Vulnerability-based priority</th>
+          <th class="num" data-i18n="ui.epi_col_priority_rank">Rank of vulnerability-based priority</th>
+        </tr>
+      </thead>
+      <tbody id="epi-trends-tbody"></tbody>
+    </table>
+  </div>
+  <p id="epi-trends-method"></p>
+  <div id="epi-trends-downloads">
+    <button type="button" id="epi-download-map" data-i18n="ui.epi_download_map">Download map (JPG)</button>
+    <button type="button" id="epi-download-csv" data-i18n="ui.epi_download_csv">Download data (CSV)</button>
   </div>
 </div>
+<div id="epi-trends-legend" class="panel">
+  <div><strong data-i18n="ui.epi_map_legend">Map colouring</strong></div>
+  <div class="legend-row" id="epi-legend-invasion-label"></div>
+  <div class="legend-bar" id="epi-legend-invasion-bar"></div>
+  <div class="legend-ticks" id="epi-legend-invasion-ticks"></div>
+  <div class="legend-row" style="margin-top:10px" data-i18n="ui.epi_legend_active">Confirmed cases</div>
+  <div class="legend-bar" id="epi-legend-cases-bar"></div>
+  <div class="legend-ticks" id="epi-legend-cases-ticks"></div>
+  <div class="checkbox-row" style="margin-top:10px">
+    <input type="checkbox" id="epi-show-cases" />
+    <label for="epi-show-cases" style="margin:0" data-i18n="ui.show_cases">Show active-case markers</label>
+  </div>
+  <div id="epi-flow-legend" style="margin-top:10px;font-size:11px;color:#5c574f;line-height:1.35">
+    <div style="margin-bottom:4px">
+      <span class="swatch" style="background:#b23b2e"></span>
+      <span data-i18n="ui.legend.flow_in">inflow to hub</span>
+    </div>
+    <div data-i18n="ui.legend.importation_pressure_width">Line width ∝ confirmed cases in the external origin zone (Flowminder inflows only), 0–1 vs max for selected zone</div>
+  </div>
+</div>
+<div id="trends-controls" class="panel">
+  <div id="trends-controls-header">
+    <strong data-i18n="ui.trends_controls_title">Scope</strong>
+    <button class="panel-toggle" data-target="trends-controls" type="button"
+            data-i18n-aria="ui.aria.toggle_trends" data-i18n-title="ui.aria.collapse_trends"
+            aria-label="Toggle trends scope panel" title="Collapse / expand trends scope">−</button>
+  </div>
+  <div id="trends-controls-body" class="panel-body">
+    <div class="trends-controls">
+      <label for="trends-scope-select">
+        <span data-i18n="ui.trends_scope">Geographic scope</span>
+        <select id="trends-scope-select">
+          <option value="national" data-i18n="ui.trends_scope_national">National</option>
+          <option value="province" data-i18n="ui.trends_scope_province">Province</option>
+          <option value="health_zone" data-i18n="ui.trends_scope_health_zone">Health zone</option>
+          <option value="lab" data-i18n="ui.trends_scope_lab">Laboratory</option>
+        </select>
+      </label>
+      <label for="trends-search-input">
+        <span data-i18n="ui.trends_search">Search</span>
+        <div id="trends-search-wrap">
+          <input type="search" id="trends-search-input" autocomplete="off"
+                 data-i18n-placeholder="ui.trends_search_placeholder" placeholder="Search…" />
+          <div id="trends-search-results" role="listbox"></div>
+        </div>
+      </label>
+    </div>
+    <div id="trends-lab-list" aria-label="Laboratories" style="margin-top:8px"></div>
+  </div>
+</div>
+<div id="epi-float" class="panel"></div>
 <div id="trends" class="panel">
   <div class="panel-header">
     <strong id="trends-title" data-i18n="ui.trends_panel">Trends</strong>
-    <button class="panel-toggle" data-target="trends" type="button" data-i18n-aria="ui.aria.toggle_trends" data-i18n-title="ui.aria.collapse_trends" aria-label="Toggle trends panel" title="Collapse / expand trends">−</button>
+    <button class="panel-toggle" data-target="trends" type="button"
+            data-i18n-aria="ui.aria.toggle_trends" data-i18n-title="ui.aria.collapse_trends"
+            aria-label="Toggle trends panel" title="Collapse / expand trends">−</button>
   </div>
   <div id="trends-body" class="panel-body trends-empty"></div>
 </div>
@@ -3546,6 +4331,7 @@ HTML_TEMPLATE = r"""<!doctype html>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script id="payload" type="application/json">__PAYLOAD__</script>
 <script>
 const PAYLOAD = JSON.parse(document.getElementById("payload").textContent);
@@ -3623,8 +4409,16 @@ function layerUsesFlowArcs(layer) {
   return !!(layer && layer.viz === "flow_arcs");
 }
 function flowArcsOverlayActive() {
-  const box = document.getElementById("show-flow-arcs");
-  return !!(box && box.checked && FLOW_ARC_LAYER && activeView === "map");
+  if (!FLOW_ARC_LAYER) return false;
+  if (activeView === "map") {
+    const box = document.getElementById("show-flow-arcs");
+    return !!(box && box.checked);
+  }
+  // Epidemiological trends: same curved Flowminder arcs as snapshot, only while a zone is selected.
+  if (activeView === "epi-trends") {
+    return !!epiSelectedNom;
+  }
+  return false;
 }
 function flowArcLayerDef() {
   return FLOW_ARC_LAYER;
@@ -3864,29 +4658,8 @@ function buildTracker() {
 function buildModeledEstimateNote() {
   const root = document.getElementById("imperial-model-estimates");
   if (!root) return;
-  const m = PAYLOAD.ic_model || {};
-  function icDisplay(v) {
-    if (v == null || v === "") return "NA";
-    if (typeof v === "number") return v.toLocaleString(localeTag());
-    return String(v);
-  }
-  const date = icDisplay(m.ic_model_date);
-  const lo = icDisplay(m.ic_model_lowerbound);
-  const hi = icDisplay(m.ic_model_upperbound);
-  const ic = t("ui.ic_model");
-  const icReportUrl = "https://www.imperial.ac.uk/media/imperial-college/medicine/mrc-gida/Report-ebola-update-20-05-2026.pdf";
-  const tooltip = ic.tooltip_prefix + " " + date + ", " +
-    ic.tooltip_between + " " + lo + " " + ic.tooltip_and + " " + hi + " " +
-    ic.tooltip_suffix + " <a href='" + icReportUrl + "' target='_blank' rel='noopener'>" +
-    ic.tooltip_link + "</a> " + ic.tooltip_end;
-  root.innerHTML =
-    "<span class='note-wrap'>" +
-      "<span class='note-text'>" + ic.sentence + "</span>" +
-      "<span class='info-wrap'>" +
-        "<button class='info-icon' type='button' aria-label='" + ic.aria + "'>i</button>" +
-        "<span class='info-tooltip' role='tooltip'>" + tooltip + "</span>" +
-      "</span>" +
-    "</span>";
+  root.innerHTML = "";
+  root.style.display = "none";
 }
 
 // --- partners strip ---
@@ -3946,9 +4719,15 @@ function setLang(lang) {
   }
   if (activeView === "trends") {
     updateTrendsDateLabel();
-    renderTrendsPanel(trendsHoveredProvince);
+    syncTrendsPlayButton();
+    renderTrendsPlot();
   } else if (activeView === "context") {
     renderContextPanel(contextSelectedNom);
+  } else if (activeView === "epi-trends") {
+    updateEpiTitle();
+    updateEpiMetaNotes();
+    renderEpiLegendBars();
+    renderEpiTrendsTable();
   } else {
     const infoBody = document.getElementById("info-body");
     if (infoBody && !infoBody.classList.contains("info-empty")) {
@@ -3982,9 +4761,13 @@ const OUTBREAK = [
 const VIRIDIS = [
   [68,1,84],[72,40,120],[62,73,137],[49,104,142],[38,130,142],[31,158,137],
   [53,183,121],[109,206,89],[180,222,44],[253,231,37]];
+// Darker, subdued purple ramp for invasion probability.
+const PURPLES = [
+  [236,230,242],[214,201,224],[184,164,201],[150,124,171],[117,90,140],
+  [91,68,112],[72,52,90],[55,40,72],[42,30,56]];
 const PALETTES = {
   plasma:PLASMA, plasma_r:[...PLASMA].reverse(),
-  reds:REDS, outbreak:OUTBREAK, viridis:VIRIDIS,
+  reds:REDS, outbreak:OUTBREAK, viridis:VIRIDIS, purples:PURPLES,
 };
 
 function lerpColor(stops, t) {
@@ -4022,7 +4805,10 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
 
 map.createPane("flow-arcs");
 map.getPane("flow-arcs").style.zIndex = "450";
+map.createPane("epi-links");
+map.getPane("epi-links").style.zIndex = "455";
 const flowArcLayer = L.layerGroup();
+const epiLinkLayer = L.layerGroup();
 
 function zoneCentroid(nom) {
   const z = ZONE_DATA[nom];
@@ -4065,13 +4851,41 @@ function flowArcWeight(count, maxCount) {
   return 1 + 4 * Math.sqrt(count / maxCount);
 }
 
-function addFlowWingMarker(pts, color) {
+function flowArcWeightNormalized(frac) {
+  if (frac == null || !isFinite(frac) || frac <= 0) return 1.2;
+  return 1 + 4 * Math.max(0, Math.min(1, frac));
+}
+
+function zoneConfirmedCases(nom) {
+  const z = ZONE_DATA[nom];
+  if (!z) return 0;
+  const c = Number(z.confirmed_cases);
+  return (isFinite(c) && c > 0) ? c : 0;
+}
+
+function importationPressure(sourceNom, movers) {
+  // Spatial risk: Flowminder inflow edges weighted by confirmed cases in the
+  // external (origin) health zone. No movement → no pressure.
+  const n = Number(movers);
+  if (!isFinite(n) || n <= 0) return 0;
+  return zoneConfirmedCases(sourceNom);
+}
+
+function addFlowWingMarker(pts, color, opts) {
+  opts = opts || {};
   if (!pts || pts.length < 2) return;
-  const midIdx = Math.floor(pts.length / 2);
+  // Place near the destination for inward (import) arrows so they read as
+  // pointing into the selected health zone; otherwise mid-arc.
+  const frac = opts.nearEnd ? 0.78 : 0.5;
+  const midIdx = Math.max(1, Math.min(pts.length - 2, Math.floor((pts.length - 1) * frac)));
   const mid = pts[midIdx];
   const prev = pts[Math.max(0, midIdx - 1)];
   const next = pts[Math.min(pts.length - 1, midIdx + 1)];
-  const angle = Math.atan2(next[1] - prev[1], next[0] - prev[0]) * 180 / Math.PI + 90;
+  // Screen-space bearing so the chevron follows the drawn path (toward hub
+  // for inflow polylines that run origin → selected zone).
+  const p0 = map.latLngToLayerPoint(L.latLng(prev[0], prev[1]));
+  const p1 = map.latLngToLayerPoint(L.latLng(next[0], next[1]));
+  const angle = Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180 / Math.PI;
   const svg =
     '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" ' +
     'style="transform:rotate(' + angle + 'deg)">' +
@@ -4101,61 +4915,595 @@ function renderFlowArcs(hubNom, layer) {
   const ins = (cat.in_by_dest && cat.in_by_dest[hubNom]) || [];
   const outSorted = outs.slice().sort(function(a, b) { return b[1] - a[1]; });
   const inSorted = ins.slice().sort(function(a, b) { return b[1] - a[1]; });
+  // Spatial risk: only inflows into the selected zone (drawn in red),
+  // weighted by confirmed cases in each external origin zone.
+  const useImportPressure = activeView === "epi-trends";
 
-  let maxCount = 1;
-  outSorted.concat(inSorted).forEach(function(p) {
-    if (p[1] > maxCount) maxCount = p[1];
-  });
-
-  outSorted.forEach(function(pair) {
-    const dest = pair[0];
-    const count = pair[1];
-    const end = zoneCentroid(dest);
-    if (!end) return;
-    const pts = quadraticBezierPoints(hub[0], hub[1], end[0], end[1], 1);
-    const line = L.polyline(pts, {
-      color: FLOW_OUT_COLOR,
-      weight: flowArcWeight(count, maxCount),
-      opacity: 0.82,
-      pane: "flow-arcs",
+  let maxMetric = 0;
+  if (useImportPressure) {
+    inSorted.forEach(function(p) {
+      const m = importationPressure(p[0], p[1]);
+      if (m > maxMetric) maxMetric = m;
     });
-    line.bindTooltip(tf("ui.flow_arc_tooltip", {
-      from: flowHubDisplayName(),
-      to: hubDisplayName(dest),
-      count: fmt(count),
-    }), {direction: "top", sticky: true});
-    line.addTo(flowArcLayer);
-    addFlowWingMarker(pts, FLOW_OUT_COLOR);
-  });
+  } else {
+    outSorted.concat(inSorted).forEach(function(p) {
+      const m = Number(p[1]) || 0;
+      if (m > maxMetric) maxMetric = m;
+    });
+    if (maxMetric < 1) maxMetric = 1;
+  }
+
+  if (!useImportPressure) {
+    outSorted.forEach(function(pair) {
+      const dest = pair[0];
+      const count = pair[1];
+      const end = zoneCentroid(dest);
+      if (!end) return;
+      const pts = quadraticBezierPoints(hub[0], hub[1], end[0], end[1], 1);
+      const line = L.polyline(pts, {
+        color: FLOW_OUT_COLOR,
+        weight: flowArcWeight(count, maxMetric),
+        opacity: 0.82,
+        pane: "flow-arcs",
+      });
+      line.bindTooltip(tf("ui.flow_arc_tooltip", {
+        from: flowHubDisplayName(),
+        to: hubDisplayName(dest),
+        count: fmt(count),
+      }), {direction: "top", sticky: true});
+      line.addTo(flowArcLayer);
+      addFlowWingMarker(pts, FLOW_OUT_COLOR);
+    });
+  }
 
   inSorted.forEach(function(pair) {
     const origin = pair[0];
     const count = pair[1];
     const start = zoneCentroid(origin);
     if (!start) return;
+    const cases = zoneConfirmedCases(origin);
+    const pressure = useImportPressure ? importationPressure(origin, count) : count;
+    const weight = useImportPressure
+      ? flowArcWeightNormalized(maxMetric > 0 ? pressure / maxMetric : 0)
+      : flowArcWeight(count, maxMetric);
+    const color = useImportPressure ? FLOW_OUT_COLOR : FLOW_IN_COLOR;
+    // Always draw origin → selected hub so chevrons point inward.
     const pts = quadraticBezierPoints(start[0], start[1], hub[0], hub[1], 1);
     const line = L.polyline(pts, {
-      color: FLOW_IN_COLOR,
-      weight: flowArcWeight(count, maxCount),
+      color: color,
+      weight: weight,
       opacity: 0.82,
       pane: "flow-arcs",
     });
-    line.bindTooltip(tf("ui.flow_arc_tooltip", {
-      from: hubDisplayName(origin),
-      to: flowHubDisplayName(),
-      count: fmt(count),
-    }), {direction: "top", sticky: true});
+    if (useImportPressure) {
+      line.bindTooltip(tf("ui.importation_pressure_tooltip", {
+        from: hubDisplayName(origin),
+        to: flowHubDisplayName(),
+        pressure: (maxMetric > 0 ? pressure / maxMetric : 0).toFixed(3),
+        cases: fmt(cases),
+        count: fmt(count),
+      }), {direction: "top", sticky: true});
+    } else {
+      line.bindTooltip(tf("ui.flow_arc_tooltip", {
+        from: hubDisplayName(origin),
+        to: flowHubDisplayName(),
+        count: fmt(count),
+      }), {direction: "top", sticky: true});
+    }
     line.addTo(flowArcLayer);
-    addFlowWingMarker(pts, FLOW_IN_COLOR);
+    addFlowWingMarker(pts, color, useImportPressure ? {nearEnd: true} : null);
   });
 
   flowArcStats = {
     outTotal: outs.length,
-    outShown: outSorted.length,
+    outShown: useImportPressure ? 0 : outSorted.length,
     inTotal: ins.length,
     inShown: inSorted.length,
+    metric: useImportPressure ? "importation_pressure" : "persons",
+    maxMetric: maxMetric,
   };
   flowArcLayer.addTo(map);
+}
+
+// --- Epidemiological trends (invasion risk) ---
+const INVASION_RISK = PAYLOAD.invasion_risk || null;
+const INVASION_ZONES = (INVASION_RISK && INVASION_RISK.zones) || {};
+const INVASION_SCOPES = (INVASION_RISK && INVASION_RISK.scopes) || [];
+let epiScopeId = "national";
+let epiRankMode = "rr"; // "rr" | "priority"
+let epiSelectedNom = null;
+let epiFocusNoms = null; // Set of noms to keep vivid when a zone is selected
+let epiInvasionDomain = {min: 0, max: 1, palette: PURPLES};
+let epiCasesDomain = {min: 0, max: 1, isLog: true, palette: REDS};
+
+function clearEpiLinks() {
+  epiLinkLayer.clearLayers();
+  if (map.hasLayer(epiLinkLayer)) map.removeLayer(epiLinkLayer);
+}
+
+function renderEpiStraightLinks(hubNom) {
+  clearEpiLinks();
+  if (!hubNom) return;
+  const hub = zoneCentroid(hubNom);
+  if (!hub) return;
+  const cat = flowCatalogForLayer(FLOW_ARC_LAYER);
+  if (!cat) return;
+
+  const edges = [];
+  const outs = (cat.out_by_origin && cat.out_by_origin[hubNom]) || [];
+  const ins = (cat.in_by_dest && cat.in_by_dest[hubNom]) || [];
+  outs.forEach(function(pair) {
+    if (pair && pair[0] && Number(pair[1]) > 0) edges.push({nom: pair[0], count: Number(pair[1]), dir: "out"});
+  });
+  ins.forEach(function(pair) {
+    if (pair && pair[0] && Number(pair[1]) > 0) edges.push({nom: pair[0], count: Number(pair[1]), dir: "in"});
+  });
+  if (!edges.length) return;
+
+  let maxCount = 1;
+  edges.forEach(function(e) { if (e.count > maxCount) maxCount = e.count; });
+
+  edges.forEach(function(e) {
+    const end = zoneCentroid(e.nom);
+    if (!end) return;
+    const color = e.dir === "out" ? FLOW_OUT_COLOR : FLOW_IN_COLOR;
+    const line = L.polyline([hub, end], {
+      color: color,
+      weight: 1.2 + 3.5 * Math.sqrt(e.count / maxCount),
+      opacity: 0.85,
+      pane: "epi-links",
+      interactive: false,
+    });
+    line.bindTooltip(tf("ui.flow_arc_tooltip", {
+      from: e.dir === "out" ? hubDisplayName(hubNom) : hubDisplayName(e.nom),
+      to: e.dir === "out" ? hubDisplayName(e.nom) : hubDisplayName(hubNom),
+      count: fmt(e.count),
+    }), {direction: "top", sticky: true});
+    line.addTo(epiLinkLayer);
+  });
+  epiLinkLayer.addTo(map);
+}
+
+function epiCurrentScope() {
+  return INVASION_SCOPES.find(function(s) { return s.id === epiScopeId; }) || INVASION_SCOPES[0] || null;
+}
+
+function epiZoneVisible(row) {
+  const scope = epiCurrentScope();
+  if (!scope || !scope.province) return true;
+  return row && row.province === scope.province;
+}
+
+function epiFlowConnectedNoms(hubNom) {
+  const out = new Set([hubNom]);
+  const layer = FLOW_ARC_LAYER;
+  const cat = flowCatalogForLayer(layer);
+  if (!cat || !hubNom) return out;
+  // Spatial risk focuses on inflows into the selected zone.
+  const ins = (cat.in_by_dest && cat.in_by_dest[hubNom]) || [];
+  ins.forEach(function(p) { if (p && p[0]) out.add(p[0]); });
+  return out;
+}
+
+function epiFmtProb(v) {
+  if (v == null || Number.isNaN(v)) return "—";
+  return Number(v).toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3});
+}
+
+function epiFmtNum(v, digits) {
+  if (v == null || Number.isNaN(v)) return "—";
+  if (digits == null) return Number(v).toLocaleString(undefined, {maximumFractionDigits: 2});
+  return Number(v).toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits
+  });
+}
+
+function updateEpiTitle() {
+  const el = document.getElementById("epi-trends-title");
+  if (!el) return;
+  const scope = epiCurrentScope();
+  if (!scope || scope.id === "national") {
+    el.textContent = t("ui.epi_trends_title");
+  } else {
+    el.textContent = tf("ui.epi_trends_title_province", {province: scope.label});
+  }
+}
+
+function epiCapitalizeFirst(text) {
+  const s = String(text || "");
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function epiParseIsoDate(iso) {
+  if (!iso) return null;
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+function epiOrdinalDay(n) {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return n + "th";
+  const rem10 = n % 10;
+  if (rem10 === 1) return n + "st";
+  if (rem10 === 2) return n + "nd";
+  if (rem10 === 3) return n + "rd";
+  return n + "th";
+}
+
+function epiFormatLongDate(iso) {
+  const d = epiParseIsoDate(iso);
+  if (!d || Number.isNaN(d.getTime())) return "";
+  const monthsEn = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const monthsFr = ["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
+  if (currentLang === "fr") {
+    return d.getDate() + " " + monthsFr[d.getMonth()] + " " + d.getFullYear();
+  }
+  return monthsEn[d.getMonth()] + " " + epiOrdinalDay(d.getDate());
+}
+
+function epiForecastEndIso() {
+  if (INVASION_RISK && INVASION_RISK.forecast_end_date) {
+    return INVASION_RISK.forecast_end_date;
+  }
+  const cutoff = INVASION_RISK && INVASION_RISK.cutoff_date;
+  const weeks = INVASION_RISK && INVASION_RISK.horizon_window;
+  const d = epiParseIsoDate(cutoff);
+  if (!d || weeks == null || Number.isNaN(Number(weeks))) return null;
+  d.setDate(d.getDate() + Math.round(Number(weeks)) * 7);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return yyyy + "-" + mm + "-" + dd;
+}
+
+function updateEpiMetaNotes() {
+  const sub = document.getElementById("epi-trends-subtitle");
+  if (sub) {
+    const startIso = INVASION_RISK && INVASION_RISK.cutoff_date;
+    const weeksRaw = INVASION_RISK && (
+      INVASION_RISK.forecasting_window != null
+        ? INVASION_RISK.forecasting_window
+        : INVASION_RISK.horizon_window
+    );
+    const weeks = (weeksRaw == null || Number.isNaN(Number(weeksRaw)))
+      ? null
+      : Math.round(Number(weeksRaw));
+    const endIso = epiForecastEndIso();
+    const startLabel = epiFormatLongDate(startIso);
+    const endLabel = epiFormatLongDate(endIso);
+    if (startLabel && endLabel && weeks != null) {
+      sub.textContent = tf("ui.epi_forecast_subtitle", {
+        start: startLabel,
+        weeks: String(weeks),
+        week_unit: weeks === 1 ? t("ui.epi_week_one") : t("ui.epi_week_other"),
+        end: endLabel,
+      });
+    } else {
+      sub.textContent = "";
+    }
+  }
+  const methodEl = document.getElementById("epi-trends-method");
+  if (!methodEl) return;
+  if (!INVASION_RISK) {
+    methodEl.textContent = t("ui.epi_no_data");
+    return;
+  }
+  const label = (INVASION_RISK.method_label) || t("ui.epi_method_label");
+  const url = INVASION_RISK.method_url || t("ui.epi_method_url");
+  const cutoffLabel = epiFormatLongDate(INVASION_RISK.cutoff_date);
+  let html = escHtml(t("ui.epi_method_prefix")) + " " +
+    "<a href='" + escHtml(url) + "' target='_blank' rel='noopener'>" +
+    escHtml(label) + "</a>";
+  if (cutoffLabel) {
+    html += " · " + escHtml(tf("ui.epi_data_up_to", {date: cutoffLabel}));
+  }
+  methodEl.innerHTML = html;
+}
+
+function renderEpiLegendBars() {
+  function fillBar(barId, ticksId, domain, round) {
+    const bar = document.getElementById(barId);
+    const ticks = document.getElementById(ticksId);
+    if (!bar || !ticks) return;
+    const stops = [];
+    for (let i = 0; i <= 10; i++) {
+      const tt = i / 10;
+      stops.push(rgb(lerpColor(domain.palette, tt)) + " " + Math.round(tt * 100) + "%");
+    }
+    bar.style.background = "linear-gradient(to right, " + stops.join(", ") + ")";
+    const lo = domain.min, hi = domain.max;
+    const mid = domain.isLog ? Math.sqrt(Math.max(lo, 1e-9) * Math.max(hi, 1e-9)) : (lo + hi) / 2;
+    ticks.innerHTML =
+      "<span>" + fmtLegend(lo, round) + "</span>" +
+      "<span>" + fmtLegend(mid, round) + "</span>" +
+      "<span>" + fmtLegend(hi, round) + "</span>";
+  }
+  const invLabel = document.getElementById("epi-legend-invasion-label");
+  if (invLabel) {
+    const raw = (INVASION_RISK && INVASION_RISK.p_case_invasion_label) ||
+      t("ui.epi_p_invasion");
+    invLabel.textContent = epiCapitalizeFirst(raw);
+  }
+  const activeLabel = document.querySelector('#epi-trends-legend [data-i18n="ui.epi_legend_active"]');
+  if (activeLabel) {
+    activeLabel.textContent = epiCapitalizeFirst(t("ui.epi_legend_active"));
+  }
+  fillBar("epi-legend-invasion-bar", "epi-legend-invasion-ticks", epiInvasionDomain, 2);
+  fillBar("epi-legend-cases-bar", "epi-legend-cases-ticks", epiCasesDomain, "int");
+}
+
+function updateEpiFloat(nom, latlng) {
+  const box = document.getElementById("epi-float");
+  if (!box) return;
+  const row = INVASION_ZONES[nom];
+  if (!row || !epiZoneVisible(row)) {
+    box.classList.remove("visible");
+    return;
+  }
+  const name = zoneDisplayName(nom) || nom;
+  box.innerHTML =
+    "<strong>" + escHtml(name) + "</strong>" +
+    "<table>" +
+    "<tr><td>" + escHtml(t("ui.epi_surveillance_gap")) + "</td><td>" + epiFmtNum(row.surveillance_gap, 3) + "</td></tr>" +
+    "<tr><td>" + escHtml(t("ui.epi_access_gap")) + "</td><td>" + epiFmtNum(row.access_gap, 3) + "</td></tr>" +
+    "<tr><td>" + escHtml(t("ui.epi_social_vuln")) + "</td><td>" + epiFmtNum(row.social_vulnerability, 3) + "</td></tr>" +
+    "</table>";
+  const c = latlng
+    ? [latlng.lat, latlng.lng]
+    : zoneCentroid(nom);
+  if (c) {
+    const pt = map.latLngToContainerPoint(L.latLng(c[0], c[1]));
+    const mapEl = map.getContainer();
+    const x = Math.min(Math.max(12, pt.x + 14), mapEl.clientWidth - 220);
+    const y = Math.min(Math.max(12, pt.y - 20), mapEl.clientHeight - 120);
+    box.style.left = x + "px";
+    box.style.top = y + "px";
+  }
+  box.classList.add("visible");
+}
+
+function hideEpiFloat() {
+  const box = document.getElementById("epi-float");
+  if (box) box.classList.remove("visible");
+}
+
+function setEpiSelected(nom) {
+  if (!nom || !INVASION_ZONES[nom] || !epiZoneVisible(INVASION_ZONES[nom])) {
+    epiSelectedNom = null;
+    epiFocusNoms = null;
+    clearEpiLinks();
+    clearFlowArcs();
+  } else {
+    epiSelectedNom = nom;
+    epiFocusNoms = epiFlowConnectedNoms(nom);
+    flowHubNom = nom;
+    clearEpiLinks();
+    renderFlowArcs(nom, flowArcLayerDef());
+  }
+  renderEpiTrendsTable();
+  recomputeEpiTrends();
+}
+
+function epiSortedRows() {
+  const scope = epiCurrentScope();
+  if (!scope) return [];
+  const rows = [];
+  Object.keys(INVASION_ZONES).forEach(function(nom) {
+    const row = INVASION_ZONES[nom];
+    if (!epiZoneVisible(row)) return;
+    const rr = row[scope.rr];
+    const rrRank = row[scope.rank];
+    // Province scopes only include zones with a non-null provincial RR when ranking by RR.
+    if (scope.province && epiRankMode === "rr" && (rr == null || Number.isNaN(rr))) return;
+    rows.push({
+      nom: nom,
+      row: row,
+      rr: rr,
+      rrRank: rrRank,
+      priority: row.priority,
+      priorityRank: row.priority_rank,
+    });
+  });
+  rows.sort(function(a, b) {
+    if (epiRankMode === "priority") {
+      const pa = a.priorityRank, pb = b.priorityRank;
+      if (pa == null && pb == null) return String(a.nom).localeCompare(String(b.nom));
+      if (pa == null) return 1;
+      if (pb == null) return -1;
+      if (pa !== pb) return pa - pb;
+      return String(a.nom).localeCompare(String(b.nom));
+    }
+    const ra = a.rrRank, rb = b.rrRank;
+    if (ra == null && rb == null) {
+      const va = a.rr, vb = b.rr;
+      if (va == null && vb == null) return String(a.nom).localeCompare(String(b.nom));
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return vb - va;
+    }
+    if (ra == null) return 1;
+    if (rb == null) return -1;
+    if (ra !== rb) return ra - rb;
+    return String(a.nom).localeCompare(String(b.nom));
+  });
+  return rows;
+}
+
+function epiFmtCi(lo, hi, digits) {
+  const a = epiFmtNum(lo, digits);
+  const b = epiFmtNum(hi, digits);
+  if (a === "—" && b === "—") return "—";
+  return a + " - " + b;
+}
+
+function renderEpiTrendsTable() {
+  const tbody = document.getElementById("epi-trends-tbody");
+  if (!tbody) return;
+  const rows = epiSortedRows();
+  let maxRr = 0;
+  rows.forEach(function(item) {
+    if (item.rr != null && !Number.isNaN(item.rr) && item.rr > maxRr) maxRr = item.rr;
+  });
+  tbody.innerHTML = rows.map(function(item) {
+    const sel = item.nom === epiSelectedNom ? " selected" : "";
+    const norm = (item.rr == null || Number.isNaN(item.rr) || maxRr <= 0)
+      ? null
+      : (item.rr / maxRr);
+    const pInv = item.row.p_case_invasion;
+    const pLo = item.row.p_case_lo;
+    const pHi = item.row.p_case_hi != null ? item.row.p_case_hi : item.row.p_case_high;
+    return "<tr class='" + sel + "' data-nom='" + escHtml(item.nom) + "'>" +
+      "<td>" + escHtml(item.row.province || "—") + "</td>" +
+      "<td>" + escHtml(zoneDisplayName(item.nom) || item.nom) + "</td>" +
+      "<td class='num'>" + epiFmtNum(pInv, 3) + "</td>" +
+      "<td class='num'>" + epiFmtCi(pLo, pHi, 3) + "</td>" +
+      "<td class='num'>" + epiFmtNum(norm, 3) + "</td>" +
+      "<td class='num'>" + epiFmtNum(item.rr, 2) + "</td>" +
+      "<td class='num'>" + (item.rrRank == null ? "—" : item.rrRank) + "</td>" +
+      "<td class='num'>" + epiFmtNum(item.priority, 3) + "</td>" +
+      "<td class='num'>" + (item.priorityRank == null ? "—" : item.priorityRank) + "</td>" +
+      "</tr>";
+  }).join("");
+}
+
+function recomputeEpiTrends() {
+  if (!INVASION_RISK) return;
+  const invasionVals = [];
+  const caseVals = [];
+  Object.keys(INVASION_ZONES).forEach(function(nom) {
+    const row = INVASION_ZONES[nom];
+    if (!epiZoneVisible(row)) return;
+    if (row.was_active_before) {
+      const z = ZONE_DATA[nom] || {};
+      const c = z.confirmed_cases;
+      if (c != null && !Number.isNaN(Number(c)) && Number(c) > 0) caseVals.push(Number(c));
+    } else if (row.p_case_invasion != null && !Number.isNaN(row.p_case_invasion)) {
+      invasionVals.push(row.p_case_invasion);
+    }
+  });
+  if (invasionVals.length) {
+    epiInvasionDomain = {
+      min: Math.min.apply(null, invasionVals),
+      max: Math.max.apply(null, invasionVals),
+      palette: PURPLES,
+    };
+    if (epiInvasionDomain.max === epiInvasionDomain.min) {
+      epiInvasionDomain.max = epiInvasionDomain.min + 0.01;
+    }
+  } else {
+    epiInvasionDomain = {min: 0, max: 1, palette: PURPLES};
+  }
+  if (caseVals.length) {
+    const lo = Math.min.apply(null, caseVals);
+    const hi = Math.max.apply(null, caseVals);
+    epiCasesDomain = {
+      min: lo,
+      max: hi === lo ? lo * 10 : hi,
+      isLog: true,
+      palette: REDS,
+    };
+  } else {
+    epiCasesDomain = {min: 1, max: 10, isLog: true, palette: REDS};
+  }
+  updateEpiTitle();
+  updateEpiMetaNotes();
+  renderEpiLegendBars();
+  renderEpiTrendsTable();
+  geoLayer.setStyle(styleFn);
+  clearEpiLinks();
+  if (flowArcsOverlayActive()) {
+    renderFlowArcs(flowHubNom || epiSelectedNom, flowArcLayerDef());
+  } else {
+    clearFlowArcs();
+  }
+}
+
+function epiTrendsStyleFn(feature) {
+  const ref = feature.properties.nom;
+  const row = INVASION_ZONES[ref];
+  if (!row || !epiZoneVisible(row)) {
+    return {color: "#111", weight: 0.25, fillOpacity: 0.04, fillColor: "#222"};
+  }
+  let fill = ZERO_FILL;
+  let has = false;
+  if (row.was_active_before) {
+    const z = ZONE_DATA[ref] || {};
+    const v = z.confirmed_cases;
+    if (v != null && !Number.isNaN(Number(v))) {
+      has = true;
+      const num = Number(v);
+      if (num <= 0) fill = ZERO_FILL;
+      else {
+        let t = (Math.log(num) - Math.log(epiCasesDomain.min)) /
+          (Math.log(epiCasesDomain.max) - Math.log(epiCasesDomain.min) || 1);
+        if (!isFinite(t)) t = 0;
+        t = Math.max(0, Math.min(1, t));
+        fill = rgb(lerpColor(epiCasesDomain.palette, t));
+      }
+    }
+  } else if (row.p_case_invasion != null && !Number.isNaN(row.p_case_invasion)) {
+    has = true;
+    let t = (row.p_case_invasion - epiInvasionDomain.min) /
+      (epiInvasionDomain.max - epiInvasionDomain.min || 1);
+    if (!isFinite(t)) t = 0;
+    t = Math.max(0, Math.min(1, t));
+    fill = rgb(lerpColor(epiInvasionDomain.palette, t));
+  }
+  if (!has) {
+    return {color: "#111", weight: 0.35, fillOpacity: 0};
+  }
+  let opacity = 0.82;
+  let weight = 0.35;
+  if (epiSelectedNom) {
+    const focus = epiFocusNoms && epiFocusNoms.has(ref);
+    if (ref === epiSelectedNom) {
+      opacity = 0.95;
+      weight = 1.8;
+    } else if (focus) {
+      opacity = 0.78;
+      weight = 0.8;
+    } else {
+      opacity = 0.12;
+    }
+  }
+  return {
+    color: ref === epiSelectedNom ? "#ffae42" : "#111",
+    weight: weight,
+    fillColor: fill,
+    fillOpacity: opacity,
+  };
+}
+
+function enterEpiTrendsView() {
+  if (!INVASION_RISK || !Object.keys(INVASION_ZONES).length) {
+    const methodEl = document.getElementById("epi-trends-method");
+    if (methodEl) methodEl.textContent = t("ui.epi_no_data");
+  }
+  hideProvinceOutlines();
+  clearContextSelection();
+  clearEpiLinks();
+  const epiCases = document.getElementById("epi-show-cases");
+  if (epiCases && showCasesBox) epiCases.checked = !!showCasesBox.checked;
+  if (!epiSelectedNom) {
+    flowHubNom = PAYLOAD.flow_default_hub || flowHubNom;
+    clearFlowArcs();
+  } else {
+    flowHubNom = epiSelectedNom;
+    renderFlowArcs(epiSelectedNom, flowArcLayerDef());
+  }
+  updateEpiMetaNotes();
+}
+
+function leaveEpiTrendsView() {
+  epiSelectedNom = null;
+  epiFocusNoms = null;
+  hideEpiFloat();
+  clearEpiLinks();
+  clearFlowArcs();
+  document.body.classList.remove("view-epi-trends", "epi-splitting");
 }
 
 const ZERO_FILL    = "#c4bfb6";
@@ -4221,6 +5569,7 @@ function valueToColor(v, ref, layer) {
 }
 
 function styleFn(feature) {
+  if (activeView === "epi-trends") return epiTrendsStyleFn(feature);
   const ref = feature.properties.nom;
   const v = currentValues.get(ref);
   const has = v != null && !Number.isNaN(v);
@@ -4423,11 +5772,18 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
     layer.on({
       mouseover: function(e) {
         if (activeView === "trends") {
-          clearTimeout(trendsHoverTimer);
-          setTrendsProvinceHover(feature.properties.province || null);
+          if (trendsScope === "lab" || trendsScope === "national") return;
+          e.target.setStyle({weight: 1.6, color: "#ffae42"});
+          e.target.bringToFront();
           return;
         }
         if (activeView === "context") {
+          return;
+        }
+        if (activeView === "epi-trends") {
+          e.target.setStyle({weight: 1.6, color: "#ffae42"});
+          e.target.bringToFront();
+          updateEpiFloat(feature.properties.nom, e.latlng);
           return;
         }
         e.target.setStyle({weight: 1.6, color: "#ffae42"});
@@ -4437,9 +5793,11 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
       },
       mouseout: function(e) {
         if (activeView === "trends") {
-          trendsHoverTimer = setTimeout(function() {
-            setTrendsProvinceHover(null);
-          }, 40);
+          geoLayer.resetStyle(e.target);
+          if (trendsScope === "health_zone" && trendsSelectedKey &&
+              feature.properties.nom === trendsSelectedKey) {
+            e.target.setStyle({weight: 2, color: "#ffae42"});
+          }
           return;
         }
         if (activeView === "context") {
@@ -4448,12 +5806,35 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
           }
           return;
         }
+        if (activeView === "epi-trends") {
+          hideEpiFloat();
+          geoLayer.resetStyle(e.target);
+          return;
+        }
         geoLayer.resetStyle(e.target);
       },
       click: function(e) {
+        if (activeView === "trends") {
+          L.DomEvent.stop(e);
+          if (trendsScope === "lab" || trendsScope === "national") return;
+          if (trendsScope === "province") {
+            setTrendsSelection(feature.properties.province || null);
+            return;
+          }
+          if (trendsScope === "health_zone") {
+            setTrendsSelection(feature.properties.nom || null);
+            return;
+          }
+          return;
+        }
         if (activeView === "context") {
           L.DomEvent.stop(e);
           selectContextZone(feature.properties.nom, e.target);
+          return;
+        }
+        if (activeView === "epi-trends") {
+          L.DomEvent.stop(e);
+          setEpiSelected(feature.properties.nom);
           return;
         }
         const layer = getLayer(layerSelect.value);
@@ -4471,6 +5852,9 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
       },
       dblclick: function(e) {
         if (activeView === "context") return;
+        if (activeView === "trends" && (trendsScope === "lab" || trendsScope === "national")) {
+          return;
+        }
         L.DomEvent.stop(e);
         map.fitBounds(e.target.getBounds(), {padding:[40,40]});
       }
@@ -4480,6 +5864,7 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
 
 map.on("click", function() {
   if (activeView === "context") clearContextSelection();
+  if (activeView === "epi-trends") setEpiSelected(null);
 });
 
 // --- health-zone search ---
@@ -4658,19 +6043,28 @@ if (zoneSearchInput && zoneSearchResults) {
 }
 
 // --- province outlines (Trends view) ---
+let trendsScope = "national";
+let trendsSelectedKey = null;
+let trendsHoverTimer = null;
+let trendsHoveredProvince = null;
 function themeVar(name, fallback) {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || fallback;
 }
-function provinceOutlineStyle(hovered) {
+function provinceOutlineStyle(selected) {
+  const provinceMode = activeView === "trends" && trendsScope === "province";
+  const baseWeight = provinceMode
+    ? parseFloat(themeVar("--province-outline-weight-wide", "2.4"))
+    : parseFloat(themeVar("--province-outline-weight", "1"));
+  const selWeight = provinceMode
+    ? parseFloat(themeVar("--province-outline-weight-wide-hover", "3.6"))
+    : parseFloat(themeVar("--province-outline-weight-hover", "1.5"));
   return {
-    color: hovered
+    color: selected
       ? themeVar("--province-outline-hover", "#b23b2e")
       : themeVar("--province-outline", "#9b7d4e"),
-    weight: hovered
-      ? parseFloat(themeVar("--province-outline-weight-hover", "1.5"))
-      : parseFloat(themeVar("--province-outline-weight", "1")),
-    opacity: hovered ? 1 : 0.88,
+    weight: selected ? selWeight : baseWeight,
+    opacity: selected ? 1 : (provinceMode ? 0.95 : 0.88),
     fillOpacity: 0,
   };
 }
@@ -4685,8 +6079,8 @@ const provinceOutlineLayer = L.geoJSON(PAYLOAD.province_boundaries || {type:"Fea
   },
 });
 
-function applyProvinceOutlineStyles(hoveredProvince) {
-  trendsHoveredProvince = hoveredProvince || null;
+function applyProvinceOutlineStyles(selectedProvince) {
+  trendsHoveredProvince = selectedProvince || null;
   document.body.classList.toggle("trends-province-hovered", !!trendsHoveredProvince);
   provinceOutlineLayer.eachLayer(function(layer) {
     const match = trendsHoveredProvince &&
@@ -4694,7 +6088,6 @@ function applyProvinceOutlineStyles(hoveredProvince) {
     layer.setStyle(provinceOutlineStyle(!!match));
     if (match) layer.bringToFront();
   });
-  renderTrendsPanel(trendsHoveredProvince);
 }
 
 function escHtml(s) {
@@ -4705,31 +6098,258 @@ function escHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
-function renderTrendsPanel(province) {
-  const body = document.getElementById("trends-body");
-  const title = document.getElementById("trends-title");
-  if (!body) return;
-  if (!province) {
-    if (title) title.textContent = t("ui.trends_panel");
-    body.className = "panel-body trends-empty";
-    body.innerHTML = "";
-    return;
-  }
-  const trends = PAYLOAD.onset_trends;
-  const plot = trends && trends.plots && trends.plots[province];
-  if (!plot || !plot.svg) {
-    if (title) title.textContent = t("ui.trends_panel");
-    body.className = "panel-body trends-empty";
-    body.innerHTML = "<p>" + tf("ui.trends_no_data", {province: escHtml(province)}) + "</p>";
-    return;
-  }
-  if (title) title.textContent = plot.title || ("Daily onset — " + province);
-  body.className = "panel-body";
-  body.innerHTML = "<div class='onset-chart-wrap'>" + plot.svg + "</div>";
+function renderTrendsPanel(_unused) {
+  renderTrendsPlot();
 }
 
 function setTrendsProvinceHover(province) {
-  applyProvinceOutlineStyles(province || null);
+  // Kept for compatibility; selection-driven plots replace hover plots.
+  if (activeView === "trends" && trendsScope === "province" && !trendsSelectedKey) {
+    applyProvinceOutlineStyles(province || null);
+  }
+}
+
+function trendsPlotData() {
+  return PAYLOAD.onset_trends || null;
+}
+
+function trendsEntityList() {
+  const data = trendsPlotData();
+  if (!data) return [];
+  if (trendsScope === "province") {
+    return Object.keys(data.provinces || data.plots || {}).sort(function(a, b) {
+      return String(a).localeCompare(String(b), undefined, {sensitivity: "base"});
+    }).map(function(id) {
+      return {id: id, label: id, kind: "province"};
+    });
+  }
+  if (trendsScope === "health_zone") {
+    return Object.keys(data.health_zones || {}).sort(function(a, b) {
+      return String(a).localeCompare(String(b), undefined, {sensitivity: "base"});
+    }).map(function(id) {
+      return {id: id, label: zoneDisplayName(id) || id, kind: "health_zone"};
+    });
+  }
+  if (trendsScope === "lab") {
+    return (data.labs || []).map(function(lab) {
+      return {id: lab.id, label: lab.label || lab.id, kind: "lab"};
+    });
+  }
+  return [{id: "national", label: t("ui.trends_scope_national"), kind: "national"}];
+}
+
+function findTrendsLab(id) {
+  const labs = (trendsPlotData() && trendsPlotData().labs) || [];
+  for (let i = 0; i < labs.length; i++) {
+    if (labs[i].id === id) return labs[i];
+  }
+  return null;
+}
+
+function resolveTrendsPlot() {
+  const data = trendsPlotData();
+  if (!data) return null;
+  if (trendsScope === "national") return data.national || null;
+  if (trendsScope === "province") {
+    if (!trendsSelectedKey) return null;
+    return (data.provinces && data.provinces[trendsSelectedKey]) ||
+      (data.plots && data.plots[trendsSelectedKey]) || null;
+  }
+  if (trendsScope === "health_zone") {
+    if (!trendsSelectedKey) return null;
+    return (data.health_zones && data.health_zones[trendsSelectedKey]) || null;
+  }
+  if (trendsScope === "lab") {
+    if (!trendsSelectedKey) return null;
+    return findTrendsLab(trendsSelectedKey);
+  }
+  return null;
+}
+
+function renderTrendsPlot() {
+  const titleEl = document.getElementById("trends-title");
+  const body = document.getElementById("trends-body");
+  if (!body) return;
+  const plot = resolveTrendsPlot();
+  if (plot && plot.svg) {
+    if (titleEl) titleEl.textContent = plot.title || plot.label || t("ui.trends_panel");
+    body.className = "panel-body";
+    body.innerHTML = "<div class='onset-chart-wrap'>" + plot.svg + "</div>";
+    return;
+  }
+  if (titleEl) titleEl.textContent = t("ui.trends_panel");
+  body.className = "panel-body trends-empty";
+  if (trendsScope === "national") {
+    body.innerHTML = "<p>" + escHtml(t("ui.trends_no_plot").replace("{name}", t("ui.trends_scope_national"))) + "</p>";
+  } else if (trendsScope === "province") {
+    body.innerHTML = "<p>" + escHtml(
+      trendsSelectedKey
+        ? tf("ui.trends_no_plot", {name: trendsSelectedKey})
+        : t("ui.trends_select_province")
+    ) + "</p>";
+  } else if (trendsScope === "health_zone") {
+    body.innerHTML = "<p>" + escHtml(
+      trendsSelectedKey
+        ? tf("ui.trends_no_plot", {name: zoneDisplayName(trendsSelectedKey) || trendsSelectedKey})
+        : t("ui.trends_select_health_zone")
+    ) + "</p>";
+  } else {
+    body.innerHTML = "<p>" + escHtml(
+      trendsSelectedKey
+        ? tf("ui.trends_no_plot", {name: (findTrendsLab(trendsSelectedKey) || {}).label || trendsSelectedKey})
+        : t("ui.trends_select_lab")
+    ) + "</p>";
+  }
+}
+
+function fitMapToTrendsSelection(key) {
+  if (!key || activeView !== "trends") return;
+  if (trendsScope === "health_zone") {
+    const layer = findGeoLayerByNom(key);
+    if (!layer) return;
+    map.fitBounds(layer.getBounds(), {
+      paddingTopLeft: [40, 80],
+      paddingBottomRight: [Math.min(420, Math.round(window.innerWidth * 0.42)), 160],
+      maxZoom: 10,
+    });
+    return;
+  }
+  if (trendsScope !== "province") return;
+  let bounds = null;
+  provinceOutlineLayer.eachLayer(function(layer) {
+    if (layer.feature && layer.feature.properties.province === key) {
+      bounds = layer.getBounds();
+    }
+  });
+  if (!bounds || !bounds.isValid()) {
+    const layers = [];
+    geoLayer.eachLayer(function(layer) {
+      if (layer.feature && layer.feature.properties.province === key) {
+        layers.push(layer);
+      }
+    });
+    if (!layers.length) return;
+    bounds = L.featureGroup(layers).getBounds();
+  }
+  if (!bounds || !bounds.isValid()) return;
+  map.fitBounds(bounds, {
+    paddingTopLeft: [40, 80],
+    paddingBottomRight: [Math.min(420, Math.round(window.innerWidth * 0.42)), 160],
+    maxZoom: 8,
+  });
+}
+
+function setTrendsSelection(key, opts) {
+  opts = opts || {};
+  trendsSelectedKey = key || null;
+  if (trendsScope === "province") {
+    applyProvinceOutlineStyles(trendsSelectedKey);
+  } else if (trendsScope === "health_zone") {
+    applyProvinceOutlineStyles(null);
+  } else {
+    applyProvinceOutlineStyles(null);
+  }
+  renderTrendsLabList();
+  renderTrendsPlot();
+  if (activeView === "trends") {
+    // Restyle health-zone polygons to emphasize selection.
+    geoLayer.setStyle(styleFn);
+    if (trendsScope === "health_zone" && trendsSelectedKey) {
+      geoLayer.eachLayer(function(layer) {
+        if (layer.feature && layer.feature.properties.nom === trendsSelectedKey) {
+          layer.setStyle({weight: 2, color: "#ffae42"});
+          layer.bringToFront();
+        }
+      });
+    }
+    if (trendsSelectedKey &&
+        (trendsScope === "province" || trendsScope === "health_zone")) {
+      fitMapToTrendsSelection(trendsSelectedKey);
+    }
+  }
+  if (opts.fromSearch) {
+    const input = document.getElementById("trends-search-input");
+    const results = document.getElementById("trends-search-results");
+    if (input) input.value = "";
+    if (results) {
+      results.classList.remove("open");
+      results.innerHTML = "";
+    }
+  }
+}
+
+function setTrendsScope(scope) {
+  trendsScope = scope || "national";
+  trendsSelectedKey = null;
+  const labList = document.getElementById("trends-lab-list");
+  if (labList) labList.classList.toggle("visible", trendsScope === "lab");
+  document.body.classList.toggle("trends-lab-mode", trendsScope === "lab");
+  applyProvinceOutlineStyles(null);
+  renderTrendsLabList();
+  renderTrendsPlot();
+  if (activeView === "trends") {
+    geoLayer.setStyle(styleFn);
+    showProvinceOutlines();
+  }
+}
+
+function renderTrendsLabList() {
+  const root = document.getElementById("trends-lab-list");
+  if (!root) return;
+  if (trendsScope !== "lab") {
+    root.innerHTML = "";
+    return;
+  }
+  const labs = (trendsPlotData() && trendsPlotData().labs) || [];
+  const q = ((document.getElementById("trends-search-input") || {}).value || "").trim().toLowerCase();
+  root.innerHTML = labs.filter(function(lab) {
+    if (!q) return true;
+    return String(lab.label || "").toLowerCase().indexOf(q) >= 0 ||
+      String(lab.id || "").toLowerCase().indexOf(q) >= 0;
+  }).map(function(lab) {
+    const active = lab.id === trendsSelectedKey ? " active" : "";
+    return "<button type='button' class='" + active + "' data-lab-id='" + escHtml(lab.id) + "'>" +
+      escHtml(lab.label || lab.id) + "</button>";
+  }).join("");
+}
+
+function renderTrendsSearchResults(query) {
+  const root = document.getElementById("trends-search-results");
+  if (!root) return;
+  if (trendsScope === "national") {
+    root.classList.remove("open");
+    root.innerHTML = "";
+    return;
+  }
+  const q = String(query || "").trim().toLowerCase();
+  // Only open the match list once the user starts typing.
+  if (!q) {
+    root.classList.remove("open");
+    root.innerHTML = "";
+    return;
+  }
+  let items = trendsEntityList().filter(function(it) {
+    return String(it.label).toLowerCase().indexOf(q) >= 0 ||
+      String(it.id).toLowerCase().indexOf(q) >= 0;
+  });
+  if (!items.length) {
+    root.innerHTML = "<div class='zone-search-empty'>" + escHtml(t("ui.zone_search_no_matches") || "No matches") + "</div>";
+    root.classList.add("open");
+    return;
+  }
+  // Keep enough matches that the expanded panel can fill its ≥5-hit capacity.
+  root.innerHTML = items.slice(0, 40).map(function(it) {
+    return "<button type='button' role='option' data-id='" + escHtml(it.id) + "'>" +
+      escHtml(it.label) + "</button>";
+  }).join("");
+  root.classList.add("open");
+}
+
+function syncTrendsPlayButton() {
+  const btn = document.getElementById("trends-play-btn");
+  if (!btn) return;
+  btn.classList.toggle("playing", !!trendsSliderAnimating);
+  btn.textContent = trendsSliderAnimating ? t("ui.trends_pause") : t("ui.trends_play");
 }
 
 function formatContextDate(raw) {
@@ -4987,8 +6607,6 @@ function hideProvinceOutlines() {
 }
 
 // --- Map / Trends / Context tab switching ---
-let trendsHoverTimer = null;
-let trendsHoveredProvince = null;
 let savedMapLayerId = null;
 let trendsDateIdx = 0;
 let trendsSliderTimer = null;
@@ -5011,6 +6629,7 @@ function stopTrendsSliderAnimation() {
   }
   trendsSliderAnimating = false;
   syncTrendsSliderBusy();
+  syncTrendsPlayButton();
 }
 
 function applyTrendsDateIdx(idx) {
@@ -5029,6 +6648,7 @@ function playTrendsSliderAnimation() {
   if (!ts || !ts.dates || ts.dates.length < 2) return;
   trendsSliderAnimating = true;
   syncTrendsSliderBusy();
+  syncTrendsPlayButton();
   let idx = 0;
   applyTrendsDateIdx(0);
   trendsSliderTimer = setInterval(function() {
@@ -5110,6 +6730,14 @@ function recomputeTrendsMap() {
     palette: PALETTES[layer.palette] || REDS,
   };
   geoLayer.setStyle(styleFn);
+  if (activeView === "trends" && trendsScope === "health_zone" && trendsSelectedKey) {
+    geoLayer.eachLayer(function(layer) {
+      if (layer.feature && layer.feature.properties.nom === trendsSelectedKey) {
+        layer.setStyle({weight: 2, color: "#ffae42"});
+        layer.bringToFront();
+      }
+    });
+  }
 }
 
 function restoreCaseMarkersForView(view) {
@@ -5117,12 +6745,19 @@ function restoreCaseMarkersForView(view) {
     map.removeLayer(caseLayer);
     return;
   }
+  if (view === "epi-trends") {
+    const epiCases = document.getElementById("epi-show-cases");
+    const on = epiCases ? epiCases.checked : (showCasesBox && showCasesBox.checked);
+    if (on) caseLayer.addTo(map);
+    else map.removeLayer(caseLayer);
+    return;
+  }
   if (showCasesBox.checked) caseLayer.addTo(map);
   else map.removeLayer(caseLayer);
 }
 
 function restoreFlowArcsForView(view) {
-  if (view !== "map") {
+  if (view !== "map" && view !== "epi-trends") {
     clearFlowArcs();
     return;
   }
@@ -5145,13 +6780,18 @@ function enterTrendsView() {
   if (!ts || !ts.dates || !ts.dates.length) {
     if (legendPanel) legendPanel.style.display = "none";
     recompute();
-    return;
+  } else {
+    if (legendPanel) legendPanel.style.display = "";
+    initTrendsLegendBar();
+    const slider = document.getElementById("trends-date-slider");
+    if (slider) slider.max = String(ts.dates.length - 1);
+    // Latest sitrep values on open; animation only via Play.
+    applyTrendsDateIdx(ts.dates.length - 1);
   }
-  if (legendPanel) legendPanel.style.display = "";
-  initTrendsLegendBar();
-  const slider = document.getElementById("trends-date-slider");
-  if (slider) slider.max = String(ts.dates.length - 1);
-  playTrendsSliderAnimation();
+  const scopeSelect = document.getElementById("trends-scope-select");
+  if (scopeSelect) setTrendsScope(scopeSelect.value || "national");
+  else setTrendsScope("national");
+  map.invalidateSize({animate: false});
 }
 
 function leaveTrendsView() {
@@ -5159,7 +6799,9 @@ function leaveTrendsView() {
   trendsSliderPointerDown = false;
   setTrendsSliderBusy(false);
   hideProvinceOutlines();
-  renderTrendsPanel(null);
+  trendsSelectedKey = null;
+  document.body.classList.remove("trends-lab-mode");
+  renderTrendsPlot();
   if (savedMapLayerId) {
     layerSelect.value = savedMapLayerId;
     recompute();
@@ -5170,9 +6812,17 @@ function setActiveView(view) {
   if (view === activeView) return;
   if (view === "trends") {
     enterTrendsView();
+  } else if (view === "epi-trends") {
+    if (activeView === "trends") leaveTrendsView();
+    else {
+      hideProvinceOutlines();
+      clearContextSelection();
+    }
+    enterEpiTrendsView();
   } else if (view === "context") {
     clearFlowArcs();
     if (activeView === "trends") leaveTrendsView();
+    else if (activeView === "epi-trends") leaveEpiTrendsView();
     else {
       hideProvinceOutlines();
       renderTrendsPanel(null);
@@ -5180,6 +6830,7 @@ function setActiveView(view) {
     clearContextSelection();
   } else {
     if (activeView === "trends") leaveTrendsView();
+    else if (activeView === "epi-trends") leaveEpiTrendsView();
     else {
       hideProvinceOutlines();
       clearContextSelection();
@@ -5190,11 +6841,21 @@ function setActiveView(view) {
   restoreFlowArcsForView(view);
   document.body.classList.toggle("view-map", view === "map");
   document.body.classList.toggle("view-trends", view === "trends");
+  document.body.classList.toggle("view-epi-trends", view === "epi-trends");
   document.body.classList.toggle("view-context", view === "context");
   syncMatrixUi();
   document.querySelectorAll(".view-tab").forEach(function(btn) {
     btn.classList.toggle("active", btn.dataset.view === view);
   });
+  if (view === "epi-trends") {
+    map.invalidateSize();
+    recomputeEpiTrends();
+  } else if (view === "trends") {
+    map.invalidateSize();
+  } else if (view === "map") {
+    map.invalidateSize();
+    recompute();
+  }
 }
 
 document.querySelectorAll(".view-tab").forEach(function(btn) {
@@ -5224,6 +6885,62 @@ document.querySelectorAll(".view-tab").forEach(function(btn) {
   slider.addEventListener("pointerdown", onSliderPointerDown);
   slider.addEventListener("pointerup", onSliderPointerUp);
   slider.addEventListener("pointercancel", onSliderPointerUp);
+  const playBtn = document.getElementById("trends-play-btn");
+  if (playBtn) {
+    playBtn.addEventListener("click", function() {
+      if (activeView !== "trends") return;
+      if (trendsSliderAnimating) stopTrendsSliderAnimation();
+      else playTrendsSliderAnimation();
+    });
+  }
+  syncTrendsPlayButton();
+})();
+
+(function wireTrendsPanelUi() {
+  const scopeSelect = document.getElementById("trends-scope-select");
+  const searchInput = document.getElementById("trends-search-input");
+  const searchResults = document.getElementById("trends-search-results");
+  const labList = document.getElementById("trends-lab-list");
+
+  if (scopeSelect) {
+    scopeSelect.addEventListener("change", function() {
+      setTrendsScope(scopeSelect.value || "national");
+      if (searchInput) searchInput.value = "";
+      if (searchResults) {
+        searchResults.classList.remove("open");
+        searchResults.innerHTML = "";
+      }
+    });
+  }
+  if (searchInput) {
+    searchInput.addEventListener("input", function() {
+      if (trendsScope === "lab") renderTrendsLabList();
+      renderTrendsSearchResults(searchInput.value);
+    });
+    searchInput.addEventListener("focus", function() {
+      renderTrendsSearchResults(searchInput.value);
+    });
+  }
+  if (searchResults) {
+    searchResults.addEventListener("click", function(e) {
+      const btn = e.target.closest("button[data-id]");
+      if (!btn) return;
+      setTrendsSelection(btn.getAttribute("data-id"), {fromSearch: true});
+    });
+  }
+  if (labList) {
+    labList.addEventListener("click", function(e) {
+      const btn = e.target.closest("button[data-lab-id]");
+      if (!btn) return;
+      setTrendsSelection(btn.getAttribute("data-lab-id"));
+    });
+  }
+  document.addEventListener("click", function(e) {
+    if (!searchResults || !searchResults.classList.contains("open")) return;
+    if (e.target.closest("#trends-search-wrap")) return;
+    searchResults.classList.remove("open");
+  });
+  setTrendsScope("national");
 })();
 
 // --- active-case markers ---
@@ -5320,21 +7037,261 @@ if (!PAYLOAD.genome_markers_available || !GENOME_SEQUENCES.length) {
 }
 
 showCasesBox.addEventListener("change", function() {
+  const epiCases = document.getElementById("epi-show-cases");
+  if (epiCases) epiCases.checked = showCasesBox.checked;
   syncMarkerToggles("cases");
+  if (activeView === "epi-trends") restoreCaseMarkersForView("epi-trends");
 });
 
 // --- Flowminder in/out flow arcs (toggle overlay) ---
 const showFlowArcsBox = document.getElementById("show-flow-arcs");
 const showFlowArcsRow = document.getElementById("show-flow-arcs-row");
+let flowArcsUserPref = true;
 if (!PAYLOAD.flow_arcs_available || !FLOW_ARC_LAYER) {
   if (showFlowArcsRow) showFlowArcsRow.style.display = "none";
+  flowArcsUserPref = false;
 } else if (showFlowArcsBox) {
+  if (showFlowArcsRow) showFlowArcsRow.style.display = "";
   showFlowArcsBox.checked = true;
+  flowArcsUserPref = true;
   showFlowArcsBox.addEventListener("change", function() {
+    flowArcsUserPref = !!showFlowArcsBox.checked;
     recompute();
     syncMatrixUi();
   });
 }
+
+// --- Epidemiological trends controls ---
+(function wireEpiTrendsUi() {
+  const scopeSelect = document.getElementById("epi-scope-select");
+  const tbody = document.getElementById("epi-trends-tbody");
+  const tab = document.querySelector('.view-tab[data-view="epi-trends"]');
+  const splitHandle = document.getElementById("epi-split-handle");
+  const EPI_SPLIT_MIN = 28;
+  const EPI_SPLIT_MAX = 72;
+  const EPI_SPLIT_KEY = "bdbv_epi_panel_width_pct";
+
+  function clampEpiSplitPct(pct) {
+    return Math.max(EPI_SPLIT_MIN, Math.min(EPI_SPLIT_MAX, pct));
+  }
+
+  function applyEpiSplitPct(pct, invalidate) {
+    const value = clampEpiSplitPct(pct);
+    document.documentElement.style.setProperty("--epi-panel-width", value + "%");
+    if (splitHandle) splitHandle.setAttribute("aria-valuenow", String(Math.round(value)));
+    try { localStorage.setItem(EPI_SPLIT_KEY, String(value)); } catch (e) {}
+    if (invalidate && activeView === "epi-trends") {
+      map.invalidateSize({animate: false});
+    }
+    return value;
+  }
+
+  function readStoredEpiSplit() {
+    try {
+      const raw = localStorage.getItem(EPI_SPLIT_KEY);
+      if (raw == null || raw === "") return 50;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : 50;
+    } catch (e) {
+      return 50;
+    }
+  }
+
+  applyEpiSplitPct(readStoredEpiSplit(), false);
+  if (splitHandle) {
+    splitHandle.setAttribute("aria-valuemin", String(EPI_SPLIT_MIN));
+    splitHandle.setAttribute("aria-valuemax", String(EPI_SPLIT_MAX));
+    let dragging = false;
+    function splitFromClientX(clientX) {
+      const w = window.innerWidth || document.documentElement.clientWidth || 1;
+      // Panel is on the right: width% = distance from right edge.
+      return clampEpiSplitPct(((w - clientX) / w) * 100);
+    }
+    function onPointerMove(e) {
+      if (!dragging) return;
+      if (e.cancelable) e.preventDefault();
+      const x = e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX;
+      applyEpiSplitPct(splitFromClientX(x), false);
+    }
+    function onPointerUp() {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove("epi-splitting");
+      window.removeEventListener("mousemove", onPointerMove);
+      window.removeEventListener("mouseup", onPointerUp);
+      window.removeEventListener("touchmove", onPointerMove);
+      window.removeEventListener("touchend", onPointerUp);
+      window.removeEventListener("touchcancel", onPointerUp);
+      if (activeView === "epi-trends") map.invalidateSize({animate: false});
+    }
+    function onPointerDown(e) {
+      if (activeView !== "epi-trends") return;
+      dragging = true;
+      document.body.classList.add("epi-splitting");
+      const x = e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX;
+      applyEpiSplitPct(splitFromClientX(x), false);
+      window.addEventListener("mousemove", onPointerMove);
+      window.addEventListener("mouseup", onPointerUp);
+      window.addEventListener("touchmove", onPointerMove, {passive: false});
+      window.addEventListener("touchend", onPointerUp);
+      window.addEventListener("touchcancel", onPointerUp);
+      if (e.cancelable) e.preventDefault();
+    }
+    splitHandle.addEventListener("mousedown", onPointerDown);
+    splitHandle.addEventListener("touchstart", onPointerDown, {passive: false});
+    splitHandle.addEventListener("keydown", function(e) {
+      if (activeView !== "epi-trends") return;
+      let delta = 0;
+      if (e.key === "ArrowLeft") delta = 2;
+      else if (e.key === "ArrowRight") delta = -2;
+      else if (e.key === "Home") {
+        applyEpiSplitPct(50, true);
+        e.preventDefault();
+        return;
+      } else return;
+      const cur = parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--epi-panel-width")
+      ) || 50;
+      applyEpiSplitPct(cur + delta, true);
+      e.preventDefault();
+    });
+  }
+
+  if (!INVASION_RISK || !Object.keys(INVASION_ZONES).length) {
+    if (tab) tab.style.display = "none";
+    if (splitHandle) splitHandle.style.display = "none";
+    return;
+  }
+  if (scopeSelect) {
+    scopeSelect.innerHTML = INVASION_SCOPES.map(function(s) {
+      return "<option value='" + escHtml(s.id) + "'>" + escHtml(s.label) + "</option>";
+    }).join("");
+    scopeSelect.addEventListener("change", function() {
+      epiScopeId = scopeSelect.value || "national";
+      setEpiSelected(null);
+      recomputeEpiTrends();
+      // Fit map to selected province when filtering.
+      const scope = epiCurrentScope();
+      if (scope && scope.province) {
+        const layers = [];
+        geoLayer.eachLayer(function(layer) {
+          if (layer.feature && layer.feature.properties.province === scope.province) {
+            layers.push(layer);
+          }
+        });
+        if (layers.length) {
+          const group = L.featureGroup(layers);
+          map.fitBounds(group.getBounds(), {padding: [30, 30], maxZoom: 8});
+        }
+      } else {
+        map.setView([INITIAL_VIEW.lat, INITIAL_VIEW.lon], INITIAL_VIEW.zoom);
+      }
+    });
+  }
+  document.querySelectorAll(".epi-rank-btn").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      epiRankMode = btn.getAttribute("data-rank") || "rr";
+      document.querySelectorAll(".epi-rank-btn").forEach(function(b) {
+        b.classList.toggle("active", b === btn);
+      });
+      renderEpiTrendsTable();
+    });
+  });
+  if (tbody) {
+    tbody.addEventListener("click", function(e) {
+      const tr = e.target.closest("tr[data-nom]");
+      if (!tr) return;
+      setEpiSelected(tr.getAttribute("data-nom"));
+    });
+  }
+  const epiCases = document.getElementById("epi-show-cases");
+  if (epiCases) {
+    epiCases.checked = !!(showCasesBox && showCasesBox.checked);
+    epiCases.addEventListener("change", function() {
+      if (showCasesBox) showCasesBox.checked = epiCases.checked;
+      if (activeView === "epi-trends") restoreCaseMarkersForView("epi-trends");
+      else syncMarkerToggles("cases");
+    });
+  }
+
+  function triggerDownload(filename, href) {
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  const csvBtn = document.getElementById("epi-download-csv");
+  if (csvBtn) {
+    csvBtn.addEventListener("click", function() {
+      const csv = (INVASION_RISK && INVASION_RISK.download_csv) || "";
+      if (!csv) return;
+      const blob = new Blob([csv], {type: "text/csv;charset=utf-8"});
+      const url = URL.createObjectURL(blob);
+      const stamp = (INVASION_RISK.cutoff_date || "data").replace(/-/g, "");
+      triggerDownload("invasion_risk_model_estimates_" + stamp + ".csv", url);
+      setTimeout(function() { URL.revokeObjectURL(url); }, 1500);
+    });
+  }
+
+  const mapBtn = document.getElementById("epi-download-map");
+  if (mapBtn) {
+    mapBtn.addEventListener("click", function() {
+      if (typeof html2canvas !== "function") {
+        window.alert(t("ui.epi_download_map_unavailable"));
+        return;
+      }
+      const hadCases = map.hasLayer(caseLayer);
+      const hadSelection = epiSelectedNom;
+      const prevCenter = map.getCenter();
+      const prevZoom = map.getZoom();
+      clearEpiLinks();
+      clearFlowArcs();
+      if (hadSelection) setEpiSelected(null);
+      if (hadCases) map.removeLayer(caseLayer);
+      hideEpiFloat();
+      document.body.classList.add("epi-map-exporting");
+      map.invalidateSize({animate: false});
+      try {
+        map.fitBounds(geoLayer.getBounds(), {
+          padding: [28, 28],
+          animate: false,
+          maxZoom: 7,
+        });
+      } catch (err) {
+        map.setView([-2.5, 23.5], 5, {animate: false});
+      }
+      setTimeout(function() {
+        html2canvas(map.getContainer(), {
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: "#ffffff",
+          scale: 2,
+        }).then(function(canvas) {
+          const jpg = canvas.toDataURL("image/jpeg", 0.92);
+          const stamp = (INVASION_RISK && INVASION_RISK.cutoff_date || "map").replace(/-/g, "");
+          triggerDownload("invasion_risk_map_" + stamp + ".jpg", jpg);
+        }).catch(function(err) {
+          console.error(err);
+          window.alert(t("ui.epi_download_map_unavailable"));
+        }).finally(function() {
+          document.body.classList.remove("epi-map-exporting");
+          map.invalidateSize({animate: false});
+          map.setView(prevCenter, prevZoom, {animate: false});
+          if (hadCases && (
+            (document.getElementById("epi-show-cases") || {}).checked ||
+            (showCasesBox && showCasesBox.checked)
+          )) {
+            caseLayer.addTo(map);
+          }
+          if (hadSelection) setEpiSelected(hadSelection);
+        });
+      }, 180);
+    });
+  }
+})();
 
 // Default: total cases layer, active-case markers ON, flow arcs ON from Mongbwalu.
 showCasesBox.checked = true;
@@ -5343,9 +7300,14 @@ caseLayer.addTo(map);
 layerSelect.addEventListener("change", function() {
   // OSRM layers (travel time / road distance) render from the origin zone's
   // matrix row, which visually competes with the Flowminder in/out-flow arcs
-  // radiating from the same origin — turn the arcs off automatically.
-  if (layerUsesMatrix(getLayer(layerSelect.value)) && showFlowArcsBox && showFlowArcsBox.checked) {
-    showFlowArcsBox.checked = false;
+  // radiating from the same origin — turn the arcs off automatically, then
+  // restore the user's Flowminder preference when leaving those layers.
+  if (showFlowArcsBox && PAYLOAD.flow_arcs_available && FLOW_ARC_LAYER) {
+    if (layerUsesMatrix(getLayer(layerSelect.value))) {
+      showFlowArcsBox.checked = false;
+    } else if (flowArcsUserPref) {
+      showFlowArcsBox.checked = true;
+    }
   }
   recompute();
   syncMatrixUi();
@@ -5454,6 +7416,7 @@ wireModal("terms-modal", "terms-btn", "terms-close");
     syncMarkerToggles("genomes"); // also unticks + removes the case-marker layer
     if (showFlowArcsBox) {
       showFlowArcsBox.checked = false;
+      flowArcsUserPref = false;
     }
     recompute();
     syncMatrixUi();
