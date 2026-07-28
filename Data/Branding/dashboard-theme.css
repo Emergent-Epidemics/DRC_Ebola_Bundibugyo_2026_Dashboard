@@ -24,6 +24,8 @@
   --case-marker: #5b86b3;
   --case-marker-opacity: 0.85;
   --green: #285943;
+  --header-bg: #f4f4f4;
+  --navy: #1B4671;
 }
 
 /* ── Page ─────────────────────────────────────────────────── */
@@ -66,24 +68,29 @@ html, body {
   background: rgba(155, 125, 78, 0.08) !important;
 }
 
-/* ── Title + tracker ────────────────────────────────────── */
-#title h1 {
-  color: var(--ink) !important;
+/* ── Header (title + tracker) ─────────────────────────────
+   NOTE: this used to be #title before the dashboard was split into
+   separate pages sharing one header; the header element is now
+   #site-header (see Scripts/common/chrome.py). */
+#site-header {
+  /* Swapped with #page-tabs below: header is now --card (white), tabs bar
+     is --header-bg (cream). */
+  background: var(--card) !important;
+}
+#site-header h1#page-heading {
+  color: var(--navy) !important;
   letter-spacing: -0.01em;
 }
-#title .sub {
+#site-header .sub {
   color: var(--muted) !important;
 }
-#title a {
+#site-header a {
   color: var(--link) !important;
 }
-#title a:hover {
+#site-header a:hover {
   color: var(--link-hover) !important;
 }
 
-#tracker {
-  border-top-color: var(--border) !important;
-}
 #tracker .global-title,
 #tracker .global-cell .sub,
 #tracker .country .sub {
@@ -159,6 +166,38 @@ select, button {
   color: var(--ink) !important;
   border-color: var(--border) !important;
 }
+
+/* Zone search box (#controls panel): the base dashboard.css styles this as
+   a plain dark <input>/dropdown (#222/#1a1a1a), which was never picked up
+   by the "select, button" override above since it's an <input> and a plain
+   <div> listbox -- leaving a black box sitting inside the themed light
+   panel. Match it to the rest of the panel chrome instead. */
+#zone-search-input {
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  border-color: var(--border) !important;
+}
+#zone-search-input:focus {
+  border-color: var(--terracotta) !important;
+  box-shadow: 0 0 0 1px rgba(155, 125, 78, 0.35) !important;
+}
+#zone-search-results {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  box-shadow: 0 4px 14px rgba(30, 25, 18, 0.18) !important;
+}
+.zone-search-option {
+  color: var(--ink) !important;
+  border-bottom-color: var(--border) !important;
+}
+.zone-search-option:hover,
+.zone-search-option.active {
+  background: rgba(155, 125, 78, 0.12) !important;
+  color: var(--maroon) !important;
+}
+.zone-search-empty {
+  color: var(--muted) !important;
+}
 .checkbox-row label {
   color: var(--ink) !important;
 }
@@ -187,6 +226,13 @@ h4 {
   background: rgba(155, 125, 78, 0.08) !important;
   color: var(--maroon) !important;
   border-color: var(--terracotta) !important;
+}
+
+/* ── Page tabs (full-width bar under the header) ──────────── */
+#page-tabs {
+  background: var(--header-bg) !important;
+  border-bottom: 1px solid var(--border) !important;
+  box-shadow: 0 1px 3px rgba(30, 25, 18, 0.08) !important;
 }
 
 /* ── View switcher (full-width bottom chrome) ─────────────── */
@@ -247,6 +293,20 @@ h4 {
   background: #f3f1ec !important;
   color: var(--terracotta) !important;
   border: 1px solid var(--border);
+}
+
+/* ── "Coming soon" stub pages ──────────────────────────────── */
+.stub-panel {
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 2px 10px rgba(30, 25, 18, 0.1) !important;
+}
+.stub-panel h2 {
+  color: var(--terracotta) !important;
+}
+.stub-panel p {
+  color: var(--muted) !important;
 }
 .context-pillar p {
   color: var(--ink) !important;
@@ -394,9 +454,54 @@ body.epi-splitting #epi-split-handle::before {
   background: var(--terracotta) !important;
 }
 
-body.view-epi-trends #title {
-  left: calc((100% - var(--epi-panel-width)) / 2) !important;
-  transform: translateX(-50%) !important;
-  max-width: min(520px, calc(100% - var(--epi-panel-width) - 24px)) !important;
+/* ── Trends panel (map left / plots column right) ─────────── */
+#trends-panel {
+  background: var(--bg) !important;
+  color: var(--ink) !important;
+  border-left-color: var(--border) !important;
 }
+/* Scope buttons (National / Provincial / Health Zone). These are plain
+   <button> elements, which the generic "select, button" rule above already
+   themes with !important -- these more-specific overrides are needed so the
+   hover/active states aren't clobbered by that rule (same reason
+   #epi-trends-panel button.epi-rank-btn needs its own overrides below). */
+.trends-scope-btn {
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  border-color: var(--border) !important;
+}
+.trends-scope-btn:hover {
+  background: rgba(155, 125, 78, 0.08) !important;
+  color: var(--maroon) !important;
+  border-color: var(--terracotta) !important;
+}
+.trends-scope-btn.active {
+  background: rgba(155, 125, 78, 0.16) !important;
+  color: var(--link) !important;
+  border-color: var(--terracotta) !important;
+}
+/* #trends-search-results renders plain, class-less <button> results (see
+   engine.js renderTrendsSearchResults), so -- like .trends-scope-btn above
+   -- the hover/active state needs its own !important override or the
+   generic "select, button" rule wins and the highlight never shows. */
+#trends-search-results button {
+  color: var(--ink) !important;
+  border-bottom-color: var(--border) !important;
+}
+#trends-search-results button:hover,
+#trends-search-results button.active {
+  background: rgba(155, 125, 78, 0.12) !important;
+  color: var(--maroon) !important;
+}
+#trends-split-handle::before {
+  background: var(--grip) !important;
+}
+#trends-split-handle:hover::before,
+body.trends-splitting #trends-split-handle::before {
+  background: var(--terracotta) !important;
+}
+
+/* body.view-epi-trends #title centering override removed: the header is
+   #site-header now, full-width and identical across all four pages -- see
+   Scripts/common/chrome.py and the "Multi-page structure" README section. */
 
