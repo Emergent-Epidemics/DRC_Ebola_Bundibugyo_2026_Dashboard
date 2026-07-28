@@ -1,0 +1,647 @@
+{
+  "date": "2026-07-28",
+  "source_csv": "2026-07-28/status_aggregated.csv",
+  "series": [
+    {
+      "id": "d_pos",
+      "label": "Confirmed",
+      "color": "#b23b2e"
+    },
+    {
+      "id": "d_neg",
+      "label": "Negative",
+      "color": "#5b86b3"
+    },
+    {
+      "id": "d_inv",
+      "label": "Invalid Result",
+      "color": "#d08163"
+    },
+    {
+      "id": "d_blk",
+      "label": "Unclassified",
+      "color": "#9c968b"
+    }
+  ],
+  "incomplete_styling": {
+    "days": 5,
+    "color": "#9c968b",
+    "label": "Reporting likely incomplete"
+  },
+  "plots": {
+    "confirmed_cases_and_positivity": {
+      "Haut-Uele": {
+        "file": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/provincial/daily_onset_haut-uele.svg",
+        "title": "Daily Cases by Symptom Onset - Haut-Uele",
+        "caption": "Confirmed cases by date of symptom onset. Shaded region: dates within the last week (reporting likely incomplete)."
+      },
+      "Ituri": {
+        "file": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/provincial/daily_onset_ituri.svg",
+        "title": "Daily Cases by Symptom Onset - Ituri",
+        "caption": "Confirmed cases by date of symptom onset. Shaded region: dates within the last week (reporting likely incomplete)."
+      },
+      "Nord-Kivu": {
+        "file": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/provincial/daily_onset_nord-kivu.svg",
+        "title": "Daily Cases by Symptom Onset - Nord-Kivu",
+        "caption": "Confirmed cases by date of symptom onset. Shaded region: dates within the last week (reporting likely incomplete)."
+      },
+      "Sud-Kivu": {
+        "file": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/provincial/daily_onset_sud-kivu.svg",
+        "title": "Daily Cases by Symptom Onset - Sud-Kivu",
+        "caption": "Confirmed cases by date of symptom onset"
+      },
+      "Tshopo": {
+        "file": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/provincial/daily_onset_tshopo.svg",
+        "title": "Daily Cases by Symptom Onset - Tshopo",
+        "caption": "Confirmed cases by date of symptom onset. Shaded region: dates within the last week (reporting likely incomplete)."
+      }
+    },
+    "rolling_positivity": {
+      "Haut-Uele": {
+        "file": "2026-07-28/dashboard_plots/rolling_positivity/provincial/rolling_positivity_haut-uele.svg",
+        "title": "5-day Rolling Test Positivity - Haut-Uele",
+        "caption": "5-day rolling test positivity by date of symptom onset. Shaded region: dates within the last week (reporting likely incomplete)."
+      },
+      "Ituri": {
+        "file": "2026-07-28/dashboard_plots/rolling_positivity/provincial/rolling_positivity_ituri.svg",
+        "title": "5-day Rolling Test Positivity - Ituri",
+        "caption": "5-day rolling test positivity by date of symptom onset. Shaded region: dates within the last week (reporting likely incomplete)."
+      },
+      "Nord-Kivu": {
+        "file": "2026-07-28/dashboard_plots/rolling_positivity/provincial/rolling_positivity_nord-kivu.svg",
+        "title": "5-day Rolling Test Positivity - Nord-Kivu",
+        "caption": "5-day rolling test positivity by date of symptom onset. Shaded region: dates within the last week (reporting likely incomplete)."
+      },
+      "Sud-Kivu": {
+        "file": "2026-07-28/dashboard_plots/rolling_positivity/provincial/rolling_positivity_sud-kivu.svg",
+        "title": "5-day Rolling Test Positivity - Sud-Kivu",
+        "caption": "5-day rolling test positivity by date of symptom onset"
+      },
+      "Tshopo": {
+        "file": "2026-07-28/dashboard_plots/rolling_positivity/provincial/rolling_positivity_tshopo.svg",
+        "title": "5-day Rolling Test Positivity - Tshopo",
+        "caption": "5-day rolling test positivity by date of symptom onset. Shaded region: dates within the last week (reporting likely incomplete)."
+      }
+    },
+    "cumulative_deaths": {
+      "Haut-Uele": {
+        "file": "2026-07-28/dashboard_plots/cumulative_deaths/provincial/cumulative_deaths_haut-uele.svg",
+        "title": "Cumulative Confirmed Deaths - Haut-Uele",
+        "caption": "Cumulative confirmed deaths by reporting date (death alerts with confirmed MVE classification). Shaded region: dates within the last week (reporting likely incomplete)."
+      },
+      "Ituri": {
+        "file": "2026-07-28/dashboard_plots/cumulative_deaths/provincial/cumulative_deaths_ituri.svg",
+        "title": "Cumulative Confirmed Deaths - Ituri",
+        "caption": "Cumulative confirmed deaths by reporting date (death alerts with confirmed MVE classification). Shaded region: dates within the last week (reporting likely incomplete)."
+      },
+      "Nord-Kivu": {
+        "file": "2026-07-28/dashboard_plots/cumulative_deaths/provincial/cumulative_deaths_nord-kivu.svg",
+        "title": "Cumulative Confirmed Deaths - Nord-Kivu",
+        "caption": "Cumulative confirmed deaths by reporting date (death alerts with confirmed MVE classification). Shaded region: dates within the last week (reporting likely incomplete)."
+      },
+      "Sud-Kivu": {
+        "file": "2026-07-28/dashboard_plots/cumulative_deaths/provincial/cumulative_deaths_sud-kivu.svg",
+        "title": "Cumulative Confirmed Deaths - Sud-Kivu",
+        "caption": "Cumulative confirmed deaths by reporting date (death alerts with confirmed MVE classification)"
+      }
+    },
+    "lab_plots": {
+      "AUT": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_aut.svg",
+        "title": "Samples Analysed and Test Positivity - AUT",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "AUT",
+        "lab_name_long": "AUT",
+        "health_zone": null,
+        "province": null
+      },
+      "INRBANTB": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_inrbantb.svg",
+        "title": "Samples Analysed and Test Positivity - INRB Antenne Butembo",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "INRBANTB",
+        "lab_name_long": "INRB Antenne Butembo",
+        "health_zone": "Butembo",
+        "province": "Nord-Kivu"
+      },
+      "INRBATB": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_inrbatb.svg",
+        "title": "Samples Analysed and Test Positivity - INRB Antenne Beni",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "INRBATB",
+        "lab_name_long": "INRB Antenne Beni",
+        "health_zone": "Beni",
+        "province": "Nord-Kivu"
+      },
+      "INRBGM": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_inrbgm.svg",
+        "title": "Samples Analysed and Test Positivity - INRB Goma",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "INRBGM",
+        "lab_name_long": "INRB Goma",
+        "health_zone": "Goma",
+        "province": "Nord-Kivu"
+      },
+      "INRBK": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_inrbk.svg",
+        "title": "Samples Analysed and Test Positivity - INRB Kinshasa",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "INRBK",
+        "lab_name_long": "INRB Kinshasa",
+        "health_zone": "Kinshasa",
+        "province": "Kinshasa"
+      },
+      "Lab_MGL": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_lab-mgl.svg",
+        "title": "Samples Analysed and Test Positivity - Laboratoire de Mongbwalu",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "Lab_MGL",
+        "lab_name_long": "Laboratoire de Mongbwalu",
+        "health_zone": "Mongbwalu",
+        "province": "Ituri"
+      },
+      "LBARU": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_lbaru.svg",
+        "title": "Samples Analysed and Test Positivity - LBARU",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "LBARU",
+        "lab_name_long": "LBARU",
+        "health_zone": "Aru",
+        "province": "Ituri"
+      },
+      "LBCHOM": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_lbchom.svg",
+        "title": "Samples Analysed and Test Positivity - LBCHOM",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "LBCHOM",
+        "lab_name_long": "LBCHOM",
+        "health_zone": "Tchomia",
+        "province": "Ituri"
+      },
+      "LBISTMN": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_lbistmn.svg",
+        "title": "Samples Analysed and Test Positivity - LBISTMN",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "LBISTMN",
+        "lab_name_long": "LBISTMN",
+        "health_zone": "Rwampara",
+        "province": "Ituri"
+      },
+      "LBKOM": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_lbkom.svg",
+        "title": "Samples Analysed and Test Positivity - LBKOM",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "LBKOM",
+        "lab_name_long": "LBKOM",
+        "health_zone": "Komanda",
+        "province": "Ituri"
+      },
+      "LBLOGO": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_lblogo.svg",
+        "title": "Samples Analysed and Test Positivity - LBLOGO",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "LBLOGO",
+        "lab_name_long": "LBLOGO",
+        "health_zone": "Logo",
+        "province": "Ituri"
+      },
+      "LBMAM": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_lbmam.svg",
+        "title": "Samples Analysed and Test Positivity - LBMAM",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "LBMAM",
+        "lab_name_long": "LBMAM",
+        "health_zone": "Mambasa",
+        "province": "Ituri"
+      },
+      "LBNIA": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_lbnia.svg",
+        "title": "Samples Analysed and Test Positivity - LBNIA",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "LBNIA",
+        "lab_name_long": "LBNIA",
+        "health_zone": "Nia Nia",
+        "province": "Ituri"
+      },
+      "LBNIZ": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_lbniz.svg",
+        "title": "Samples Analysed and Test Positivity - LBNIZ",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "LBNIZ",
+        "lab_name_long": "LBNIZ",
+        "health_zone": "Nizi",
+        "province": "Ituri"
+      },
+      "LBNYA": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_lbnya.svg",
+        "title": "Samples Analysed and Test Positivity - LBNYA",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "LBNYA",
+        "lab_name_long": "LBNYA",
+        "health_zone": "Nyankunde",
+        "province": "Ituri"
+      },
+      "LPSPBN": {
+        "file": "2026-07-28/dashboard_plots/lab_plots/lab_lpspbn.svg",
+        "title": "Samples Analysed and Test Positivity - Laboratoire Provincial de Sant√© Publique de Bunia",
+        "caption": "Samples analysed and test positivity by analysis date",
+        "lab_code": "LPSPBN",
+        "lab_name_long": "Laboratoire Provincial de Sant√© Publique de Bunia",
+        "health_zone": "Bunia",
+        "province": "Ituri"
+      }
+    }
+  },
+  "indexes": {
+    "by_health_zone": {
+      "Adja": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_adja.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_adja.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_adja.svg"
+      },
+      "Ariwara": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_ariwara.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_ariwara.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_ariwara.svg"
+      },
+      "Aru": {
+        "province": "Ituri",
+        "lab_codes": "LBARU",
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_aru.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_aru.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_aru.svg"
+      },
+      "Aungba": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_aungba.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_aungba.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_aungba.svg"
+      },
+      "Bambu": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_bambu.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_bambu.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_bambu.svg"
+      },
+      "Beni": {
+        "province": "Nord-Kivu",
+        "lab_codes": "INRBATB",
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_beni.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_beni.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_beni.svg"
+      },
+      "Boga": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_boga.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_boga.svg",
+        "cumulative_deaths": {}
+      },
+      "Boma Mangbetu": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_boma-mangbetu.svg",
+        "rolling_positivity": {},
+        "cumulative_deaths": {}
+      },
+      "Bunia": {
+        "province": "Ituri",
+        "lab_codes": "LPSPBN",
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_bunia.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_bunia.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_bunia.svg"
+      },
+      "Butembo": {
+        "province": "Nord-Kivu",
+        "lab_codes": "INRBANTB",
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_butembo.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_butembo.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_butembo.svg"
+      },
+      "Damas": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_damas.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_damas.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_damas.svg"
+      },
+      "Drodro": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_drodro.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_drodro.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_drodro.svg"
+      },
+      "Fataki": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_fataki.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_fataki.svg",
+        "cumulative_deaths": {}
+      },
+      "Gety": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_gety.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_gety.svg",
+        "cumulative_deaths": {}
+      },
+      "Goma": {
+        "province": "Nord-Kivu",
+        "lab_codes": "INRBGM",
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_goma.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_goma.svg",
+        "cumulative_deaths": {}
+      },
+      "Isiro": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_isiro.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_isiro.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_isiro.svg"
+      },
+      "Kalunguta": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_kalunguta.svg",
+        "rolling_positivity": {},
+        "cumulative_deaths": {}
+      },
+      "Kambala": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_kambala.svg",
+        "rolling_positivity": {},
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_kambala.svg"
+      },
+      "Katwa": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_katwa.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_katwa.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_katwa.svg"
+      },
+      "Kilo": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_kilo.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_kilo.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_kilo.svg"
+      },
+      "Kinshasa": {
+        "province": "Kinshasa",
+        "lab_codes": "INRBK",
+        "confirmed_cases_and_positivity": {},
+        "rolling_positivity": {},
+        "cumulative_deaths": {}
+      },
+      "Komanda": {
+        "province": "Ituri",
+        "lab_codes": "LBKOM",
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_komanda.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_komanda.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_komanda.svg"
+      },
+      "Kyondo": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_kyondo.svg",
+        "rolling_positivity": {},
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_kyondo.svg"
+      },
+      "Lita": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_lita.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_lita.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_lita.svg"
+      },
+      "Logo": {
+        "province": "Ituri",
+        "lab_codes": "LBLOGO",
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_logo.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_logo.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_logo.svg"
+      },
+      "Lolwa": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_lolwa.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_lolwa.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_lolwa.svg"
+      },
+      "Mabalako": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_mabalako.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_mabalako.svg",
+        "cumulative_deaths": {}
+      },
+      "Mahagi": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_mahagi.svg",
+        "rolling_positivity": {},
+        "cumulative_deaths": {}
+      },
+      "Makiso Kisangani": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_makiso-kisangani.svg",
+        "rolling_positivity": {},
+        "cumulative_deaths": {}
+      },
+      "Mambasa": {
+        "province": "Ituri",
+        "lab_codes": "LBMAM",
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_mambasa.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_mambasa.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_mambasa.svg"
+      },
+      "Mandima": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_mandima.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_mandima.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_mandima.svg"
+      },
+      "Mangala": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_mangala.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_mangala.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_mangala.svg"
+      },
+      "Mangobo": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_mangobo.svg",
+        "rolling_positivity": {},
+        "cumulative_deaths": {}
+      },
+      "Masereka": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_masereka.svg",
+        "rolling_positivity": {},
+        "cumulative_deaths": {}
+      },
+      "Miti Murhesa": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_miti-murhesa.svg",
+        "rolling_positivity": {},
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_miti-murhesa.svg"
+      },
+      "Mongbwalu": {
+        "province": "Ituri",
+        "lab_codes": "Lab_MGL",
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_mongbwalu.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_mongbwalu.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_mongbwalu.svg"
+      },
+      "Musienene": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_musienene.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_musienene.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_musienene.svg"
+      },
+      "Nia Nia": {
+        "province": "Ituri",
+        "lab_codes": "LBNIA",
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_nia-nia.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_nia-nia.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_nia-nia.svg"
+      },
+      "Niangara": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_niangara.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_niangara.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_niangara.svg"
+      },
+      "Nizi": {
+        "province": "Ituri",
+        "lab_codes": "LBNIZ",
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_nizi.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_nizi.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_nizi.svg"
+      },
+      "Nyankunde": {
+        "province": "Ituri",
+        "lab_codes": "LBNYA",
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_nyankunde.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_nyankunde.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_nyankunde.svg"
+      },
+      "Pawa": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_pawa.svg",
+        "rolling_positivity": {},
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_pawa.svg"
+      },
+      "Rethy": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_rethy.svg",
+        "rolling_positivity": {},
+        "cumulative_deaths": {}
+      },
+      "Rimba": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_rimba.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_rimba.svg",
+        "cumulative_deaths": {}
+      },
+      "Rungu": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_rungu.svg",
+        "rolling_positivity": {},
+        "cumulative_deaths": {}
+      },
+      "Rwampara": {
+        "province": "Ituri",
+        "lab_codes": "LBISTMN",
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_rwampara.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_rwampara.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_rwampara.svg"
+      },
+      "Tchomia": {
+        "province": "Ituri",
+        "lab_codes": "LBCHOM",
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_tchomia.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_tchomia.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_tchomia.svg"
+      },
+      "Tshopo": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_tshopo.svg",
+        "rolling_positivity": {},
+        "cumulative_deaths": {}
+      },
+      "Vuhovi": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_vuhovi.svg",
+        "rolling_positivity": {},
+        "cumulative_deaths": {}
+      },
+      "Wamba": {
+        "province": null,
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/healthzone/daily_onset_wamba.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/healthzone/rolling_positivity_wamba.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/healthzone/cumulative_deaths_wamba.svg"
+      }
+    },
+    "by_province": {
+      "Haut-Uele": {
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/provincial/daily_onset_haut-uele.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/provincial/rolling_positivity_haut-uele.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/provincial/cumulative_deaths_haut-uele.svg"
+      },
+      "Ituri": {
+        "lab_codes": ["Lab_MGL", "LBARU", "LBCHOM", "LBISTMN", "LBKOM", "LBLOGO", "LBMAM", "LBNIA", "LBNIZ", "LBNYA", "LPSPBN"],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/provincial/daily_onset_ituri.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/provincial/rolling_positivity_ituri.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/provincial/cumulative_deaths_ituri.svg"
+      },
+      "Kinshasa": {
+        "lab_codes": "INRBK",
+        "confirmed_cases_and_positivity": {},
+        "rolling_positivity": {},
+        "cumulative_deaths": {}
+      },
+      "Nord-Kivu": {
+        "lab_codes": ["INRBANTB", "INRBATB", "INRBGM"],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/provincial/daily_onset_nord-kivu.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/provincial/rolling_positivity_nord-kivu.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/provincial/cumulative_deaths_nord-kivu.svg"
+      },
+      "Sud-Kivu": {
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/provincial/daily_onset_sud-kivu.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/provincial/rolling_positivity_sud-kivu.svg",
+        "cumulative_deaths": "2026-07-28/dashboard_plots/cumulative_deaths/provincial/cumulative_deaths_sud-kivu.svg"
+      },
+      "Tshopo": {
+        "lab_codes": [],
+        "confirmed_cases_and_positivity": "2026-07-28/dashboard_plots/confirmed_cases_and_positivity/provincial/daily_onset_tshopo.svg",
+        "rolling_positivity": "2026-07-28/dashboard_plots/rolling_positivity/provincial/rolling_positivity_tshopo.svg",
+        "cumulative_deaths": {}
+      }
+    }
+  }
+}

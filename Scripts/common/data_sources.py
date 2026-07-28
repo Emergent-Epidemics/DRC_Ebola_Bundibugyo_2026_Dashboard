@@ -931,20 +931,23 @@ def _read_plot_svg(path: Path) -> str | None:
 
 
 def _svg_plot_title(svg: str, fallback: str) -> str:
-    match = re.search(
-        r">\s*(Daily Cases by Symptom Onset[^<]*?)\s*<",
-        svg,
-        flags=re.I,
-    )
-    if match:
-        return re.sub(r"\s+", " ", match.group(1)).strip()
-    match = re.search(
-        r">\s*(5-day Rolling Test Positivity[^<]*?)\s*<",
-        svg,
-        flags=re.I,
-    )
-    if match:
-        return re.sub(r"\s+", " ", match.group(1)).strip()
+    # Require a "- <place>" suffix so we match the real chart title rather than
+    # a legend/series label that happens to repeat the same base phrase earlier
+    # in the SVG markup (e.g. rolling_positivity's "5-day Rolling Test
+    # Positivity" legend entry, which has no place suffix and appears before
+    # the actual title).
+    for prefix in (
+        "Daily Cases by Symptom Onset",
+        "Cumulative Confirmed Deaths",
+        "5-day Rolling Test Positivity",
+    ):
+        match = re.search(
+            r">\s*(" + re.escape(prefix) + r"\s*-\s*[^<]+?)\s*<",
+            svg,
+            flags=re.I,
+        )
+        if match:
+            return re.sub(r"\s+", " ", match.group(1)).strip()
     return fallback
 
 
@@ -988,6 +991,120 @@ def _lab_label_from_stem(stem: str, name_map: dict[str, str]) -> str:
     return re.sub(r"[-_]+", "-", raw).upper()
 
 
+def _lab_code_from_stem(stem: str, manifest_labs: dict) -> str | None:
+    """Match a lab_*.svg stem back to the manifest lab_code (e.g. lab_lpspbn → LPSPBN)."""
+    raw = stem[4:] if stem.lower().startswith("lab_") else stem
+    for suffix in ("_samples", "_positivity"):
+        if raw.endswith(suffix):
+            raw = raw[: -len(suffix)]
+            break
+    slug = _slugify_plot_key(raw)
+    for code in manifest_labs:
+        if _slugify_plot_key(code) == slug:
+            return code
+    return None
+
+
+def _load_plot_type_family(
+    type_dir: Path,
+    filename_prefix: str,
+    national_title_default: str,
+    label_title_fmt: str,
+    province_by_slug: dict[str, str],
+    nom_by_slug: dict[str, str],
+    manifest_meta: dict,
+) -> tuple[dict | None, dict[str, dict], dict[str, dict]]:
+    """Load one plot type's national/province/health-zone SVGs from
+    ``type_dir`` (already resolved to e.g. .../confirmed_cases_and_positivity
+    or .../cumulative_deaths).
+
+    Handles both the current layout (national/provincial/healthzone
+    subfolders under type_dir) and the older flat layout (files directly in
+    type_dir, health zones under a bare "healthzone" subfolder). Province
+    entries missing from disk are filled in from ``manifest_meta``
+    (province -> {file, title, caption}), matching load_dashboard_plots'
+    manifest handling.
+    """
+    national = None
+    national_path = type_dir / "national" / f"{filename_prefix}national.svg"
+    if not national_path.exists():
+        national_path = type_dir / f"{filename_prefix}national.svg"
+    nat_svg = _read_plot_svg(national_path)
+    if nat_svg:
+        national = {
+            "id": "national",
+            "label": "National",
+            "file": str(national_path.relative_to(DASHBOARD_PLOTS_DIR)),
+            "title": _svg_plot_title(nat_svg, national_title_default),
+            "caption": "",
+            "svg": nat_svg,
+        }
+
+    provincial_dir = type_dir / "provincial"
+    if not provincial_dir.exists():
+        provincial_dir = type_dir
+    province_plots: dict[str, dict] = {}
+    for svg_path in sorted(provincial_dir.glob(f"{filename_prefix}*.svg")):
+        slug = svg_path.stem.removeprefix(filename_prefix)
+        if slug == "national":
+            continue
+        svg = _read_plot_svg(svg_path)
+        if not svg:
+            continue
+        label = province_by_slug.get(slug) or slug.replace("-", " ").title()
+        province_plots[label] = {
+            "id": label,
+            "label": label,
+            "slug": slug,
+            "file": str(svg_path.relative_to(DASHBOARD_PLOTS_DIR)),
+            "title": _svg_plot_title(svg, label_title_fmt.format(label=label)),
+            "caption": "",
+            "svg": svg,
+        }
+
+    # Manifest entries fill gaps only (province not already found on disk).
+    for province, meta in (manifest_meta or {}).items():
+        if not isinstance(meta, dict) or province in province_plots:
+            continue
+        filename = meta.get("file")
+        if not filename:
+            continue
+        svg_path = DASHBOARD_PLOTS_DIR / filename
+        svg = _read_plot_svg(svg_path)
+        if not svg:
+            continue
+        province_plots[province] = {
+            "id": province,
+            "label": province,
+            "slug": _slugify_plot_key(province),
+            "file": filename,
+            "title": meta.get("title") or label_title_fmt.format(label=province),
+            "caption": meta.get("caption") or "",
+            "svg": svg,
+        }
+
+    hz_plots: dict[str, dict] = {}
+    hz_dir = type_dir / "healthzone"
+    if hz_dir.exists():
+        for svg_path in sorted(hz_dir.glob(f"{filename_prefix}*.svg")):
+            slug = svg_path.stem.removeprefix(filename_prefix)
+            svg = _read_plot_svg(svg_path)
+            if not svg:
+                continue
+            nom = nom_by_slug.get(slug) or slug.replace("-", " ").title()
+            hz_plots[nom] = {
+                "id": nom,
+                "label": nom,
+                "slug": slug,
+                "file": str(svg_path.relative_to(DASHBOARD_PLOTS_DIR)),
+                "title": _svg_plot_title(svg, label_title_fmt.format(label=nom)),
+                "caption": "",
+                "svg": svg,
+            }
+
+    return national, province_plots, hz_plots
+
+
 # Pre-built onset / lab plots for the Epidemiological trends panel.
 def load_dashboard_plots(
     zone_noms: list[str] | None = None,
@@ -1020,14 +1137,21 @@ def load_dashboard_plots(
           lab_name_map.csv   (optional)
 
     manifest.json province plots are read from
-    ``plots.confirmed_cases_and_positivity.<province>`` (falling back to
-    ``plots.<province>`` for older manifests) and only used to fill gaps left
-    by the ``daily_onset_*.svg`` globs below.
+    ``plots.confirmed_cases_and_positivity.<province>`` and
+    ``plots.cumulative_deaths.<province>`` (the whole ``plots`` dict is
+    treated as the confirmed-cases entries for older manifests that predate
+    the plot-type nesting) and only used to fill gaps left by the
+    ``daily_onset_*.svg`` / ``cumulative_deaths_*.svg`` globs below.
 
-    Note: the data repo also now produces a parallel "cumulative_deaths"
-    plot type alongside "confirmed_cases_and_positivity" (same
-    national/provincial/healthzone split); this function doesn't load it yet
-    since nothing in the dashboard payload/UI consumes it.
+    The data repo also produces a parallel "cumulative_deaths" plot type
+    alongside "confirmed_cases_and_positivity" (same national/provincial/
+    healthzone split, no lab plots); it's returned under the
+    ``cumulative_deaths`` key.
+
+    ``manifest.indexes`` (``by_health_zone`` / ``by_province``) is passed
+    through for location-based lab subsetting, and each lab entry is
+    enriched from ``manifest.plots.lab_plots`` with ``lab_code``,
+    ``health_zone``, and ``province``.
     """
     if not DASHBOARD_PLOTS_DIR.exists():
         print(f"  NOTE: {DASHBOARD_PLOTS_DIR} not found; trends plots unavailable")
@@ -1051,17 +1175,14 @@ def load_dashboard_plots(
         if dated_base.exists():
             plots_base = dated_base
 
-    # Within plots_base, confirmed-cases plots live under their own
-    # plot-type folder in the current layout; older data has them directly
-    # in plots_base with no plot-type wrapper.
+    # Within plots_base, each plot type lives under its own folder in the
+    # current layout; older data has confirmed-cases plots directly in
+    # plots_base with no plot-type wrapper (and no cumulative_deaths at all).
     cases_dir = plots_base / "confirmed_cases_and_positivity"
     if not cases_dir.exists():
         cases_dir = plots_base
-    # Provinces sit in a "provincial" subfolder in the current layout;
-    # older data has them directly in cases_dir.
-    provincial_dir = cases_dir / "provincial"
-    if not provincial_dir.exists():
-        provincial_dir = cases_dir
+    deaths_dir = plots_base / "cumulative_deaths"
+    positivity_dir = plots_base / "rolling_positivity"
     # Lab plots' folder was renamed lab -> lab_plots.
     lab_dir = plots_base / "lab_plots"
     if not lab_dir.exists():
@@ -1072,110 +1193,112 @@ def load_dashboard_plots(
     nom_by_slug = {_slugify_plot_key(n): n for n in zone_noms if n}
     province_by_slug = {_slugify_plot_key(p): p for p in provinces if p}
 
-    national = None
-    national_path = cases_dir / "national" / "daily_onset_national.svg"
-    if not national_path.exists():
-        national_path = cases_dir / "daily_onset_national.svg"
-    nat_svg = _read_plot_svg(national_path)
-    if nat_svg:
-        national = {
-            "id": "national",
-            "label": "National",
-            "file": str(national_path.relative_to(DASHBOARD_PLOTS_DIR)),
-            "title": _svg_plot_title(nat_svg, "Daily Cases by Symptom Onset - National"),
-            "caption": "",
-            "svg": nat_svg,
-        }
-
-    province_plots: dict[str, dict] = {}
-    for svg_path in sorted(provincial_dir.glob("daily_onset_*.svg")):
-        stem = svg_path.stem  # daily_onset_ituri
-        slug = stem.removeprefix("daily_onset_")
-        if slug == "national":
-            continue
-        svg = _read_plot_svg(svg_path)
-        if not svg:
-            continue
-        label = province_by_slug.get(slug) or slug.replace("-", " ").title()
-        province_plots[label] = {
-            "id": label,
-            "label": label,
-            "slug": slug,
-            "file": str(svg_path.relative_to(DASHBOARD_PLOTS_DIR)),
-            "title": _svg_plot_title(svg, f"Daily Cases by Symptom Onset - {label}"),
-            "caption": "",
-            "svg": svg,
-        }
-
-    # Manifest province entries (fill gaps only). The Processed_Sensitive_Data
-    # manifest now nests these under plots.confirmed_cases_and_positivity
-    # (previously plots.<province> directly) -- accept either shape so an
-    # older manifest doesn't silently stop populating anything.
     manifest_plots = manifest.get("plots") or {}
-    province_meta = manifest_plots.get("confirmed_cases_and_positivity")
-    if not isinstance(province_meta, dict):
-        province_meta = manifest_plots
-    for province, meta in province_meta.items():
-        if not isinstance(meta, dict) or province in province_plots:
-            continue
-        filename = meta.get("file")
-        if not filename:
-            continue
-        svg_path = DASHBOARD_PLOTS_DIR / filename
-        svg = _read_plot_svg(svg_path)
-        if not svg:
-            continue
-        province_plots[province] = {
-            "id": province,
-            "label": province,
-            "slug": _slugify_plot_key(province),
-            "file": filename,
-            "title": meta.get("title") or f"Daily onset — {province}",
-            "caption": meta.get("caption") or "",
-            "svg": svg,
-        }
+    cases_meta = manifest_plots.get("confirmed_cases_and_positivity")
+    if not isinstance(cases_meta, dict):
+        cases_meta = manifest_plots  # older, pre-plot-type-nesting manifest shape
+    deaths_meta = manifest_plots.get("cumulative_deaths")
+    if not isinstance(deaths_meta, dict):
+        deaths_meta = {}
+    positivity_meta = manifest_plots.get("rolling_positivity")
+    if not isinstance(positivity_meta, dict):
+        positivity_meta = {}
 
-    hz_plots: dict[str, dict] = {}
-    hz_dir = cases_dir / "healthzone"
-    if hz_dir.exists():
-        for svg_path in sorted(hz_dir.glob("daily_onset_*.svg")):
-            slug = svg_path.stem.removeprefix("daily_onset_")
-            svg = _read_plot_svg(svg_path)
-            if not svg:
-                continue
-            nom = nom_by_slug.get(slug) or slug.replace("-", " ").title()
-            hz_plots[nom] = {
-                "id": nom,
-                "label": nom,
-                "slug": slug,
-                "file": str(svg_path.relative_to(DASHBOARD_PLOTS_DIR)),
-                "title": _svg_plot_title(svg, f"Daily Cases by Symptom Onset - {nom}"),
-                "caption": "",
-                "svg": svg,
-            }
+    national, province_plots, hz_plots = _load_plot_type_family(
+        cases_dir, "daily_onset_",
+        "Daily Cases by Symptom Onset - National",
+        "Daily Cases by Symptom Onset - {label}",
+        province_by_slug, nom_by_slug, cases_meta,
+    )
+
+    deaths_national: dict | None = None
+    deaths_province_plots: dict[str, dict] = {}
+    deaths_hz_plots: dict[str, dict] = {}
+    if deaths_dir.exists():
+        deaths_national, deaths_province_plots, deaths_hz_plots = _load_plot_type_family(
+            deaths_dir, "cumulative_deaths_",
+            "Cumulative Confirmed Deaths - National",
+            "Cumulative Confirmed Deaths - {label}",
+            province_by_slug, nom_by_slug, deaths_meta,
+        )
+
+    positivity_national: dict | None = None
+    positivity_province_plots: dict[str, dict] = {}
+    positivity_hz_plots: dict[str, dict] = {}
+    if positivity_dir.exists():
+        positivity_national, positivity_province_plots, positivity_hz_plots = _load_plot_type_family(
+            positivity_dir, "rolling_positivity_",
+            "5-day Rolling Test Positivity - National",
+            "5-day Rolling Test Positivity - {label}",
+            province_by_slug, nom_by_slug, positivity_meta,
+        )
 
     lab_name_map = _load_lab_name_map()
+    manifest_labs = manifest_plots.get("lab_plots")
+    if not isinstance(manifest_labs, dict):
+        manifest_labs = {}
     labs: list[dict] = []
-    if lab_dir.exists():
+    if manifest_labs:
+        for lab_code, meta in manifest_labs.items():
+            if not isinstance(meta, dict):
+                continue
+            plot_file = meta.get("file")
+            if not plot_file:
+                continue
+            svg = _read_plot_svg(DASHBOARD_PLOTS_DIR / plot_file)
+            if not svg:
+                continue
+            label = meta.get("lab_name_long") or lab_code
+            lab_id = f"lab_{_slugify_plot_key(lab_code)}"
+            labs.append({
+                "id": lab_id,
+                "lab_code": lab_code,
+                "label": label,
+                "slug": _slugify_plot_key(lab_code),
+                "health_zone": meta.get("health_zone"),
+                "province": meta.get("province"),
+                "file": plot_file,
+                "title": meta.get("title") or _svg_plot_title(
+                    svg, f"Samples Analysed and Test Positivity — {label}"
+                ),
+                "caption": meta.get("caption") or "",
+                "svg": svg,
+            })
+    elif lab_dir.exists():
         for svg_path in sorted(lab_dir.glob("lab_*.svg")):
+            if svg_path.stem.endswith(("_samples", "_positivity")):
+                continue
             svg = _read_plot_svg(svg_path)
             if not svg:
                 continue
             lab_id = svg_path.stem  # lab_inrbk
-            label = _lab_label_from_stem(lab_id, lab_name_map)
+            lab_code = _lab_code_from_stem(lab_id, manifest_labs)
+            meta = manifest_labs.get(lab_code) if lab_code else {}
+            if not isinstance(meta, dict):
+                meta = {}
+            label = meta.get("lab_name_long") or _lab_label_from_stem(lab_id, lab_name_map)
+            plot_title = meta.get("title") or _svg_plot_title(
+                svg, f"Samples Analysed and Test Positivity — {label}"
+            )
             labs.append({
                 "id": lab_id,
+                "lab_code": lab_code or meta.get("lab_code"),
                 "label": label,
                 "slug": _slugify_plot_key(lab_id.removeprefix("lab_")),
+                "health_zone": meta.get("health_zone"),
+                "province": meta.get("province"),
                 "file": str(svg_path.relative_to(DASHBOARD_PLOTS_DIR)),
-                "title": _svg_plot_title(svg, f"Lab positivity — {label}"),
-                "caption": "",
+                "title": plot_title,
+                "caption": meta.get("caption") or "",
                 "svg": svg,
             })
+    if labs:
         labs.sort(key=lambda x: str(x["label"]).lower())
 
-    if not national and not province_plots and not hz_plots and not labs:
-        print(f"  WARNING: no loadable plots under {DASHBOARD_PLOTS_DIR.name}/")
+    if (not national and not province_plots and not hz_plots and not labs
+            and not deaths_national and not deaths_province_plots and not deaths_hz_plots
+            and not positivity_national and not positivity_province_plots and not positivity_hz_plots):
+        print(f"  WARNING: no loadable plots under {plots_base.relative_to(DASHBOARD_PLOTS_DIR.parent)}/")
         return None
 
     print(
@@ -1184,17 +1307,37 @@ def load_dashboard_plots(
         + f", {len(province_plots)} province(s)"
         + f", {len(hz_plots)} health zone(s)"
         + f", {len(labs)} lab(s)"
-        + f" from {DASHBOARD_PLOTS_DIR.name}/"
+        + f", deaths national={'yes' if deaths_national else 'no'}"
+        + f", deaths {len(deaths_province_plots)} province(s)"
+        + f", deaths {len(deaths_hz_plots)} health zone(s)"
+        + f", positivity national={'yes' if positivity_national else 'no'}"
+        + f", positivity {len(positivity_province_plots)} province(s)"
+        + f", positivity {len(positivity_hz_plots)} health zone(s)"
+        + f" from {plots_base.relative_to(DASHBOARD_PLOTS_DIR.parent)}/"
     )
     return {
         "series": manifest.get("series") or [],
         "incomplete_styling": manifest.get("incomplete_styling") or {},
+        "indexes": manifest.get("indexes") or {},
         "national": national,
         "provinces": province_plots,
         # Backward-compatible alias used by older panel code.
         "plots": province_plots,
         "health_zones": hz_plots,
         "labs": labs,
+        "labs_by_code": {
+            lab["lab_code"]: lab for lab in labs if lab.get("lab_code")
+        },
+        "cumulative_deaths": {
+            "national": deaths_national,
+            "provinces": deaths_province_plots,
+            "health_zones": deaths_hz_plots,
+        },
+        "rolling_positivity": {
+            "national": positivity_national,
+            "provinces": positivity_province_plots,
+            "health_zones": positivity_hz_plots,
+        },
     }
 
 

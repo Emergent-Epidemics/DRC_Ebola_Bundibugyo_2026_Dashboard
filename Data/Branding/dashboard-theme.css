@@ -21,6 +21,12 @@
   --province-outline-hover: #b23b2e;
   --province-outline-weight: 1;
   --province-outline-weight-hover: 1.5;
+  /* Slightly heavier when the Trends tab is in Provincial scope, but nowhere
+     near as thick as the old 2.4/3.6 defaults -- those made the boundaries
+     look like they'd been drawn with a marker, especially now that the
+     province shapefile has more detail (more vertices per km of coastline). */
+  --province-outline-weight-wide: 1.4;
+  --province-outline-weight-wide-hover: 2;
   --case-marker: #5b86b3;
   --case-marker-opacity: 0.85;
   --green: #285943;

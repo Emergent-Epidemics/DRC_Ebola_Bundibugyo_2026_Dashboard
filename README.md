@@ -30,21 +30,84 @@ Please note that the epidemiological data presented here is based on work in pro
 ```
 BDBV-Epidemic_Dashboard/
 ├── Scripts/
-│   └── build_dashboard_public.py   # builds output/dashboard.html
+│   ├── build_dashboard.py          # master/orchestrator -- builds all 7 pages
+│   ├── common/
+│   │   ├── paths.py                 # DATA_ROOT, BUILD_DIR, output filenames, etc.
+│   │   ├── data_sources.py          # all data-loading functions (geometry, metadata,
+│   │   │                            #   ic model, matrices, plots, phr context, ...)
+│   │   ├── payload.py               # build_shared_payload() -- one JSON payload shared
+│   │   │                            #   by every page (see "Multi-page structure")
+│   │   ├── theme.py                 # theme CSS loader + JSON serialization helper
+│   │   └── chrome.py                # shared <head>/CSS wiring + body markup + nav bar +
+│   │                                 #   STUB_VIEWS ("coming soon" pages, see below)
+│   ├── assets/
+│   │   ├── dashboard.css            # extracted base stylesheet (+ theme layer at build time)
+│   │   └── engine.js                # shared JS engine (map, panels, i18n, view logic)
+│   └── pages/
+│       ├── snapshot.py              # "Current Snapshot"          -> output/index.html
+│       ├── trends.py                # "Epidemiological Trends"    -> output/trends.html
+│       ├── spatial_risk.py          # "Spatial Risk"               -> output/spatial-risk.html
+│       ├── context.py               # "Public Health Context"      -> output/context.html
+│       ├── clinical_symptoms.py     # "Clinical Symptoms" (stub)   -> output/clinical-symptoms.html
+│       ├── surveillance_testing.py  # "Surveillance and Testing" (stub) -> output/surveillance-testing.html
+│       └── genomic_epidemiology.py  # "Genomic Epidemiology" (stub) -> output/genomic-epidemiology.html
 ├── layer_config.yaml               # map layer exclusions, labels, palettes (requires PyYAML)
 ├── requirements.txt                # Python dependencies for the build script
 ├── Data/
 │   ├── health_zone_metadata.csv    # fallback fields (relative risk, population bounds, etc.)
 │   ├── ic_model_estimates.csv      # optional Imperial College bounds for tracker tooltip
 │   ├── caveats.csv                 # optional tracker footnotes (metric + warning)
-│   ├── dashboard_plots/            # optional Trends-tab SVGs (manifest.json + *.svg)
+│   ├── dashboard_plots/            # optional Trends-page SVGs (manifest.json + *.svg)
 │   ├── Methods/Contributors_Methods_Data_website.docx
 │   ├── ToS/Terms of Use.txt
-│   └── Branding/                   # partner logos + urls.txt
-├── output/
-│   └── dashboard.html              # build artefact (self-contained, ~4 MB)
-└── index.html                      # publicly served copy
+│   └── Branding/                   # partner logos, urls.txt, dashboard-theme.css (cream theme)
+├── output/                         # build artefacts (7 pages + shared assets)
+│   ├── index.html                  # Current Snapshot
+│   ├── trends.html                 # Epidemiological Trends
+│   ├── spatial-risk.html           # Spatial Risk
+│   ├── context.html                # Public Health Context
+│   ├── clinical-symptoms.html      # Clinical Symptoms (coming soon)
+│   ├── surveillance-testing.html   # Surveillance and Testing (coming soon)
+│   ├── genomic-epidemiology.html   # Genomic Epidemiology (coming soon)
+│   └── assets/
+│       ├── dashboard.css
+│       └── engine.js
+├── index.html, trends.html, spatial-risk.html, context.html,
+│   clinical-symptoms.html, surveillance-testing.html, genomic-epidemiology.html  # publicly served copies
+└── assets/                         # publicly served copy of output/assets/
 ```
+
+### Multi-page structure
+
+The dashboard used to be one HTML file with tabs sharing a single Leaflet
+map instance, JS-toggled between them. It's now separate pages/URLs (real
+navigation, not JS tab-switching), each built by its own script in
+`Scripts/pages/`, assembled by the master `Scripts/build_dashboard.py`.
+
+**Still shared across every page, for now:** the JSON data payload
+(`common/payload.py`) and the JS engine (`assets/engine.js`). This is
+deliberate, not an oversight -- Trends and Context both drive their content
+by clicking the *same* Leaflet map (province/health-zone selection), so all
+four "real" pages currently need the full map + full payload, not just
+Snapshot and Spatial risk. Splitting the payload/engine further so each page
+only ships what it needs (e.g. Trends wouldn't need `invasion_risk`, Context
+wouldn't need `matrices`/`flow_catalogs`) is a natural follow-up once you
+decide whether Trends/Context should keep their map-click interaction or
+move to a simpler dropdown-based selector.
+
+**"Coming soon" stub pages:** Clinical Symptoms, Surveillance and Testing,
+and Genomic Epidemiology are placeholders (`STUB_VIEWS` in
+`common/chrome.py`) -- they get the same shared header/tabs/footer chrome
+and the same full map engine/payload underneath (currently hidden via a
+`stub-view` body class) as the four real pages, just showing a "coming
+soon" panel instead of real content. When you're ready to build these out,
+each one's `pages/*.py` module is the place to add real payload/markup, and
+you may want to drop the "carries the full map payload for no reason" cost
+at the same time.
+
+Each page in `Scripts/pages/` is currently a thin wrapper around
+`common.chrome.render_page(view_id, payload)` -- that's the seam to hang any
+future page-specific logic on (payload trimming, page-specific JS, etc.).
 
 ## Prerequisites
 
@@ -91,12 +154,13 @@ conda activate ebov2026
 ## Building the dashboard
 
 ```bash
-python Scripts/build_dashboard_public.py
+python Scripts/build_dashboard.py
 ```
 
-This produces a single self-contained `output/dashboard.html` that embeds
-all geometry, per-zone aggregates, Methods text, Terms of Use, and partner
-logos.
+This produces four pages in `output/` (`index.html`, `spatial-risk.html`,
+`trends.html`, `context.html`) plus `output/assets/` (`dashboard.css`,
+`engine.js`), embedding all geometry, per-zone aggregates, Methods text,
+Terms of Use, and partner logos into each page's inline JSON payload.
 
 Override default paths with environment variables if the repos are not
 sibling directories:
@@ -104,13 +168,14 @@ sibling directories:
 ```bash
 BUILD_DIR=/path/to/BDBV-Data/build \
 DATA_ROOT=/path/to/Data \
-python Scripts/build_dashboard_public.py
+python Scripts/build_dashboard.py
 ```
 
 Copy the build to the site entry point before deploying to GitHub Pages:
 
 ```bash
-cp output/dashboard.html index.html
+cp output/index.html output/spatial-risk.html output/trends.html output/context.html .
+rm -rf assets && cp -r output/assets assets
 ```
 
 ## Automated rebuild (GitHub Actions)
@@ -130,7 +195,9 @@ Workflow [`.github/workflows/build-dashboard.yml`](.github/workflows/build-dashb
 - **Linelist plot update** — pushing `dashboard_plots/*.svg` or `manifest.json` to linelist `main` dispatches a rebuild (latest data release + that linelist commit).
 - **Manual** — Actions → *Build dashboard* → optional `data_repo_ref` (empty = latest release) and `linelist_repo_ref` (default `main`).
 
-Commits `output/dashboard.html` and `index.html` back to **`main`**.
+Commits `output/` (all four pages + `assets/`) and the repo-root copies
+(`index.html`, `spatial-risk.html`, `trends.html`, `context.html`, `assets/`)
+back to **`main`**.
 
 **Secrets (this repo):**
 

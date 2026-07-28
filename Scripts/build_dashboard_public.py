@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
 """
+SUPERSEDED -- kept only for reference during the multi-page migration.
+
+This single-file build script has been replaced by Scripts/build_dashboard.py
+(the new master/orchestrator) plus Scripts/common/, Scripts/pages/, and
+Scripts/assets/ (see README "Multi-page structure"). Every function here was
+moved, not rewritten, into the new module layout. This file is no longer
+called by CI or by anything else in this repo.
+
+Safe to delete once you've confirmed the new build matches this one; it is
+left in place (rather than deleted) only because this sandbox could not
+remove the file -- please delete it manually (along with Scripts/__pycache__)
+when convenient.
+
+Original docstring follows unchanged below.
+---------------------------------------------------------------------------
 Build the DRC Ebola Bundibugyo 2026 dashboard as a single self-contained
 HTML file from publicly available inputs.
 

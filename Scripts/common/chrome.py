@@ -136,13 +136,12 @@ __NAV_LINKS__
   <div class="legend-bar" id="trends-legend-bar"></div>
   <div class="legend-ticks" id="trends-legend-ticks"></div>
   <div class="legend-scale" id="trends-legend-scale" data-i18n="ui.trends_scale_log">(log scale)</div>
-  <div id="trends-time-caption" data-i18n="ui.trends_time_caption">Time representation of health zones reporting cases</div>
   <div id="trends-play-row">
-    <button type="button" id="trends-play-btn" data-i18n="ui.trends_play">Play</button>
-    <span id="trends-date-label" data-i18n="ui.trends_as_of">As of —</span>
+    <button type="button" id="trends-play-btn" data-i18n-aria="ui.trends_play" aria-label="Play">▶</button>
+    <input type="range" id="trends-date-slider" min="0" max="0" value="0"
+           data-i18n-aria="ui.trends_slider_aria" aria-label="SitRep date for confirmed cases map" />
   </div>
-  <input type="range" id="trends-date-slider" min="0" max="0" value="0"
-         data-i18n-aria="ui.trends_slider_aria" aria-label="SitRep date for confirmed cases map" />
+  <span id="trends-date-label" data-i18n="ui.trends_as_of">As of —</span>
 </div>
 <div id="info" class="panel">
   <div id="info-header">
@@ -230,33 +229,23 @@ __NAV_LINKS__
      below -- #trends is the first card; more can be appended into
      #trends-plots-column later without touching the layout mechanics. -->
 <div id="trends-panel">
-  <div id="trends-controls" class="panel">
-    <div id="trends-controls-header">
-      <strong data-i18n="ui.trends_controls_title">Scope</strong>
-      <button class="panel-toggle" data-target="trends-controls" type="button"
-              data-i18n-aria="ui.aria.toggle_trends" data-i18n-title="ui.aria.collapse_trends"
-              aria-label="Toggle trends scope panel" title="Collapse / expand trends scope">−</button>
+  <div id="trends-controls">
+    <div class="trends-scope-row" role="group"
+         data-i18n-aria="ui.trends_scope" aria-label="Geographic scope">
+      <button type="button" class="trends-scope-btn active" data-scope="national"
+              data-i18n="ui.trends_scope_national">National</button>
+      <button type="button" class="trends-scope-btn" data-scope="province"
+              data-i18n="ui.trends_scope_province">Provincial</button>
+      <button type="button" class="trends-scope-btn" data-scope="health_zone"
+              data-i18n="ui.trends_scope_health_zone">Health Zone</button>
     </div>
-    <div id="trends-controls-body" class="panel-body">
-      <div class="trends-controls">
-        <div class="trends-scope-row" role="group"
-             data-i18n-aria="ui.trends_scope" aria-label="Geographic scope">
-          <button type="button" class="trends-scope-btn active" data-scope="national"
-                  data-i18n="ui.trends_scope_national">National</button>
-          <button type="button" class="trends-scope-btn" data-scope="province"
-                  data-i18n="ui.trends_scope_province">Provincial</button>
-          <button type="button" class="trends-scope-btn" data-scope="health_zone"
-                  data-i18n="ui.trends_scope_health_zone">Health Zone</button>
-        </div>
-        <div id="trends-search-wrap">
-          <input type="search" id="trends-search-input" autocomplete="off" spellcheck="false"
-                 data-i18n-placeholder="ui.trends_search_placeholder"
-                 placeholder="Search for a location…"
-                 data-i18n-aria="ui.trends_search" aria-label="Search"
-                 aria-autocomplete="list" aria-controls="trends-search-results" aria-expanded="false" />
-          <div id="trends-search-results" role="listbox"></div>
-        </div>
-      </div>
+    <div id="trends-search-wrap">
+      <input type="search" id="trends-search-input" autocomplete="off" spellcheck="false"
+             data-i18n-placeholder="ui.trends_search_placeholder"
+             placeholder="Search for a location…"
+             data-i18n-aria="ui.trends_search" aria-label="Search"
+             aria-autocomplete="list" aria-controls="trends-search-results" aria-expanded="false" />
+      <div id="trends-search-results" role="listbox"></div>
     </div>
   </div>
   <div id="trends-plots-column">
@@ -269,8 +258,35 @@ __NAV_LINKS__
       </div>
       <div id="trends-body" class="panel-body trends-empty"></div>
     </div>
+    <div id="trends-deaths" class="panel trends-plot-card">
+      <div class="panel-header">
+        <strong id="trends-deaths-title" data-i18n="ui.trends_deaths_panel">Cumulative Deaths</strong>
+        <button class="panel-toggle" data-target="trends-deaths" type="button"
+                data-i18n-aria="ui.aria.toggle_trends" data-i18n-title="ui.aria.collapse_trends"
+                aria-label="Toggle cumulative deaths panel" title="Collapse / expand cumulative deaths">−</button>
+      </div>
+      <div id="trends-deaths-body" class="panel-body trends-empty"></div>
+    </div>
+    <div id="trends-positivity" class="panel trends-plot-card">
+      <div class="panel-header">
+        <strong id="trends-positivity-title" data-i18n="ui.trends_positivity_panel">Test Positivity</strong>
+        <button class="panel-toggle" data-target="trends-positivity" type="button"
+                data-i18n-aria="ui.aria.toggle_trends" data-i18n-title="ui.aria.collapse_trends"
+                aria-label="Toggle test positivity panel" title="Collapse / expand test positivity">−</button>
+      </div>
+      <div id="trends-positivity-body" class="panel-body trends-empty"></div>
+    </div>
+    <div id="trends-labs" class="panel trends-plot-card" style="display:none">
+      <div class="panel-header">
+        <strong id="trends-labs-title" data-i18n="ui.trends_labs_panel">Laboratory testing</strong>
+        <button class="panel-toggle" data-target="trends-labs" type="button"
+                data-i18n-aria="ui.aria.toggle_trends" data-i18n-title="ui.aria.collapse_trends"
+                aria-label="Toggle laboratory testing panel" title="Collapse / expand laboratory testing">−</button>
+      </div>
+      <div id="trends-labs-body" class="panel-body trends-empty"></div>
+    </div>
     <!-- More .trends-plot-card panels can be added here as additional plot
-         types come online (e.g. deaths-over-time, testing-over-time). -->
+         types come online (e.g. testing-over-time). -->
   </div>
 </div>
 <div id="trends-split-handle" role="separator" aria-orientation="vertical"
