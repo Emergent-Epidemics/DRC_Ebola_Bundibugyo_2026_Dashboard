@@ -1,4 +1,5 @@
-# Build output/dashboard.html and sync index.html for GitHub Pages.
+# Build output/{index,spatial-risk,trends,context}.html + output/assets/ and
+# sync repo-root copies of all of them for GitHub Pages.
 # Triggered on dashboard pushes to main, via repository_dispatch from BDBV2026-Data or
 # BDBV2026-Processed_Sensitive_Data, or manually.
 #
@@ -24,6 +25,13 @@ on:
     paths-ignore:
       - "output/**"
       - "index.html"
+      - "spatial-risk.html"
+      - "trends.html"
+      - "context.html"
+      - "clinical-symptoms.html"
+      - "surveillance-testing.html"
+      - "genomic-epidemiology.html"
+      - "assets/**"
   workflow_dispatch:
     inputs:
       data_repo_ref:
@@ -189,8 +197,20 @@ jobs:
           DATA_ROOT: ${{ github.workspace }}/dashboard/Data
         run: |
           set -euo pipefail
-          python Scripts/build_dashboard_public.py
-          cp output/dashboard.html index.html
+          python Scripts/build_dashboard.py
+          # output/{index,spatial-risk,trends,context}.html + output/assets/
+          # are the build artefacts; repo-root copies of the same files are
+          # what GitHub Pages actually serves (Pages serves from repo root,
+          # not output/).
+          cp output/index.html index.html
+          cp output/spatial-risk.html spatial-risk.html
+          cp output/trends.html trends.html
+          cp output/context.html context.html
+          cp output/clinical-symptoms.html clinical-symptoms.html
+          cp output/surveillance-testing.html surveillance-testing.html
+          cp output/genomic-epidemiology.html genomic-epidemiology.html
+          rm -rf assets
+          cp -r output/assets assets
 
       - name: Commit and push
         working-directory: dashboard
@@ -203,7 +223,8 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add output/dashboard.html index.html
+          git add output/ index.html spatial-risk.html trends.html context.html \
+            clinical-symptoms.html surveillance-testing.html genomic-epidemiology.html assets/
           if git diff --cached --quiet; then
             echo "No HTML changes to commit."
             exit 0
