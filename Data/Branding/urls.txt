@@ -1,5 +1,5 @@
-INOHA.jpeg, https://www.inoha.ac.cd/
-inrb.png, https://inrb.net/ 
+inrb.png, https://inrb.net/
 INSP.png, https://insp.cd/
 UMIE.jpeg, https://inrb.net/
 africa-cdc.png, https://africacdc.org/
+WHO.jpg, https://www.who.int/

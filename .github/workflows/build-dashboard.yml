@@ -1,4 +1,5 @@
-# Build output/dashboard.html and sync index.html for GitHub Pages.
+# Build output/{index,spatial-risk,trends,context}.html + output/assets/ and
+# sync repo-root copies of all of them for GitHub Pages.
 # Triggered on dashboard pushes to main, via repository_dispatch from BDBV2026-Data or
 # BDBV2026-Processed_Sensitive_Data, or manually.
 #
@@ -24,6 +25,14 @@ on:
     paths-ignore:
       - "output/**"
       - "index.html"
+      - "spatial-risk.html"
+      - "trends.html"
+      - "context.html"
+      - "clinical-symptoms.html"
+      - "surveillance-testing.html"
+      - "genomic-epidemiology.html"
+      - "assets/**"
+      - "pr-preview/**"
   workflow_dispatch:
     inputs:
       data_repo_ref:
@@ -144,34 +153,6 @@ jobs:
           path: BDBV2026-Processed_Sensitive_Data
           token: ${{ secrets.EXTERNAL_REPO_TOKEN }}
 
-      - name: Sync dashboard plots from processed data
-        run: |
-          set -euo pipefail
-          src="${{ github.workspace }}/BDBV2026-Processed_Sensitive_Data/outputs"
-          dest="${{ github.workspace }}/dashboard/Data/dashboard_plots"
-          if [ ! -f "${src}/manifest.json" ]; then
-            echo "::warning::No outputs/manifest.json in processed data repo; trends plots may be unavailable."
-            exit 0
-          fi
-          rm -rf "${dest}"
-          mkdir -p "${dest}"
-          cp "${src}/manifest.json" "${dest}/manifest.json"
-          # manifest.json's "file" paths are relative to outputs/ (e.g.
-          # "2026-07-15/dashboard_plots/daily_onset_ituri.svg"), so only that
-          # run's date folder actually needs to land next to it here -- not
-          # all of outputs/, which also holds per-date CSVs and unrelated
-          # residence/alert report outputs.
-          date="$(jq -r '.date // empty' "${src}/manifest.json")"
-          if [ -z "${date}" ]; then
-            echo "::warning::manifest.json has no 'date' field; falling back to syncing all of outputs/."
-            rsync -a --exclude='manifest.json' "${src}/" "${dest}/"
-          else
-            mkdir -p "${dest}/${date}/dashboard_plots"
-            rsync -a --exclude='palette_options/' "${src}/${date}/dashboard_plots/" "${dest}/${date}/dashboard_plots/"
-          fi
-          echo "Synced dashboard plots (date: ${date:-all}):"
-          find "${dest}" -maxdepth 3
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -187,10 +168,31 @@ jobs:
         env:
           BUILD_DIR: ${{ github.workspace }}/BDBV2026-Data/build
           DATA_ROOT: ${{ github.workspace }}/dashboard/Data
+          # Points straight at the processed-data repo's checkout instead of
+          # copying/rsyncing outputs/ into dashboard/Data/dashboard_plots
+          # first -- data_sources.py already expects DASHBOARD_PLOTS_DIR to
+          # be an "outputs/"-shaped directory (manifest.json +
+          # <date>/dashboard_plots/...), which is exactly what's checked out
+          # above, and it already tolerates a missing manifest.json or a
+          # manifest with no "date" field (trends plots are simply hidden
+          # with a warning, same as before).
+          DASHBOARD_PLOTS_DIR: ${{ github.workspace }}/BDBV2026-Processed_Sensitive_Data/outputs
         run: |
           set -euo pipefail
-          python Scripts/build_dashboard_public.py
-          cp output/dashboard.html index.html
+          python Scripts/build_dashboard.py
+          # output/{index,spatial-risk,trends,context}.html + output/assets/
+          # are the build artefacts; repo-root copies of the same files are
+          # what GitHub Pages actually serves (Pages serves from repo root,
+          # not output/).
+          cp output/index.html index.html
+          cp output/spatial-risk.html spatial-risk.html
+          cp output/trends.html trends.html
+          cp output/context.html context.html
+          cp output/clinical-symptoms.html clinical-symptoms.html
+          cp output/surveillance-testing.html surveillance-testing.html
+          cp output/genomic-epidemiology.html genomic-epidemiology.html
+          rm -rf assets
+          cp -r output/assets assets
 
       - name: Commit and push
         working-directory: dashboard
@@ -203,7 +205,8 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add output/dashboard.html index.html
+          git add output/ index.html spatial-risk.html trends.html context.html \
+            clinical-symptoms.html surveillance-testing.html genomic-epidemiology.html assets/
           if git diff --cached --quiet; then
             echo "No HTML changes to commit."
             exit 0
