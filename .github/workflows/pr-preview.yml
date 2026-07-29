@@ -77,7 +77,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           lfs: true
-          path: dashboard
+
+      - name: Checkout repository for preview cleanup
+        if: github.event.action == 'closed'
+        uses: actions/checkout@v4
 
       - name: Checkout data repo
         if: github.event.action != 'closed'
@@ -103,18 +106,17 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: dashboard/requirements.txt
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
         if: github.event.action != 'closed'
-        run: pip install -r dashboard/requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Build dashboard HTML
         if: github.event.action != 'closed'
-        working-directory: dashboard
         env:
           BUILD_DIR: ${{ github.workspace }}/BDBV2026-Data/build
-          DATA_ROOT: ${{ github.workspace }}/dashboard/Data
+          DATA_ROOT: ${{ github.workspace }}/Data
           DASHBOARD_PLOTS_DIR: ${{ github.workspace }}/BDBV2026-Processed_Sensitive_Data/outputs
         run: |
           set -euo pipefail
@@ -129,11 +131,21 @@ jobs:
           rm -rf assets
           cp -r output/assets assets
 
+      - name: Stage preview site
+        if: github.event.action != 'closed'
+        run: |
+          set -euo pipefail
+          rm -rf preview-site
+          mkdir -p preview-site
+          cp index.html spatial-risk.html trends.html context.html \
+            clinical-symptoms.html surveillance-testing.html genomic-epidemiology.html \
+            preview-site/
+          cp -r assets preview-site/
+
       - name: Deploy preview
         uses: rossjrw/pr-preview-action@v1
-        working-directory: dashboard
         with:
-          source-dir: ./
+          source-dir: ${{ github.event.action != 'closed' && './preview-site/' || '.' }}
           preview-branch: main
           umbrella-dir: pr-preview
           qr-code: true
