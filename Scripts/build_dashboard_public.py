@@ -48,7 +48,6 @@ the project root, alongside the ``Scripts/`` folder containing this file::
     │   │   ├── urls.txt                     "<filename>, <https url>" per line
     │   │   ├── inrb.png
     │   │   ├── INSP.jpeg
-    │   │   ├── INOHA.jpeg
     │   │   └── UMIE.jpeg
     │   └── Refugee_IDP sites/<*.geojson>    (optional; the dashboard exposes only
     │                                         per-zone aggregates, never coordinates)
@@ -183,7 +182,7 @@ _NAME_TO_NOM = {
 }
 _NOM_TO_NAME = {v: k for k, v in _NAME_TO_NOM.items()}
 
-PARTNER_ORDER = ["INSP.png", "inrb.png", "INOHA.jpeg", "UMIE.jpeg", "africa-cdc.png"]
+PARTNER_ORDER = ["INSP.png", "inrb.png", "UMIE.jpeg", "africa-cdc.png"]
 
 
 # ---------------------------------------------------------------------------
