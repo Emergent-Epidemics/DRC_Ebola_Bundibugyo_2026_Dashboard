@@ -2,7 +2,7 @@
 
 # Bundibugyo Ebola virus outbreak 2026 — Dashboard
 
-![Logos for Project Lead Organizations: Institute National de Recherche Biomedicale (INRB), One Health Institute for Africa (INOHA), Institut National de Santé Publique (INSP), Unité de Modélisation et Intelligence Epidémique (UMIE), and AfricaCDC](https://github.com/INRB-UMIE/BDBV2026-Epidemic_Dashboard/blob/main/Data/Branding/all_logos.png)
+![Logos for Project Lead Organizations: Institute National de Recherche Biomedicale (INRB), Institut National de Santé Publique (INSP), Unité de Modélisation et Intelligence Epidémique (UMIE), and AfricaCDC](https://github.com/INRB-UMIE/BDBV2026-Epidemic_Dashboard/blob/main/Data/Branding/all_logos.png)
 
 This work is led by the Institut National de Recherche Biomédicale (INRB) Kinshasa/One Health Institute for Africa (INOHA) Kinshasa (Dav Ebengo, Placide Mbala-Kingebeni and Tania Bishola), and the Institut National de Santé Publique (INSP) (Pierre Akilimali, Adelard Lofungola).
 
@@ -22,9 +22,62 @@ Please note that the epidemiological data presented here is based on work in pro
 - **health_zone_metadata.csv** Metadata file for dashboard, see below. 
 - **ic_model_estimates.csv** (optional) Imperial College model date and case bounds for the tracker tooltip (`PAYLOAD.ic_model`; independent of INSP sitreps).
 - **caveats.csv** (optional) Per-metric warnings in the title-panel tracker: `metric` (`confirmed_cases`, `suspected_cases`, `confirmed_deaths`, `suspected_deaths`) and `warning` text; adds a mark beside the count and a footnote below.
-- **dashboard_plots/** (optional) Pre-built province SVG charts for the Trends tab (`manifest.json` + `daily_onset_*.svg`). CI copies the latest plots from [BDBV2026-Linelist_Processing](https://github.com/INRB-UMIE/BDBV2026-Linelist_Processing) before each build; locally, run `src/3-dashboard_plots/build_onset_plots.py` there and copy into `Data/dashboard_plots/`.
+- **dashboard_plots/** (optional) Pre-built province/health-zone SVG charts for the Trends tab (`manifest.json` + `<date>/dashboard_plots/...`), produced by [BDBV2026-Processed_Sensitive_Data](https://github.com/INRB-UMIE/BDBV2026-Processed_Sensitive_Data)'s `outputs/` directory. The build reads this directly, no copying into `Data/dashboard_plots/` needed. By default it assumes that repo is cloned as a sibling of this one (`../BDBV2026-Processed_Sensitive_Data/outputs`), same convention as `BUILD_DIR`/`BDBV2026-Data` below; set the `DASHBOARD_PLOTS_DIR` environment variable to override.
 - **Methods** Methods for dashboard, see below.
 - **ToS** ToS for dashboard, see below. 
+
+## Dashboard tabs
+
+Beyond the shared map engine and header/footer chrome (see "Multi-page
+structure" below), each of the four "real" pages has its own controls and
+responsive behaviour worth documenting here, since none of it is obvious
+from the code alone.
+
+**Current Snapshot** (`index.html`) — the main map, coloured by whichever
+layer is selected (confirmed/suspected cases, deaths, genomic sequencing,
+etc.), with a health-zone search, a layer-controls panel (top-left), and a
+zone-details panel (top-right). Both side panels are collapsible via the
+toggle in their header. On narrow screens (≤700px) the Leaflet zoom control
+is hidden (pinch-to-zoom is used instead) and both panels start collapsed to
+just their title bar, pinned to the top of the map pane.
+
+**Epidemiological Trends** (`trends.html`) — a right-hand rail with
+National / Provincial / Health Zone scope buttons and a location search
+(matches every province and health zone, regardless of whether a plot
+exists for it) above a scrollable column of plot cards: daily cases by
+symptom onset (shown by default), cumulative deaths, test positivity, and
+per-lab submission subplots, all filtered to the selected scope. The map
+itself animates cumulative confirmed cases over time and autoplays on
+entering the tab; the map/plots split (60:40 by default) is user-draggable
+and remembered per browser via `localStorage`. The Leaflet zoom control is
+hidden on this tab at every screen size. On narrow screens the map and
+plots column stack vertically instead of sitting side by side, and the
+location search relocates into the map's top-left corner (the zoom
+control's old spot).
+
+**Spatial Risk** (`spatial-risk.html`) — National / Provincial scope
+buttons and a location search (shares its search index with Trends) above
+a health-zone table ranked by invasion risk. Any column header is
+clickable/focusable to sort by it (a ▲/▼ arrow marks the active column and
+direction), replacing the old fixed "rank by relative risk / rank by
+priority" buttons. There's no dedicated Health Zone scope, since ranking a
+table of one zone isn't meaningful — picking one from search selects/
+highlights its row instead of filtering the list. The map-colouring legend
+is collapsible and sits bottom-right of the map pane on wide screens
+(top-left on narrow screens). The Leaflet zoom control is hidden on this
+tab at every screen size. On narrow screens the map and ranked table stack
+vertically instead of sitting side by side.
+
+### Narrow-screen (≤700px) behaviour shared by every page
+
+- The site header collapses to a compact stack; the SitRep/build-info line
+  and the Methods/Terms links move into a tap-to-expand info icon instead
+  of sitting in the footer.
+- The page tabs become a single horizontally-scrollable row instead of
+  wrapping onto multiple lines.
+- Every collapsible panel (layer controls, legends, plot cards) plus the
+  Current Snapshot zone-details panel auto-collapses to just its title bar
+  on load.
 
 ## Repository layout
 ```
@@ -168,8 +221,15 @@ sibling directories:
 ```bash
 BUILD_DIR=/path/to/BDBV-Data/build \
 DATA_ROOT=/path/to/Data \
+DASHBOARD_PLOTS_DIR=/path/to/BDBV2026-Processed_Sensitive_Data/outputs \
 python Scripts/build_dashboard.py
 ```
+
+`DASHBOARD_PLOTS_DIR` is optional and independent of `DATA_ROOT` -- point it
+straight at a checked-out/mounted copy of `BDBV2026-Processed_Sensitive_Data`'s
+`outputs/` directory to build Trends-tab plots from it directly, with no copy
+step. Leave it unset and it defaults to `../BDBV2026-Processed_Sensitive_Data/outputs`
+(a sibling of this repo), same convention as `BUILD_DIR` above.
 
 Copy the build to the site entry point before deploying to GitHub Pages:
 
@@ -185,14 +245,19 @@ Workflow [`.github/workflows/build-dashboard.yml`](.github/workflows/build-dashb
 | Source | Repo | Ref used |
 |---|---|---|
 | Geometry & datasets | [`BDBV2026-Data`](https://github.com/INRB-UMIE/BDBV2026-Data) | Latest GitHub **release** (or the exact commit dispatched after a data release) |
-| Trends-tab SVGs | [`BDBV2026-Linelist_Processing`](https://github.com/INRB-UMIE/BDBV2026-Linelist_Processing) | `main` |
+| Trends-tab SVGs | [`BDBV2026-Processed_Sensitive_Data`](https://github.com/INRB-UMIE/BDBV2026-Processed_Sensitive_Data) (`outputs/`) | `main` |
 | Dashboard config & copy | this repo | triggering commit on `main` |
+
+The processed-data repo is checked out to `BDBV2026-Processed_Sensitive_Data/`
+in the runner's workspace and the build points `DASHBOARD_PLOTS_DIR` straight
+at its `outputs/` directory -- there's no separate copy/rsync step, so the
+build always reads whatever that checkout has.
 
 **Triggers:**
 
-- **Push to `main`** (any file except `index.html` / `output/**`) — rebuild with latest data release + latest linelist plots.
+- **Push to `main`** (any file except `index.html` / `output/**`) — rebuild with latest data release + latest processed-data plots.
 - **Data release** — `release.yml` on the data repo dispatches after a successful release; uses that release commit.
-- **Linelist plot update** — pushing `dashboard_plots/*.svg` or `manifest.json` to linelist `main` dispatches a rebuild (latest data release + that linelist commit).
+- **Processed-data plot update** — pushing `outputs/*/dashboard_plots/` or `outputs/manifest.json` to the processed-data repo's `main` dispatches a rebuild (latest data release + that processed-data commit). Field/event names (`linelist_repo_ref`, `linelist-updated`, etc.) are historical, kept as a contract with that repo's dispatch sender -- see the workflow file's header comment.
 - **Manual** — Actions → *Build dashboard* → optional `data_repo_ref` (empty = latest release) and `linelist_repo_ref` (default `main`).
 
 Commits `output/` (all four pages + `assets/`) and the repo-root copies
@@ -203,7 +268,7 @@ back to **`main`**.
 
 | Secret | Purpose |
 |---|---|
-| `EXTERNAL_REPO_TOKEN` | Fine-grained PAT with **Contents: Read** on `BDBV2026-Linelist_Processing` only (private repo checkout) |
+| `EXTERNAL_REPO_TOKEN` | Fine-grained PAT with **Contents: Read** on `BDBV2026-Processed_Sensitive_Data` only (private repo checkout) |
 
 **Secret (data repo only):** `DASHBOARD_DISPATCH_TOKEN` — fine-grained PAT with **Contents: Write** on `BDBV2026-Epidemic_Dashboard`. Without it, release dispatch steps warn and skip (local/manual builds still work).
 
