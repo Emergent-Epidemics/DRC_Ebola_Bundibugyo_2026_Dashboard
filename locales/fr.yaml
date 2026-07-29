@@ -135,6 +135,7 @@ ui:
   epi_trends_title: "Zones de santé classées par risque relatif national d'invasion"
   epi_trends_title_province: "Zones de santé classées par risque relatif d'invasion — {province}"
   epi_scope: "Périmètre géographique"
+  epi_scope_empty: "Recherchez une province ci-dessus pour voir ses zones de santé classées."
   epi_rank_rr: "Classer par risque relatif"
   epi_rank_priority: "Classer par priorité fondée sur la vulnérabilité"
   epi_col_province: "Province"

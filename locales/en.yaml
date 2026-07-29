@@ -135,6 +135,7 @@ ui:
   epi_trends_title: "Health zones ranked by national relative risk of invasion"
   epi_trends_title_province: "Health zones ranked by relative risk of invasion — {province}"
   epi_scope: "Geographic scope"
+  epi_scope_empty: "Search for a province above to see its ranked health zones."
   epi_rank_rr: "Rank by relative risk"
   epi_rank_priority: "Rank by vulnerability-based priority"
   epi_col_province: "Province"
