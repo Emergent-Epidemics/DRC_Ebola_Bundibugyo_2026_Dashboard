@@ -1,0 +1,139 @@
+# Build the dashboard from a pull request and deploy a static preview under
+# pr-preview/pr-<number>/ on the main branch (same branch GitHub Pages serves).
+#
+# Setup (repository secrets):
+#   EXTERNAL_REPO_TOKEN — already used by build-dashboard.yml; must grant
+#     Contents: Read on INRB-UMIE/BDBV2026-Processed_Sensitive_Data.
+#
+# This workflow uses GITHUB_TOKEN (requires org/repo workflow permissions:
+# read and write). Only add a PREVIEW_TOKEN secret if you need to override
+# that, e.g. when org policy blocks GITHUB_TOKEN write access again.
+#
+# Pages settings: deploy from the main branch at repository root (not the
+# "GitHub Actions" Pages source). Preview URLs look like:
+#   https://<owner>.github.io/<repo>/pr-preview/pr-<number>/
+#
+# Fork PRs are skipped (pr-preview-action v1 does not support them).
+
+name: Deploy PR preview
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - closed
+    paths:
+      - "Scripts/**"
+      - "locales/**"
+      - "Data/**"
+      - "requirements.txt"
+      - "layer_config.yaml"
+      - ".github/workflows/pr-preview.yml"
+
+concurrency:
+  group: pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  DATA_REPO: INRB-UMIE/BDBV2026-Data
+  PROCESSED_DATA_REPO: INRB-UMIE/BDBV2026-Processed_Sensitive_Data
+  # Previews track dev_matching_dashboard plots; production builds use main.
+  PROCESSED_DATA_REF: dev_matching_dashboard
+
+jobs:
+  deploy-preview:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve data refs
+        if: github.event.action != 'closed'
+        id: refs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if release_json="$(gh release view --repo "${DATA_REPO}" --json targetCommitish,tagName 2>/dev/null)"; then
+            data_ref="$(jq -r '.targetCommitish' <<< "${release_json}")"
+            tag="$(jq -r '.tagName' <<< "${release_json}")"
+            echo "Using latest ${DATA_REPO} release ${tag} @ ${data_ref}" >&2
+          else
+            echo "::warning::No GitHub release found on ${DATA_REPO}; falling back to main." >&2
+            data_ref="main"
+          fi
+
+          echo "data_ref=${data_ref}" >> "$GITHUB_OUTPUT"
+          echo "linelist_ref=${PROCESSED_DATA_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout pull request
+        if: github.event.action != 'closed'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          lfs: true
+          path: dashboard
+
+      - name: Checkout data repo
+        if: github.event.action != 'closed'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DATA_REPO }}
+          ref: ${{ steps.refs.outputs.data_ref }}
+          lfs: true
+          path: BDBV2026-Data
+
+      - name: Checkout processed data repo
+        if: github.event.action != 'closed'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PROCESSED_DATA_REPO }}
+          ref: ${{ steps.refs.outputs.linelist_ref }}
+          path: BDBV2026-Processed_Sensitive_Data
+          token: ${{ secrets.EXTERNAL_REPO_TOKEN }}
+
+      - name: Set up Python
+        if: github.event.action != 'closed'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: dashboard/requirements.txt
+
+      - name: Install dependencies
+        if: github.event.action != 'closed'
+        run: pip install -r dashboard/requirements.txt
+
+      - name: Build dashboard HTML
+        if: github.event.action != 'closed'
+        working-directory: dashboard
+        env:
+          BUILD_DIR: ${{ github.workspace }}/BDBV2026-Data/build
+          DATA_ROOT: ${{ github.workspace }}/dashboard/Data
+          DASHBOARD_PLOTS_DIR: ${{ github.workspace }}/BDBV2026-Processed_Sensitive_Data/outputs
+        run: |
+          set -euo pipefail
+          python Scripts/build_dashboard.py
+          cp output/index.html index.html
+          cp output/spatial-risk.html spatial-risk.html
+          cp output/trends.html trends.html
+          cp output/context.html context.html
+          cp output/clinical-symptoms.html clinical-symptoms.html
+          cp output/surveillance-testing.html surveillance-testing.html
+          cp output/genomic-epidemiology.html genomic-epidemiology.html
+          rm -rf assets
+          cp -r output/assets assets
+
+      - name: Deploy preview
+        uses: rossjrw/pr-preview-action@v1
+        with:
+          source-dir: ./dashboard/
+          preview-branch: main
+          umbrella-dir: pr-preview
+          qr-code: true
+          wait-for-pages-deployment: true
