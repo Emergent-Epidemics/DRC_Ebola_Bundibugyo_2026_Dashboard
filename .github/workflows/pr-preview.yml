@@ -131,8 +131,9 @@ jobs:
 
       - name: Deploy preview
         uses: rossjrw/pr-preview-action@v1
+        working-directory: dashboard
         with:
-          source-dir: ./dashboard/
+          source-dir: ./
           preview-branch: main
           umbrella-dir: pr-preview
           qr-code: true
