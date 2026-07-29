@@ -251,22 +251,37 @@ function formatBuildTimestamp(iso) {
 
 function buildTitleSub() {
   const linkStyle = "color:#9fcdfb;text-decoration:underline";
-  let html =
+  // Latest SitRep link + "built on" tag -- shown inline in #title-sub on
+  // wide screens; on narrow screens (see @media max-width:700px) this moves
+  // into the info icon's popup instead, since #title-sub itself is hidden
+  // there in favor of #header-narrow-row.
+  let sitrepHtml =
     t("ui.title_sub.latest") + " " +
     "<a href='" + (PAYLOAD.insp_sitrep_url || "https://insp.cd/") + "' target='_blank' rel='noopener' " +
     "style='" + linkStyle + "'>" + t("ui.title_sub.insp_sitrep") + "</a>" +
     " - " + PAYLOAD.asof;
   const db = PAYLOAD.data_build;
   if (db && db.url && db.tag) {
-    html +=
+    sitrepHtml +=
       " · " + t("ui.title_sub.built_on") + " <a href='" + db.url + "' target='_blank' rel='noopener' style='" + linkStyle + "'>" +
        db.tag + "</a>";
   }
+  // "Dashboard updated" line -- shown on every screen size: inline (as the
+  // second line of #title-sub) when wide, or standalone next to the info
+  // icon in #header-narrow-row when narrow.
+  let updatedHtml = "";
   const builtAtFormatted = formatBuildTimestamp(PAYLOAD.dashboard_built_at);
   if (builtAtFormatted) {
-    html += "<br/>" + t("ui.title_sub.dashboard_updated") + " " + builtAtFormatted;
+    updatedHtml = t("ui.title_sub.dashboard_updated") + " " + builtAtFormatted;
   }
-  document.getElementById("title-sub").innerHTML = html;
+
+  document.getElementById("title-sub").innerHTML =
+    sitrepHtml + (updatedHtml ? "<br/>" + updatedHtml : "");
+
+  const updatedLineEl = document.getElementById("header-updated-line");
+  if (updatedLineEl) updatedLineEl.innerHTML = updatedHtml;
+  const popupBodyEl = document.getElementById("header-info-popup-body");
+  if (popupBodyEl) popupBodyEl.innerHTML = sitrepHtml;
 }
 
 function buildTracker() {
@@ -339,6 +354,41 @@ function buildModeledEstimateNote() {
   root.innerHTML = "";
   root.style.display = "none";
 }
+
+// --- narrow-header info popup (see #header-narrow-row in chrome.py) ---
+// Hover opens it on desktop via CSS alone (:hover/:focus-within); this just
+// adds a click/tap toggle for touch devices, where hover doesn't apply, plus
+// close-on-outside-click and Escape.
+(function wireHeaderInfoPopup() {
+  const row = document.getElementById("header-narrow-row");
+  const btn = document.getElementById("header-info-btn");
+  const popup = document.getElementById("header-info-popup");
+  if (!row || !btn || !popup) return;
+  function setOpen(open) {
+    row.classList.toggle("open", open);
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    popup.setAttribute("aria-hidden", open ? "false" : "true");
+  }
+  btn.addEventListener("click", function(e) {
+    e.stopPropagation();
+    setOpen(!row.classList.contains("open"));
+  });
+  document.addEventListener("click", function(e) {
+    if (!e.target.closest("#header-narrow-row")) setOpen(false);
+  });
+  row.addEventListener("keydown", function(e) {
+    if (e.key === "Escape") {
+      setOpen(false);
+      btn.blur();
+    }
+  });
+  // Methods/Terms open a full-screen modal over everything, but tidy up by
+  // closing the popup itself rather than leaving it open underneath.
+  const popupLinks = document.getElementById("header-info-popup-links");
+  if (popupLinks) {
+    popupLinks.addEventListener("click", function() { setOpen(false); });
+  }
+})();
 
 // --- partners strip ---
 (function buildPartners() {
@@ -686,8 +736,20 @@ function renderFlowArcs(hubNom, layer) {
 const INVASION_RISK = PAYLOAD.invasion_risk || null;
 const INVASION_ZONES = (INVASION_RISK && INVASION_RISK.zones) || {};
 const INVASION_SCOPES = (INVASION_RISK && INVASION_RISK.scopes) || [];
+// epiScopeMode tracks which of the two scope buttons (National/Provincial)
+// is active; epiScopeId is the specific INVASION_SCOPES entry actually
+// applied to filter the table. In province mode, epiScopeId stays null until
+// a province is picked via the location search box -- epiCurrentScope()
+// returns null in that state rather than silently falling back to national,
+// so the table shows an explicit "pick a province" empty state instead of
+// quietly displaying the wrong data (see epiCurrentScope() below).
+let epiScopeMode = "national"; // "national" | "province"
 let epiScopeId = "national";
-let epiRankMode = "rr"; // "rr" | "priority"
+// Sortable column headers replace the old "rank by relative risk / rank by
+// vulnerability-based priority" buttons -- any column can be sorted by
+// clicking (or Enter/Space on) its header, see wireEpiTrendsUi().
+let epiSortKey = "rr_rank";
+let epiSortDir = "asc";
 let epiSelectedNom = null;
 let epiFocusNoms = null; // Set of noms to keep vivid when a zone is selected
 let epiInvasionDomain = {min: 0, max: 1, palette: PURPLES};
@@ -742,12 +804,18 @@ function renderEpiStraightLinks(hubNom) {
 }
 
 function epiCurrentScope() {
+  // Provincial scope with nothing picked yet: no scope applies (table shows
+  // the "search for a province" empty state) -- don't fall back to national,
+  // that would silently show the wrong data while the Provincial button
+  // still looks active.
+  if (epiScopeMode === "province" && !epiScopeId) return null;
   return INVASION_SCOPES.find(function(s) { return s.id === epiScopeId; }) || INVASION_SCOPES[0] || null;
 }
 
 function epiZoneVisible(row) {
   const scope = epiCurrentScope();
-  if (!scope || !scope.province) return true;
+  if (!scope) return false;
+  if (!scope.province) return true;
   return row && row.province === scope.province;
 }
 
@@ -964,6 +1032,42 @@ function setEpiSelected(nom) {
   recomputeEpiTrends();
 }
 
+// Extracts the value used to sort a given column -- shared by the click
+// handler (which just needs to know which column) and epiSortedRows(). "zone"
+// and "province" are strings; everything else is numeric-or-null. "norm_rr"
+// (the on-screen "Normalised Relative Risk" column) is item.rr divided by a
+// constant (the max across visible rows), so it sorts identically to "rr" --
+// no need to recompute the normalised value just to sort by it.
+function epiSortValue(item, key) {
+  switch (key) {
+    case "province": return item.row.province || "";
+    case "zone": return zoneDisplayName(item.nom) || item.nom || "";
+    case "p_invasion": return item.row.p_case_invasion;
+    // No single natural sort key for a range -- use the lower bound.
+    case "p_ci": return item.row.p_case_lo;
+    case "norm_rr": return item.rr;
+    case "rr": return item.rr;
+    case "rr_rank": return item.rrRank;
+    case "priority": return item.priority;
+    case "priority_rank": return item.priorityRank;
+    default: return null;
+  }
+}
+
+// Generic comparator for sortable-column values: nulls always sort last
+// regardless of direction (there's nothing meaningful to rank an unknown
+// value against), strings compare case/locale-insensitively, numbers compare
+// numerically. dir "desc" just flips a non-null comparison.
+function epiCompareValues(a, b, dir) {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  const cmp = (typeof a === "string" || typeof b === "string")
+    ? String(a).localeCompare(String(b), undefined, {sensitivity: "base", numeric: true})
+    : (a - b);
+  return dir === "desc" ? -cmp : cmp;
+}
+
 function epiSortedRows() {
   const scope = epiCurrentScope();
   if (!scope) return [];
@@ -971,40 +1075,21 @@ function epiSortedRows() {
   Object.keys(INVASION_ZONES).forEach(function(nom) {
     const row = INVASION_ZONES[nom];
     if (!epiZoneVisible(row)) return;
-    const rr = row[scope.rr];
-    const rrRank = row[scope.rank];
-    // Province scopes only include zones with a non-null provincial RR when ranking by RR.
-    if (scope.province && epiRankMode === "rr" && (rr == null || Number.isNaN(rr))) return;
     rows.push({
       nom: nom,
       row: row,
-      rr: rr,
-      rrRank: rrRank,
+      rr: row[scope.rr],
+      rrRank: row[scope.rank],
       priority: row.priority,
       priorityRank: row.priority_rank,
     });
   });
   rows.sort(function(a, b) {
-    if (epiRankMode === "priority") {
-      const pa = a.priorityRank, pb = b.priorityRank;
-      if (pa == null && pb == null) return String(a.nom).localeCompare(String(b.nom));
-      if (pa == null) return 1;
-      if (pb == null) return -1;
-      if (pa !== pb) return pa - pb;
-      return String(a.nom).localeCompare(String(b.nom));
-    }
-    const ra = a.rrRank, rb = b.rrRank;
-    if (ra == null && rb == null) {
-      const va = a.rr, vb = b.rr;
-      if (va == null && vb == null) return String(a.nom).localeCompare(String(b.nom));
-      if (va == null) return 1;
-      if (vb == null) return -1;
-      return vb - va;
-    }
-    if (ra == null) return 1;
-    if (rb == null) return -1;
-    if (ra !== rb) return ra - rb;
-    return String(a.nom).localeCompare(String(b.nom));
+    const cmp = epiCompareValues(epiSortValue(a, epiSortKey), epiSortValue(b, epiSortKey), epiSortDir);
+    if (cmp !== 0) return cmp;
+    // Stable tiebreaker so equal/both-null values still render in a
+    // predictable order instead of shuffling between re-renders.
+    return String(zoneDisplayName(a.nom) || a.nom).localeCompare(String(zoneDisplayName(b.nom) || b.nom));
   });
   return rows;
 }
@@ -1020,6 +1105,15 @@ function renderEpiTrendsTable() {
   const tbody = document.getElementById("epi-trends-tbody");
   if (!tbody) return;
   const rows = epiSortedRows();
+  if (!rows.length) {
+    // Covers both "Provincial scope, no province picked yet" (epiCurrentScope()
+    // returned null) and "a scope is active but happens to match zero zones" --
+    // same prompt either way, since the fix in both cases is "search for a
+    // province above".
+    tbody.innerHTML = "<tr class='epi-empty-row'><td colspan='9' class='trends-empty'>" +
+      escHtml(t("ui.epi_scope_empty")) + "</td></tr>";
+    return;
+  }
   let maxRr = 0;
   rows.forEach(function(item) {
     if (item.rr != null && !Number.isNaN(item.rr) && item.rr > maxRr) maxRr = item.rr;
@@ -1044,6 +1138,20 @@ function renderEpiTrendsTable() {
       "<td class='num'>" + (item.priorityRank == null ? "—" : item.priorityRank) + "</td>" +
       "</tr>";
   }).join("");
+}
+
+// Fills in the ▲/▼ glyph on whichever column header matches epiSortKey and
+// clears it from every other header -- called once at setup and again
+// whenever a header click changes epiSortKey/epiSortDir.
+function updateEpiSortIndicators() {
+  document.querySelectorAll("#epi-trends-table th[data-sort]").forEach(function(th) {
+    const key = th.getAttribute("data-sort");
+    const active = key === epiSortKey;
+    const arrow = th.querySelector(".sort-arrow");
+    th.classList.toggle("sort-active", active);
+    th.setAttribute("aria-sort", active ? (epiSortDir === "desc" ? "descending" : "ascending") : "none");
+    if (arrow) arrow.textContent = active ? (epiSortDir === "desc" ? "▼" : "▲") : "";
+  });
 }
 
 function recomputeEpiTrends() {
@@ -1549,6 +1657,28 @@ const ZONE_SEARCH_INDEX = (PAYLOAD.geometry.features || []).map(function(feat) {
     return String(a.name).localeCompare(String(b.name), undefined, {sensitivity: "base"});
   });
 
+// --- Trends tab location search: every province + health zone, regardless
+// of whether a plot happens to exist for it (unlike the old trendsEntityList()
+// approach, which only ever listed places trendsPlotData() had a plot for).
+// Mirrors ZONE_SEARCH_INDEX above so behaviour matches the Current Snapshot
+// search, just also covering provinces since Trends has a province scope.
+const TRENDS_LOCATION_INDEX = (function() {
+  const provinceNames = {};
+  (PAYLOAD.province_boundaries && PAYLOAD.province_boundaries.features || []).forEach(function(feat) {
+    const name = feat.properties && feat.properties.province;
+    if (name) provinceNames[name] = true;
+  });
+  const provinces = Object.keys(provinceNames).map(function(name) {
+    return {id: name, label: name, kind: "province", haystack: name.toLowerCase()};
+  });
+  const zones = ZONE_SEARCH_INDEX.map(function(z) {
+    return {id: z.nom, label: z.name, kind: "health_zone", haystack: z.haystack};
+  });
+  return provinces.concat(zones).sort(function(a, b) {
+    return String(a.label).localeCompare(String(b.label), undefined, {sensitivity: "base"});
+  });
+})();
+
 const zoneSearchInput = document.getElementById("zone-search-input");
 const zoneSearchResults = document.getElementById("zone-search-results");
 const zoneSearchWrap = document.getElementById("zone-search-wrap");
@@ -1796,32 +1926,82 @@ function trendsIndexEntry(bucket, key) {
   return null;
 }
 
+// Always returns a real array, however the manifest happens to have shaped
+// lab_codes (missing, a single string, etc.) -- a non-array value here used
+// to reach a bare .forEach() downstream and throw, which silently froze the
+// whole labs card (the exception aborted renderTrendsLabs() before it could
+// update the DOM, so it just kept showing whatever the previous selection
+// had rendered).
+function asCodeArray(v) {
+  if (Array.isArray(v)) return v;
+  if (v == null || v === "") return [];
+  return [v];
+}
+
 function trendsLabCodesForSelection() {
   if (trendsScope === "health_zone" && trendsSelectedKey) {
     const entry = trendsIndexEntry("by_health_zone", trendsSelectedKey);
-    return (entry && entry.lab_codes) || [];
+    return asCodeArray(entry && entry.lab_codes);
   }
   if (trendsScope === "province" && trendsSelectedKey) {
     const entry = trendsIndexEntry("by_province", trendsSelectedKey);
-    return (entry && entry.lab_codes) || [];
+    return asCodeArray(entry && entry.lab_codes);
   }
   return [];
 }
 
+// Normalizes a place name for cross-dataset matching: strips accents,
+// drops parenthetical suffixes ("Idiofa (Secteur)"), and collapses
+// punctuation/whitespace. Health zone naming has historically drifted a bit
+// between data feeds (see _NAME_TO_NOM on the Python side), so lab metadata
+// doesn't always spell a zone name exactly the same way the case/geometry
+// data does.
+function normalizeLabLocationKey(s) {
+  return String(s || "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/[^a-z0-9]+/gi, " ")
+    .trim()
+    .toLowerCase();
+}
+
 function trendsLabsForSelection() {
-  const codes = trendsLabCodesForSelection();
-  if (!codes.length) return [];
   const data = trendsPlotData() || {};
-  const byCode = data.labs_by_code || {};
-  const allowed = new Set(codes);
-  const out = [];
-  codes.forEach(function(code) {
-    if (byCode[code]) out.push(byCode[code]);
+  const labs = data.labs || [];
+  // National shows every lab -- no province/health-zone subsetting needed.
+  if (trendsScope === "national") return labs;
+  if (!trendsSelectedKey) return [];
+
+  // Match each lab's own health_zone/province field against the current
+  // selection directly, rather than relying solely on the manifest's
+  // indexes.by_health_zone/by_province reverse lookup -- in practice that
+  // index hasn't always been populated for every health zone.
+  const candidateKeys = (trendsScope === "health_zone"
+    ? [trendsSelectedKey, zoneDisplayName(trendsSelectedKey)]
+    : [trendsSelectedKey]
+  ).map(normalizeLabLocationKey).filter(Boolean);
+  const labField = trendsScope === "health_zone" ? "health_zone" : "province";
+  const direct = labs.filter(function(lab) {
+    const val = lab[labField];
+    return val && candidateKeys.indexOf(normalizeLabLocationKey(val)) !== -1;
   });
-  if (out.length) return out;
-  return (data.labs || []).filter(function(lab) {
-    return lab.lab_code && allowed.has(lab.lab_code);
-  });
+
+  // Union in anything the manifest's index knows about that the direct
+  // field match missed.
+  const codes = trendsLabCodesForSelection();
+  if (codes.length) {
+    const byCode = data.labs_by_code || {};
+    const seen = new Set(direct.map(function(l) { return l.lab_code || l.id; }));
+    codes.forEach(function(code) {
+      const lab = byCode[code];
+      const key = lab && (lab.lab_code || lab.id);
+      if (lab && key && !seen.has(key)) {
+        direct.push(lab);
+        seen.add(key);
+      }
+    });
+  }
+  return direct;
 }
 
 function findTrendsLab(id) {
@@ -1904,7 +2084,16 @@ function renderPlotCard(titleId, bodyId, plot, fallbackTitleKey) {
   const body = document.getElementById(bodyId);
   if (!body) return;
   if (plot && plot.svg) {
-    if (titleEl) titleEl.textContent = plot.title || plot.label || t(fallbackTitleKey);
+    // Built from the localized plot-type label + place name rather than
+    // plot.title (the SVG's own baked title) -- that text is generated once
+    // in English by the data pipeline and never changes with the language
+    // toggle. Place names (provinces/health zones) are proper nouns with no
+    // separate French form in this dataset, so only the type label and
+    // "National" need localizing.
+    if (titleEl) {
+      const place = plot.id === "national" ? t("ui.trends_scope_national") : (plot.label || plot.id || "");
+      titleEl.textContent = place ? (t(fallbackTitleKey) + " - " + place) : t(fallbackTitleKey);
+    }
     body.className = "panel-body";
     body.innerHTML = "<div class='onset-chart-wrap'>" + cropPlotSvgTop(plot.svg, PLOT_SVG_TITLE_CROP) + "</div>";
     return;
@@ -1973,6 +2162,7 @@ function renderRollingPositivityPlot() {
 }
 
 function trendsSelectionLabel() {
+  if (trendsScope === "national") return t("ui.trends_scope_national");
   if (!trendsSelectedKey) return "";
   if (trendsScope === "health_zone") {
     return zoneDisplayName(trendsSelectedKey) || trendsSelectedKey;
@@ -1986,7 +2176,9 @@ function renderTrendsLabs() {
   const body = document.getElementById("trends-labs-body");
   if (!card || !body) return;
 
-  const show = (trendsScope === "province" || trendsScope === "health_zone") && trendsSelectedKey;
+  // National always shows (every lab); province/health zone need a selection first.
+  const show = trendsScope === "national" ||
+    ((trendsScope === "province" || trendsScope === "health_zone") && trendsSelectedKey);
   card.style.display = show ? "" : "none";
   if (!show) {
     body.innerHTML = "";
@@ -1994,10 +2186,21 @@ function renderTrendsLabs() {
     return;
   }
 
-  const labs = trendsLabsForSelection();
+  // Set the title before computing labs: an unexpected manifest/lab data
+  // shape used to throw inside trendsLabsForSelection() and silently freeze
+  // this whole card -- everything after the throw (including the title)
+  // never ran, so it just kept showing the previous selection.
   const locationLabel = trendsSelectionLabel();
   if (titleEl) {
     titleEl.textContent = tf("ui.trends_labs_panel", {location: locationLabel});
+  }
+
+  let labs = [];
+  try {
+    labs = trendsLabsForSelection();
+  } catch (err) {
+    console.error("trendsLabsForSelection failed for", trendsScope, trendsSelectedKey, err);
+    labs = [];
   }
 
   if (!labs.length) {
@@ -2006,13 +2209,19 @@ function renderTrendsLabs() {
     return;
   }
 
-  body.className = "panel-body trends-labs-body";
-  body.innerHTML = labs.map(function(lab) {
-    return "<div class='trends-lab-subplot'>" +
-      "<h4 class='trends-lab-subplot-title'>" + escHtml(lab.label || lab.lab_code || lab.id) + "</h4>" +
-      "<div class='onset-chart-wrap'>" + cropPlotSvgTop(lab.svg, PLOT_SVG_TITLE_CROP) + "</div>" +
-      "</div>";
-  }).join("");
+  try {
+    body.className = "panel-body trends-labs-body";
+    body.innerHTML = labs.map(function(lab) {
+      return "<div class='trends-lab-subplot'>" +
+        "<h4 class='trends-lab-subplot-title'>" + escHtml(lab.label || lab.lab_code || lab.id) + "</h4>" +
+        "<div class='onset-chart-wrap'>" + cropPlotSvgTop(lab.svg, PLOT_SVG_TITLE_CROP) + "</div>" +
+        "</div>";
+    }).join("");
+  } catch (err) {
+    console.error("renderTrendsLabs markup failed for", trendsScope, trendsSelectedKey, err);
+    body.className = "panel-body trends-empty";
+    body.innerHTML = "<p>" + escHtml(tf("ui.trends_no_labs", {name: locationLabel})) + "</p>";
+  }
 }
 
 // Renders every card in the plots column. Call sites that used to call
@@ -2081,21 +2290,17 @@ function setTrendsScope(scope) {
 function renderTrendsSearchResults(query) {
   const root = document.getElementById("trends-search-results");
   if (!root) return;
-  if (trendsScope === "national") {
-    root.classList.remove("open");
-    root.innerHTML = "";
-    return;
-  }
   const q = String(query || "").trim().toLowerCase();
-  // Only open the match list once the user starts typing.
+  // Only open the match list once the user starts typing. Search covers
+  // every province/health zone regardless of current scope or plot
+  // availability -- picking a result switches scope automatically.
   if (!q) {
     root.classList.remove("open");
     root.innerHTML = "";
     return;
   }
-  let items = trendsEntityList().filter(function(it) {
-    return String(it.label).toLowerCase().indexOf(q) >= 0 ||
-      String(it.id).toLowerCase().indexOf(q) >= 0;
+  let items = TRENDS_LOCATION_INDEX.filter(function(it) {
+    return it.haystack.indexOf(q) >= 0;
   });
   if (!items.length) {
     root.innerHTML = "<div class='zone-search-empty'>" + escHtml(t("ui.zone_search_no_matches") || "No matches") + "</div>";
@@ -2104,7 +2309,7 @@ function renderTrendsSearchResults(query) {
   }
   // Keep enough matches that the expanded panel can fill its ≥5-hit capacity.
   root.innerHTML = items.slice(0, 40).map(function(it) {
-    return "<button type='button' role='option' data-id='" + escHtml(it.id) + "'>" +
+    return "<button type='button' role='option' data-id='" + escHtml(it.id) + "' data-kind='" + escHtml(it.kind) + "'>" +
       escHtml(it.label) + "</button>";
   }).join("");
   root.classList.add("open");
@@ -2380,7 +2585,7 @@ let trendsDateIdx = 0;
 let trendsSliderTimer = null;
 let trendsSliderAnimating = false;
 let trendsSliderPointerDown = false;
-const TRENDS_SLIDER_STEP_MS = 300;
+const TRENDS_SLIDER_STEP_MS = 150;
 
 function setTrendsSliderBusy(busy) {
   document.body.classList.toggle("trends-slider-busy", !!busy);
@@ -2553,8 +2758,9 @@ function enterTrendsView() {
     initTrendsLegendBar();
     const slider = document.getElementById("trends-date-slider");
     if (slider) slider.max = String(ts.dates.length - 1);
-    // Latest sitrep values on open; animation only via Play.
-    applyTrendsDateIdx(ts.dates.length - 1);
+    // Auto-play from the start every time the tab is opened, rather than
+    // jumping straight to the latest sitrep and waiting for a manual Play click.
+    playTrendsSliderAnimation();
   }
   const activeScopeBtn = document.querySelector(".trends-scope-btn.active");
   setTrendsScope((activeScopeBtn && activeScopeBtn.getAttribute("data-scope")) || "national");
@@ -2692,6 +2898,14 @@ function setActiveView(view) {
     searchResults.addEventListener("click", function(e) {
       const btn = e.target.closest("button[data-id]");
       if (!btn) return;
+      const kind = btn.getAttribute("data-kind");
+      if (kind && kind !== trendsScope) {
+        const targetBtn = document.querySelector(".trends-scope-btn[data-scope='" + kind + "']");
+        if (targetBtn) {
+          scopeButtons.forEach(function(b) { b.classList.toggle("active", b === targetBtn); });
+        }
+        setTrendsScope(kind);
+      }
       setTrendsSelection(btn.getAttribute("data-id"), {fromSearch: true});
     });
   }
@@ -2701,6 +2915,41 @@ function setActiveView(view) {
     searchResults.classList.remove("open");
   });
   setTrendsScope("national");
+})();
+
+// --- Trends tab: on narrow screens, relocate the location search bar out of
+// #trends-controls (now buried in the stacked bottom panel, see
+// body.view-trends #trends-panel in dashboard.css) into #trends-search-slot,
+// a sibling of #map, positioned top-left where the Leaflet zoom control used
+// to sit on this page (see body.view-trends .leaflet-control-zoom). Moves it
+// back to its original spot -- right after .trends-scope-row inside
+// #trends-controls -- on wider screens. ---
+(function wireTrendsSearchSlot() {
+  const searchWrap = document.getElementById("trends-search-wrap");
+  const slot = document.getElementById("trends-search-slot");
+  const controls = document.getElementById("trends-controls");
+  if (!searchWrap || !slot || !controls) return;
+  const scopeRow = controls.querySelector(".trends-scope-row");
+  const mq = window.matchMedia("(max-width: 700px)");
+
+  function place(narrow) {
+    if (narrow) {
+      if (searchWrap.parentElement !== slot) slot.appendChild(searchWrap);
+    } else if (searchWrap.parentElement !== controls) {
+      if (scopeRow && scopeRow.nextSibling) {
+        controls.insertBefore(searchWrap, scopeRow.nextSibling);
+      } else {
+        controls.appendChild(searchWrap);
+      }
+    }
+  }
+
+  place(mq.matches);
+  if (mq.addEventListener) {
+    mq.addEventListener("change", function(e) { place(e.matches); });
+  } else if (mq.addListener) {
+    mq.addListener(function(e) { place(e.matches); });
+  }
 })();
 
 // --- Trends tab map/plots split handle (mirrors wireEpiTrendsUi's
@@ -2918,7 +3167,6 @@ if (!PAYLOAD.flow_arcs_available || !FLOW_ARC_LAYER) {
 
 // --- Epidemiological trends controls ---
 (function wireEpiTrendsUi() {
-  const scopeSelect = document.getElementById("epi-scope-select");
   const tbody = document.getElementById("epi-trends-tbody");
   const tab = document.querySelector('.view-tab[data-view="epi-trends"]');
   const splitHandle = document.getElementById("epi-split-handle");
@@ -3017,41 +3265,160 @@ if (!PAYLOAD.flow_arcs_available || !FLOW_ARC_LAYER) {
     if (splitHandle) splitHandle.style.display = "none";
     return;
   }
-  if (scopeSelect) {
-    scopeSelect.innerHTML = INVASION_SCOPES.map(function(s) {
-      return "<option value='" + escHtml(s.id) + "'>" + escHtml(s.label) + "</option>";
-    }).join("");
-    scopeSelect.addEventListener("change", function() {
-      epiScopeId = scopeSelect.value || "national";
-      setEpiSelected(null);
-      recomputeEpiTrends();
-      // Fit map to selected province when filtering.
-      const scope = epiCurrentScope();
-      if (scope && scope.province) {
-        const layers = [];
-        geoLayer.eachLayer(function(layer) {
-          if (layer.feature && layer.feature.properties.province === scope.province) {
-            layers.push(layer);
-          }
-        });
-        if (layers.length) {
-          const group = L.featureGroup(layers);
-          map.fitBounds(group.getBounds(), {padding: [30, 30], maxZoom: 8});
-        }
-      } else {
-        map.setView([INITIAL_VIEW.lat, INITIAL_VIEW.lon], INITIAL_VIEW.zoom);
+  const epiScopeButtons = document.querySelectorAll(".epi-scope-btn");
+  const epiSearchInput = document.getElementById("epi-search-input");
+  const epiSearchResults = document.getElementById("epi-search-results");
+
+  function epiFitMapToProvince(provinceName) {
+    const layers = [];
+    geoLayer.eachLayer(function(layer) {
+      if (layer.feature && layer.feature.properties.province === provinceName) {
+        layers.push(layer);
       }
     });
+    if (layers.length) {
+      const group = L.featureGroup(layers);
+      map.fitBounds(group.getBounds(), {padding: [30, 30], maxZoom: 8});
+    }
   }
-  document.querySelectorAll(".epi-rank-btn").forEach(function(btn) {
+
+  function epiClearSearchUi() {
+    if (epiSearchInput) epiSearchInput.value = "";
+    if (epiSearchResults) {
+      epiSearchResults.classList.remove("open");
+      epiSearchResults.innerHTML = "";
+    }
+  }
+
+  function epiSetScopeButtonActive(kind) {
+    epiScopeButtons.forEach(function(b) {
+      b.classList.toggle("active", (b.getAttribute("data-scope") || "national") === kind);
+    });
+  }
+
+  // Picking a province (from search) filters the table to it -- the
+  // Provincial button switches active if it wasn't already.
+  function epiApplyProvince(provinceName) {
+    const scope = INVASION_SCOPES.find(function(s) { return s.province === provinceName; });
+    epiScopeMode = "province";
+    epiScopeId = scope ? scope.id : null;
+    epiSetScopeButtonActive("province");
+    setEpiSelected(null);
+    recomputeEpiTrends();
+    if (scope) epiFitMapToProvince(provinceName);
+  }
+
+  // Picking a health zone doesn't filter the table (a ranked list of one
+  // zone isn't useful) -- switch to National so it's guaranteed visible,
+  // then select/highlight its row, same as clicking that row directly.
+  function epiApplyHealthZone(nom) {
+    epiScopeMode = "national";
+    epiScopeId = "national";
+    epiSetScopeButtonActive("national");
+    recomputeEpiTrends();
+    setEpiSelected(nom);
+    if (tbody) {
+      const tr = Array.prototype.find.call(
+        tbody.querySelectorAll("tr[data-nom]"),
+        function(el) { return el.getAttribute("data-nom") === nom; }
+      );
+      if (tr && tr.scrollIntoView) tr.scrollIntoView({block: "center"});
+    }
+  }
+
+  epiScopeButtons.forEach(function(btn) {
     btn.addEventListener("click", function() {
-      epiRankMode = btn.getAttribute("data-rank") || "rr";
-      document.querySelectorAll(".epi-rank-btn").forEach(function(b) {
-        b.classList.toggle("active", b === btn);
-      });
-      renderEpiTrendsTable();
+      const kind = btn.getAttribute("data-scope") || "national";
+      epiSetScopeButtonActive(kind);
+      epiClearSearchUi();
+      if (kind === "national") {
+        epiScopeMode = "national";
+        epiScopeId = "national";
+        setEpiSelected(null);
+        recomputeEpiTrends();
+        map.setView([INITIAL_VIEW.lat, INITIAL_VIEW.lon], INITIAL_VIEW.zoom);
+      } else {
+        // No province picked yet -- table shows the "search above" empty
+        // state (see epiCurrentScope()/renderEpiTrendsTable()) until one is.
+        epiScopeMode = "province";
+        epiScopeId = null;
+        setEpiSelected(null);
+        recomputeEpiTrends();
+      }
     });
   });
+
+  // Shares TRENDS_LOCATION_INDEX with the Trends tab (every province +
+  // health zone) rather than building a second copy of the same index.
+  function renderEpiSearchResults(query) {
+    if (!epiSearchResults) return;
+    const q = String(query || "").trim().toLowerCase();
+    if (!q) {
+      epiSearchResults.classList.remove("open");
+      epiSearchResults.innerHTML = "";
+      return;
+    }
+    const items = TRENDS_LOCATION_INDEX.filter(function(it) {
+      return it.haystack.indexOf(q) >= 0;
+    });
+    if (!items.length) {
+      epiSearchResults.innerHTML = "<div class='zone-search-empty'>" +
+        escHtml(t("ui.zone_search_no_matches") || "No matches") + "</div>";
+      epiSearchResults.classList.add("open");
+      return;
+    }
+    epiSearchResults.innerHTML = items.slice(0, 40).map(function(it) {
+      return "<button type='button' role='option' data-id='" + escHtml(it.id) + "' data-kind='" + escHtml(it.kind) + "'>" +
+        escHtml(it.label) + "</button>";
+    }).join("");
+    epiSearchResults.classList.add("open");
+  }
+
+  if (epiSearchInput) {
+    epiSearchInput.addEventListener("input", function() { renderEpiSearchResults(epiSearchInput.value); });
+    epiSearchInput.addEventListener("focus", function() { renderEpiSearchResults(epiSearchInput.value); });
+  }
+  if (epiSearchResults) {
+    epiSearchResults.addEventListener("click", function(e) {
+      const btn = e.target.closest("button[data-id]");
+      if (!btn) return;
+      const kind = btn.getAttribute("data-kind");
+      const id = btn.getAttribute("data-id");
+      if (kind === "province") epiApplyProvince(id);
+      else if (kind === "health_zone") epiApplyHealthZone(id);
+      epiClearSearchUi();
+    });
+  }
+  document.addEventListener("click", function(e) {
+    if (!epiSearchResults || !epiSearchResults.classList.contains("open")) return;
+    if (e.target.closest("#epi-search-wrap")) return;
+    epiSearchResults.classList.remove("open");
+  });
+
+  // Sortable column headers replace the old rank-by-RR/rank-by-priority
+  // buttons -- click (or Enter/Space) any header to sort by it, click again
+  // to reverse. See epiSortValue()/epiCompareValues()/epiSortedRows() and
+  // updateEpiSortIndicators() for the ▲/▼ glyph.
+  document.querySelectorAll("#epi-trends-table th[data-sort]").forEach(function(th) {
+    function activateSort() {
+      const key = th.getAttribute("data-sort");
+      if (epiSortKey === key) {
+        epiSortDir = epiSortDir === "asc" ? "desc" : "asc";
+      } else {
+        epiSortKey = key;
+        epiSortDir = "asc";
+      }
+      updateEpiSortIndicators();
+      renderEpiTrendsTable();
+    }
+    th.addEventListener("click", activateSort);
+    th.addEventListener("keydown", function(e) {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      activateSort();
+    });
+  });
+  updateEpiSortIndicators();
   if (tbody) {
     tbody.addEventListener("click", function(e) {
       const tr = e.target.closest("tr[data-nom]");
@@ -3169,17 +3536,23 @@ layerSelect.addEventListener("change", function() {
 });
 
 // --- modal wiring (Methods + Terms) ---
-function wireModal(modalId, btnId, closeId) {
+// btnIds may be a single id or an array -- the header-info-popup's
+// methods/terms buttons (narrow screens) open the same modals as the
+// footer's Contributors/Methods and Terms buttons (wide screens).
+function wireModal(modalId, btnIds, closeId) {
   const modal = document.getElementById(modalId);
-  const btn = document.getElementById(btnId);
   const closeBtn = document.getElementById(closeId);
-  if (!modal || !btn) return;
-  function close() { modal.classList.remove("open"); }
-  btn.addEventListener("click", function() {
+  if (!modal) return;
+  function open() {
     document.querySelectorAll(".modal.open").forEach(m => m.classList.remove("open"));
     modal.classList.add("open");
+  }
+  function close() { modal.classList.remove("open"); }
+  (Array.isArray(btnIds) ? btnIds : [btnIds]).forEach(function(id) {
+    const btn = document.getElementById(id);
+    if (btn) btn.addEventListener("click", open);
   });
-  closeBtn.addEventListener("click", close);
+  if (closeBtn) closeBtn.addEventListener("click", close);
   modal.addEventListener("click", function(e) {
     if (e.target === modal) close();
   });
@@ -3189,8 +3562,8 @@ document.addEventListener("keydown", function(e) {
     document.querySelectorAll(".modal.open").forEach(m => m.classList.remove("open"));
   }
 });
-wireModal("methods-modal", "methods-btn", "methods-close");
-wireModal("terms-modal", "terms-btn", "terms-close");
+wireModal("methods-modal", ["methods-btn", "header-methods-btn"], "methods-close");
+wireModal("terms-modal", ["terms-btn", "header-terms-btn"], "terms-close");
 
 // --- collapsible panels (zone info + layer controls + legend) ---
 (function wirePanelToggles() {

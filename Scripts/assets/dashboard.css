@@ -1,7 +1,7 @@
   html, body { margin:0; padding:0; height:100%; font-family: -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif; background:#111; color:#eee; }
   body { display:flex; flex-direction:column; }
   :root {
-    --view-chrome-height: 52px;
+    --view-chrome-height: 44px;
     --epi-panel-width: 50%;
     --trends-panel-width: 40%;
   }
@@ -28,6 +28,52 @@
   #site-header h1#page-heading {
     margin:0; font-size:clamp(20px, 3.2vw, 30px); font-weight:700; letter-spacing:0.3px;
     line-height:1.15;
+  }
+  /* Narrow-screen replacement for #title-sub (see @media max-width:700px
+     below for the switch-over) -- just the "dashboard updated" line plus an
+     info icon whose popup holds what #title-sub shows inline on wide
+     screens (latest SitRep link, build tag). Hidden outright on wide
+     screens; display:flex only applies once the media query below sets it. */
+  #header-narrow-row {
+    display:none;
+    align-items:center; justify-content:center; gap:8px;
+    margin-top:4px; position:relative;
+  }
+  #header-narrow-row .sub { margin-top:0; }
+  #header-info-btn {
+    width:16px; height:16px; border-radius:50%; flex:0 0 auto;
+    border:1px solid #666; background:#222; color:#ffd28a;
+    font-size:11px; font-weight:700; line-height:1;
+    display:inline-flex; align-items:center; justify-content:center;
+    padding:0; cursor:pointer;
+  }
+  #header-info-btn:hover,
+  #header-info-btn:focus-visible { border-color:#ffae42; color:#ffae42; outline:none; }
+  #header-info-popup {
+    display:none;
+    position:absolute; left:50%; top:calc(100% + 6px);
+    transform:translateX(-50%);
+    width:max-content; max-width:min(280px, 80vw);
+    background:#1f1f1f; border:1px solid #444; border-radius:6px;
+    padding:8px 10px; box-shadow:0 4px 16px rgba(0,0,0,0.45);
+    color:#ddd; font-size:10px; line-height:1.4;
+    z-index:1500; text-align:left;
+  }
+  #header-info-popup a { color:#9fcdfb; text-decoration:underline; }
+  #header-info-popup a:hover { color:#ffae42; }
+  #header-narrow-row:hover #header-info-popup,
+  #header-narrow-row:focus-within #header-info-popup,
+  #header-narrow-row.open #header-info-popup { display:block; }
+  /* Static part of the popup (unlike #header-info-popup-body, which JS
+     overwrites) -- stands in for the footer's Contributors/Methods and
+     Terms buttons, which are hidden on narrow screens in favor of these. */
+  #header-info-popup-links {
+    display:flex; flex-direction:column; gap:6px;
+    margin-top:8px; padding-top:8px; border-top:1px solid #333;
+  }
+  #header-info-popup-links .link-btn {
+    display:block; width:100%; box-sizing:border-box;
+    padding:6px 10px; font-size:11px; text-align:center;
   }
   /* Page-switching tabs, directly under the header (used to live at the
      bottom of the page; the .view-tabs/.view-tab styling below is shared
@@ -111,6 +157,15 @@
   }
   body.view-trends #trends-panel { display:flex; flex-direction:column; gap:10px; }
   body.view-trends #map { right: var(--trends-panel-width); }
+  /* Removed on this page only (for now) -- on narrow screens the top-left
+     corner it used to occupy is given to the location search bar instead
+     (see #trends-search-slot). */
+  body.view-trends .leaflet-control-zoom { display:none; }
+  /* Sibling of #map (see chrome.py) -- engine.js relocates #trends-search-wrap
+     in here on narrow screens (see @media max-width:700px below), out of
+     #trends-controls, so search stays reachable next to the map instead of
+     being buried in the stacked bottom panel. Hidden/inert otherwise. */
+  #trends-search-slot { display:none; }
   #trends-split-handle {
     display:none;
     position:absolute;
@@ -215,6 +270,9 @@
   body.epi-splitting #map,
   body.epi-splitting #epi-trends-panel { pointer-events:none; }
   body.view-epi-trends #epi-trends-panel { display:flex; flex-direction:column; gap:8px; }
+  /* No search bar to relocate into this spot on Spatial Risk (unlike Trends),
+     so just hide it outright -- touch users pinch-zoom instead. */
+  body.view-epi-trends .leaflet-control-zoom { display:none; }
   body.view-trends #epi-trends-panel,
   body.view-trends #epi-split-handle,
   body.view-trends #epi-trends-legend,
@@ -241,61 +299,52 @@
   .trends-scope-btn.active {
     background:rgba(155,125,78,0.16); color:#7c4a12; border-color:#9b7d4e;
   }
-  #trends-controls input[type="search"] {
+  /* Shared by #trends-search-wrap (Trends tab) and #epi-search-wrap (Spatial
+     Risk tab) so both tabs' location search looks/behaves identically.
+     Scoped to the class itself (not the parent controls row) so the input
+     keeps its styling when engine.js relocates #trends-search-wrap into
+     #trends-search-slot on narrow screens -- see wireTrendsSearchSlot(). */
+  .location-search-wrap input[type="search"] {
     background:#ffffff; color:#2a2a27; border:1px solid #e7e3db; border-radius:4px;
     padding:6px 8px; font-size:12px; width:100%; box-sizing:border-box;
   }
-  #trends-controls input[type="search"]:focus {
+  .location-search-wrap input[type="search"]:focus {
     outline:none; border-color:#9b7d4e; box-shadow:0 0 0 1px rgba(155,125,78,0.35);
   }
-  /* Location search sits on the right side of the row. */
-  #trends-search-wrap { position:relative; flex:0 1 200px; min-width:140px; }
-  /* In-flow results so the Scope panel grows (absolute dropdowns were clipped
-     by #trends-controls { overflow-y:auto }). Tall enough for ≥5 hits. */
-  #trends-search-results {
+  /* Location search sits on the right side of the row (wide screens; see
+     #trends-search-slot for the Trends-tab narrow-screen position). */
+  .location-search-wrap { position:relative; flex:0 1 200px; min-width:140px; }
+  /* Floats over the content below rather than pushing it down. Tall enough
+     for ≥5 hits. */
+  .location-search-results {
     display:none;
-    position:static;
+    position:absolute; left:0; right:0; top:100%;
     margin-top:6px;
     max-height:calc(5 * 32px);
     overflow-y:auto;
     background:#ffffff; border:1px solid #e7e3db; border-radius:4px;
+    box-shadow:0 4px 14px rgba(0,0,0,0.14);
+    z-index:1100;
   }
-  #trends-search-results.open { display:block; }
-  #trends-search-results button {
+  .location-search-results.open { display:block; }
+  .location-search-results button {
     display:block; width:100%; text-align:left; border:none; border-bottom:1px solid #e7e3db;
     background:#ffffff; color:#2a2a27; padding:7px 8px; font-size:12px; line-height:1.35;
     min-height:32px; box-sizing:border-box; cursor:pointer;
   }
-  #trends-search-results button:hover,
-  #trends-search-results button.active { background:#f3f1ec; color:#9b7d4e; }
-  #trends-search-results .zone-search-empty {
+  .location-search-results button:hover,
+  .location-search-results button.active { background:#f3f1ec; color:#9b7d4e; }
+  .location-search-results .zone-search-empty {
     padding:8px; font-size:12px; color:#9c968b; font-style:italic;
   }
   #epi-trends-panel h2 {
     margin:0; font-size:14px; color:#2a2a27; font-weight:700;
   }
-  #epi-trends-panel .epi-controls {
-    display:flex; flex-wrap:nowrap; gap:8px; align-items:flex-end;
-  }
-  #epi-trends-panel .epi-controls label {
-    display:flex; flex-direction:column; gap:3px; font-size:11px; color:#9c968b; margin:0;
-    flex:1 1 0; min-width:0;
-  }
-  #epi-trends-panel select, #epi-trends-panel button.epi-rank-btn {
-    background:#ffffff; color:#2a2a27; border:1px solid #e7e3db; border-radius:4px;
-    padding:6px 8px; font-size:12px; width:100%;
-    box-sizing:border-box;
-  }
-  #epi-trends-panel button.epi-rank-btn {
-    flex:1 1 0; min-width:0; cursor:pointer; font-weight:600;
-    white-space:normal; line-height:1.25; height:auto; min-height:34px;
-    color:#9b7d4e;
-  }
-  #epi-trends-panel button.epi-rank-btn:hover {
-    background:rgba(155,125,78,0.08); color:#7c1d1d; border-color:#9b7d4e;
-  }
-  #epi-trends-panel button.epi-rank-btn.active {
-    color:#7c1d1d; background:rgba(155,125,78,0.12); border-color:#9b7d4e;
+  /* Scope buttons on the left, location search on the right -- same row
+     layout as #trends-controls on the Trends tab. */
+  .epi-controls {
+    display:flex; align-items:center; justify-content:space-between;
+    gap:10px; flex-wrap:wrap;
   }
   #epi-trends-table-wrap {
     flex:1 1 auto; overflow:auto; border:1px solid #e7e3db; border-radius:6px;
@@ -318,6 +367,29 @@
     background:rgba(155,125,78,0.12); color:#7c1d1d;
   }
   #epi-trends-table .num { font-variant-numeric:tabular-nums; text-align:center; }
+  /* Sortable column headers (replace the old "Rank by relative risk /
+     Rank by vulnerability-based priority" buttons) -- click or Enter/Space
+     to sort by that column, click again to reverse. .sort-arrow is filled
+     in by updateEpiSortIndicators() for whichever column is currently
+     active; blank on every other header. */
+  #epi-trends-table th.sortable {
+    cursor:pointer; user-select:none; white-space:nowrap;
+  }
+  #epi-trends-table th.sortable:hover,
+  #epi-trends-table th.sortable:focus-visible {
+    background:#f0ede6; color:#7c4a12;
+  }
+  #epi-trends-table th.sortable:focus-visible { outline:2px solid #9b7d4e; outline-offset:-2px; }
+  #epi-trends-table th.sort-active { color:#7c4a12; }
+  #epi-trends-table th .sort-arrow {
+    display:inline-block; width:0.9em; margin-left:3px; font-size:9px; color:#9b7d4e;
+  }
+  /* Shown instead of ranked rows when Provincial scope is active but no
+     province has been picked yet via the search box above -- reuses the
+     same empty-state text styling as the Trends tab's placeholder copy. */
+  #epi-trends-tbody .epi-empty-row td {
+    cursor:default; white-space:normal; text-align:center; padding:16px 8px;
+  }
   #epi-trends-method {
     font-size:11px; color:#9c968b; margin-top:4px; line-height:1.35;
   }
@@ -354,7 +426,12 @@
   #epi-trends-legend {
     display:none;
     position:absolute; z-index:1000;
-    bottom:calc(var(--view-chrome-height) + 12px); left:12px; max-width:min(340px, calc(100vw - 36px));
+    /* Sits over the map portion only (map is narrowed by --epi-panel-width
+       on this tab), bottom-right of that visible area rather than
+       bottom-right of the whole viewport -- otherwise it'd land underneath
+       the ranked-zones table panel. Mirrors #trends-legend's positioning. */
+    bottom:calc(var(--view-chrome-height) + 12px);
+    right:calc(var(--epi-panel-width) + 12px); max-width:min(340px, calc(100vw - 36px));
     background:#ffffff; color:#2a2a27;
     padding:12px 14px; border-radius:8px;
     border:1px solid #e7e3db;
@@ -437,6 +514,14 @@
   #trends-date-label {
     display:block; margin-top:8px; font-size:12px; color:#bbb;
   }
+  /* While the date slider is animating (Play) or being dragged, cross-fade
+     each health zone's fill colour instead of snapping straight to the new
+     value -- scoped to trends-slider-busy so scrubbing/playback feel smooth
+     without adding a transition to every other colour change on the map
+     (scope switches, search selection, hover highlight, etc). */
+  body.trends-slider-busy .leaflet-interactive {
+    transition: fill 0.14s linear, fill-opacity 0.14s linear;
+  }
   /* Play button + slider share a row now, button to the left. */
   #trends-play-row {
     display:flex; gap:8px; align-items:center; margin-top:8px;
@@ -464,7 +549,7 @@
     align-items:center;
     gap:10px;
     box-sizing:border-box;
-    padding:6px 10px 6px 12px;
+    padding:4px 10px 4px 12px;
     background:rgba(20,20,20,0.96); color:#f4f4f4;
     border-radius:0;
     border-top:1px solid #333;
@@ -509,7 +594,7 @@
   #view-switcher #partners a { display:inline-flex; align-items:center; transition:opacity .15s ease; }
   #view-switcher #partners a:hover { opacity:0.78; }
   #view-switcher #partners img {
-    height:clamp(20px, 3.6vmin, 36px); width:auto;
+    height:clamp(18px, 3vmin, 28px); width:auto;
     max-width:min(14vmin, 110px); display:block; object-fit:contain;
   }
   #context-hint,
@@ -540,7 +625,10 @@
     display: block;
     overflow: visible;
   }
-  #trends-body.trends-empty { color:#888; font-size:12px; }
+  /* Applies to every plot card's empty state (trends/deaths/positivity/labs),
+     not just #trends-body -- previously scoped to that one id, so the other
+     cards' placeholder copy rendered in default (dark, larger) text. */
+  .trends-empty { color:#888; font-size:12px; }
   #context-national {
     top:12px; left:12px; bottom:auto; right:auto;
     width:min(280px, calc(50vw - 24px));
@@ -649,7 +737,7 @@
   #info.collapsed #info-body,
   .panel.collapsed .panel-body { display:none; }
   @media (max-width: 700px) {
-    :root { --view-chrome-height: 72px; }
+    :root { --view-chrome-height: 54px; }
     .panel          { font-size:12px; padding:6px 8px; }
     /* Narrow viewports: stack the right column (outbreak summary) below the
        left column (title/build info) instead of squeezing them side by side,
@@ -665,19 +753,119 @@
        win even on narrow screens, so #site-header-right centered but its
        #tracker contents stayed right-aligned. See the block right after the
        "Tracker stack" rules below. */
-    #view-switcher { padding:4px 8px; gap:6px; }
+    #view-switcher { padding:3px 8px; gap:6px; }
     .view-tab { padding:3px 9px; font-size:11px; }
+    /* One scrollable row instead of wrapping onto multiple lines -- 7 tabs
+       don't all fit on a phone width, so let the row scroll horizontally
+       rather than growing #page-tabs taller. */
+    .view-tabs {
+      flex-wrap:nowrap; flex:1 1 auto; min-width:0;
+      justify-content:flex-start;
+      overflow-x:auto; -webkit-overflow-scrolling:touch;
+      scrollbar-width:thin;
+    }
+    .view-tab { flex:0 0 auto; }
     #view-switcher #partners img {
-      height:clamp(16px, 4vmin, 26px);
+      height:clamp(14px, 3.5vmin, 22px);
       max-width:min(12vmin, 80px);
     }
     #site-header h1#page-heading { margin-bottom:2px; }
     #site-header .sub { font-size:10px; }
+    /* Collapse to: page-heading / [updated line + info icon] / stats-block.
+       #title-sub (latest SitRep line + build tag) is replaced by
+       #header-narrow-row -- that content moves into the info icon's popup
+       instead of just disappearing. */
+    #title-sub { display:none; }
+    #header-narrow-row { display:flex; }
+    /* Stats-block simplified to just the cases/deaths/recovered numbers --
+       drop the "OUTBREAK SIZE" label and the per-country breakdown rows,
+       there's not enough width to justify them here. */
+    #tracker .global-title,
+    #tracker .countries-row { display:none; }
     #tracker        { margin-top:0; padding:0 2px; }
     #tracker .global-row { gap:14px; }
     #tracker .countries-row { gap:2px; margin-top:6px; }
     #tracker .country { gap:3px 6px; }
     #info           { max-width:60vw; }
+    /* Contributors/Methods and Terms move into the header info popup on
+       narrow screens (see #header-info-popup-links above) instead of
+       sitting in the footer -- there isn't room for both there and the
+       language switcher/partner logos. */
+    #methods-btn,
+    #terms-btn { display:none; }
+    /* Trends tab: map and plots column stack as a column instead of sitting
+       side by side -- there isn't width for both. Map keeps the top ~40% of
+       the viewport area, the plots panel takes the rest and scrolls
+       independently; the drag-to-resize handle only makes sense for a
+       left/right split, so it's hidden here rather than taught to resize
+       vertically. */
+    body.view-trends #map {
+      right:0; bottom:auto; height:40vh;
+    }
+    body.view-trends #trends-panel {
+      top:40vh; left:0; right:0; bottom:var(--view-chrome-height);
+      width:auto;
+      border-left:none; border-top:1px solid #e7e3db;
+      box-shadow:0 -2px 12px rgba(42,42,39,0.06);
+    }
+    #trends-split-handle { display:none !important; }
+    /* Location search moves to the map's top-left corner (where the zoom
+       control used to be) instead of staying buried in #trends-controls,
+       now down in the stacked bottom panel -- engine.js does the actual
+       DOM move (wireTrendsSearchSlot()), this just positions the slot. */
+    body.view-trends #trends-search-slot {
+      display:block; position:absolute; z-index:1000;
+      top:12px; left:12px;
+      width:min(220px, calc(100vw - 24px));
+    }
+    /* Trends tab: replace the full legend (title/description/colour bar/
+       ticks/scale/date-slider) with just a small play-button panel,
+       top-right -- not enough room for all of that, and autoplay already
+       runs on entering the tab, so the button (same #trends-play-btn /
+       playTrendsSliderAnimation() as before) just lets you replay/pause. */
+    body.view-trends #trends-legend {
+      /* Map is full-width in its own top section on narrow screens (see
+         "map and plots column stack" rules below), so no panel-width
+         offset is needed here the way there is on wider screens. */
+      top:12px; bottom:auto; right:12px;
+      max-width:none; width:auto; padding:6px;
+    }
+    #trends-legend-title,
+    #trends-legend-desc,
+    #trends-legend-bar,
+    #trends-legend-ticks,
+    #trends-legend-scale,
+    #trends-date-slider,
+    #trends-date-label { display:none; }
+    #trends-play-row { margin-top:0; }
+    /* Spatial Risk tab: map and ranked-zones table stack as a column instead
+       of sitting side by side, same treatment as the Trends map/plots split
+       above. Map keeps the top ~40% of the viewport, the table panel takes
+       the rest and scrolls independently; the drag-to-resize handle only
+       makes sense for a left/right split, so it's hidden here too. */
+    body.view-epi-trends #map {
+      right:0; bottom:auto; height:40vh;
+    }
+    body.view-epi-trends #epi-trends-panel {
+      top:40vh; left:0; right:0; bottom:var(--view-chrome-height);
+      width:auto;
+      border-left:none; border-top:1px solid #e7e3db;
+      box-shadow:0 -2px 12px rgba(42,42,39,0.06);
+    }
+    #epi-split-handle { display:none !important; }
+    /* The map-colouring legend collapses to just its title bar by default on
+       narrow screens (see wirePanelToggles()'s auto-collapse-on-load check
+       in engine.js, which applies to every .panel-toggle panel including
+       this one) -- reposition it top-left over the now-shorter map instead
+       of bottom-left, and drop it to a compact single-line width so the
+       collapsed title bar doesn't span the whole map width. */
+    body.view-epi-trends #epi-trends-legend {
+      /* Cancel the wide-screen right:calc(...) offset -- the map is
+         full-width in its own top section here (see the map/table stacking
+         rules above), so this just needs to sit in its own top-left corner. */
+      top:12px; left:12px; right:auto; bottom:auto;
+      max-width:min(240px, calc(100vw - 24px));
+    }
     body.view-context #context-national {
       top:clamp(128px, 24vh, 200px);
       left:6px; bottom:auto;
@@ -691,8 +879,22 @@
       max-width:min(260px, 46vw);
     }
     #legend         { max-width:60vw; }
-    #controls       { top:clamp(150px, 28vh, 240px); }
-    #info           { top:clamp(150px, 28vh, 240px); }
+    /* Current Snapshot tab: layer controls and zone details used to be
+       pushed down to ~28vh from the top, presumably to clear a taller
+       header -- now that the narrow header is a compact couple of rows in
+       normal flow above #viewport-area (see #header-narrow-row etc. above),
+       that offset just leaves them floating awkwardly over the middle of
+       the map. Pin them to the actual top of the map pane instead, same as
+       #controls/#info sit on wide screens. Both panels are already
+       collapsed to just their title bar by default here (see
+       wirePanelToggles()'s narrow-screen auto-collapse in engine.js), so
+       this mostly affects where that collapsed title bar sits. */
+    #controls       { top:12px; }
+    #info           { top:12px; }
+    /* No location search to relocate into this corner on this tab (unlike
+       Trends), so just hide the zoom control outright -- touch users
+       pinch-zoom instead. */
+    body.view-map .leaflet-control-zoom { display:none; }
   }
   @media (max-height: 500px) {
     .panel          { font-size:11px; padding:5px 7px; }
@@ -710,11 +912,11 @@
     #legend         { max-height:60vh; bottom:calc(var(--view-chrome-height) + 8px); }
     body.view-context #context-national { max-height:min(28vh, calc(50vh - 80px)); }
     body.view-context #context { max-height:min(55vh, calc(100vh - 200px)); }
-    :root { --view-chrome-height: 58px; }
-    #view-switcher { padding:4px 8px; gap:6px; }
+    :root { --view-chrome-height: 46px; }
+    #view-switcher { padding:3px 8px; gap:6px; }
     #view-switcher #partners { padding:1px 2px; gap:1px; }
     #view-switcher #partners img {
-      max-height:clamp(16px, 4vh, 24px); height:clamp(16px, 4vh, 24px);
+      max-height:clamp(14px, 3.5vh, 20px); height:clamp(14px, 3.5vh, 20px);
       max-width:min(12vmin, 72px);
     }
     .view-tab { padding:3px 8px; font-size:11px; }

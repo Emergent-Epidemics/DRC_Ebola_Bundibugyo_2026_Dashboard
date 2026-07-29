@@ -44,7 +44,16 @@ METADATA_CSV     = DATA_ROOT / "health_zone_metadata.csv"
 IC_MODEL_CSV     = DATA_ROOT / "ic_model_estimates.csv"
 CAVEATS_CSV      = DATA_ROOT / "caveats.csv"
 INVASION_RISK_CSV = DATA_ROOT / "invasion_risk_model_estimates.csv"
-DASHBOARD_PLOTS_DIR = DATA_ROOT / "dashboard_plots"
+# Independently overridable (not just derived from DATA_ROOT) so the build
+# can point straight at a checked-out/mounted copy of the processed-data
+# repo's outputs/ directory (manifest.json + <date>/dashboard_plots/...)
+# instead of requiring that content to be copied into Data/dashboard_plots/
+# first. Default assumes BDBV2026-Processed_Sensitive_Data is cloned as a
+# sibling of this repo, same convention as BUILD_DIR/BDBV2026-Data above.
+DASHBOARD_PLOTS_DIR = Path(
+    os.environ.get("DASHBOARD_PLOTS_DIR") or
+    (SCRIPT_DIR.parent.parent / "BDBV2026-Processed_Sensitive_Data" / "outputs")
+).resolve()
 SIT_REPS_DIR     = DATA_ROOT / "Epidemiological Data"
 METHODS_DOCX     = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website.docx"
 METHODS_DOCX_FR  = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website_fr.docx"
