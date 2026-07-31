@@ -117,6 +117,8 @@ __all__ = [
     '_parse_optional_int',
     '_parse_boolish',
     '_parse_flexible_date',
+    '_SPATIOTEMPORAL_DATE_RE',
+    '_latest_spatiotemporal_key_outputs_dir',
     'load_invasion_risk_estimates',
     '_CONFIRMED_TS_LONG',
     '_CONFIRMED_TS_PROCESSED',
@@ -1400,28 +1402,86 @@ def _parse_flexible_date(value):
     return None
 
 
+_SPATIOTEMPORAL_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _latest_spatiotemporal_key_outputs_dir() -> Path | None:
+    """Newest ``<outputs>/<date>/spatiotemporal/key_outputs/`` dir with risk scores.
+
+    ``DASHBOARD_PLOTS_DIR`` already points at
+    BDBV2026-Processed_Sensitive_Data/outputs (see paths.py); this scans its
+    dated subfolders independently of that dir's own dashboard_plots
+    manifest.json ``date`` pointer, since the spatiotemporal Bayes pipeline
+    runs on its own (sparser) cadence and its latest date may not match.
+    """
+    if not DASHBOARD_PLOTS_DIR.exists():
+        return None
+    candidates: list[tuple[str, Path]] = []
+    for p in DASHBOARD_PLOTS_DIR.iterdir():
+        if not p.is_dir() or not _SPATIOTEMPORAL_DATE_RE.match(p.name):
+            continue
+        key_outputs = p / "spatiotemporal" / "key_outputs"
+        if (key_outputs / "bayes_risk_scores_all_zones.csv").exists():
+            candidates.append((p.name, key_outputs))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: t[0])
+    return candidates[-1][1]
+
+
 def load_invasion_risk_estimates() -> dict | None:
     """Load Bayesian invasion-risk scores for the Epidemiological trends tab.
 
     Prefers ``horizon == 1`` (next forecast window). Zone names are expected to
     match GeoJSON ``nom`` values.
-    """
-    if not INVASION_RISK_CSV.exists():
-        print(
-            f"  NOTE: {INVASION_RISK_CSV.name} not found; "
-            "Epidemiological trends tab unavailable"
-        )
-        return None
 
-    df = pd.read_csv(INVASION_RISK_CSV)
+    Primary source: the newest dated
+    ``spatiotemporal/key_outputs/bayes_risk_scores_all_zones.csv`` under
+    BDBV2026-Processed_Sensitive_Data/outputs -- the model-selected
+    ("featured") method's per-zone forecast for that pipeline run. That CSV
+    has no ``cutoff_date`` column (unlike the legacy
+    Data/invasion_risk_model_estimates.csv it replaces), so it's backfilled
+    from the sibling run_info.json's ``linelist_cutoff_date``. Falls back to
+    the legacy CSV if no spatiotemporal output is found (e.g. local dev
+    without BDBV2026-Processed_Sensitive_Data checked out).
+    """
+    source_path: Path | None = None
+    cutoff_override = None
+    key_outputs_dir = _latest_spatiotemporal_key_outputs_dir()
+    if key_outputs_dir is not None:
+        source_path = key_outputs_dir / "bayes_risk_scores_all_zones.csv"
+        run_info_path = key_outputs_dir / "run_info.json"
+        if run_info_path.exists():
+            try:
+                run_info = json.loads(run_info_path.read_text(encoding="utf-8"))
+                cutoff_override = run_info.get("linelist_cutoff_date")
+            except (json.JSONDecodeError, OSError) as exc:
+                print(f"  WARNING: could not read {run_info_path.name}: {exc}")
+        print(f"  invasion risk source: {source_path}")
+
+    if source_path is None:
+        if not INVASION_RISK_CSV.exists():
+            print(
+                "  NOTE: no spatiotemporal Bayes output found and "
+                f"{INVASION_RISK_CSV.name} not found; "
+                "Epidemiological trends tab unavailable"
+            )
+            return None
+        source_path = INVASION_RISK_CSV
+        print(f"  invasion risk source (legacy fallback): {source_path}")
+
+    df = pd.read_csv(source_path)
     if df.empty:
-        print(f"  WARNING: {INVASION_RISK_CSV.name} is empty")
+        print(f"  WARNING: {source_path.name} is empty")
         return None
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
     if "health_zone" not in df.columns:
-        print(f"  WARNING: {INVASION_RISK_CSV.name} missing health_zone column")
+        print(f"  WARNING: {source_path.name} missing health_zone column")
         return None
+
+    if "cutoff_date" not in df.columns and cutoff_override:
+        df["cutoff_date"] = cutoff_override
 
     # Keep a full-file snapshot for CSV download (all horizons / columns).
     download_csv = df.to_csv(index=False)
