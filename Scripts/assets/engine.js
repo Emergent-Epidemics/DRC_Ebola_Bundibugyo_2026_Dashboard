@@ -907,7 +907,12 @@ function epiForecastEndIso() {
 function updateEpiMetaNotes() {
   const sub = document.getElementById("epi-trends-subtitle");
   if (sub) {
-    const startIso = INVASION_RISK && INVASION_RISK.cutoff_date;
+    // Prefer the pipeline's own forecast_start_date (ground truth from
+    // run_info.json's forecast_target_windows) over cutoff_date, which is
+    // "data up to" (last training day), not "forecast starts on".
+    const startIso = INVASION_RISK && (
+      INVASION_RISK.forecast_start_date || INVASION_RISK.cutoff_date
+    );
     const weeksRaw = INVASION_RISK && (
       INVASION_RISK.forecasting_window != null
         ? INVASION_RISK.forecasting_window

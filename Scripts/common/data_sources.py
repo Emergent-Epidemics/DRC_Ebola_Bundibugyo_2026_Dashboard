@@ -1441,9 +1441,29 @@ def load_invasion_risk_estimates() -> dict | None:
     ("featured") method's per-zone forecast for that pipeline run. That CSV
     has no ``cutoff_date`` column (unlike the legacy
     Data/invasion_risk_model_estimates.csv it replaces), so it's backfilled
-    from the sibling run_info.json's ``linelist_cutoff_date``. Falls back to
-    the legacy CSV if no spatiotemporal output is found (e.g. local dev
-    without BDBV2026-Processed_Sensitive_Data checked out).
+    from the sibling run_info.json.
+
+    NOTE: the backfill uses run_info.json's ``training_window_end``, not its
+    ``linelist_cutoff_date``. The latter is only the WEEK-ANCHOR start of the
+    final training week (run_all.R: "training_cutoff is the WEEK ANCHOR...");
+    the actual last calendar day of training data is ``training_window_end``
+    (== training_cutoff + 6), which is what run_all.R itself calls out as
+    "the human-facing training cutoff" -- and what the dashboard displays
+    verbatim as "Data up to {cutoff_date}". Using the week-anchor there was a
+    bug: it understated data recency by up to 6 days. The forecast window
+    shown alongside it (forecast_start_date/forecast_end_date) is derived
+    here from that corrected cutoff_date -- NOT from run_info.json's own
+    ``forecast_target_windows``, which has its own bug: window_start there is
+    training_window_end + 1, but window_end is training_cutoff + 7*h (the
+    week-anchor, 6 days earlier than training_window_end), so the two ends of
+    the "window" use different anchors. That collapses to a same-day window
+    for horizon=1 and understates the span by 6 days for horizon=2. See the
+    comment at forecast_start_date/forecast_end_date below.
+
+    Falls back to the legacy CSV if no spatiotemporal output is found (e.g.
+    local dev without BDBV2026-Processed_Sensitive_Data checked out); in that
+    fallback, cutoff_date/forecast_end_date keep the old CSV-column /
+    arithmetic behaviour (no run_info.json equivalent exists there).
     """
     source_path: Path | None = None
     cutoff_override = None
@@ -1454,7 +1474,7 @@ def load_invasion_risk_estimates() -> dict | None:
         if run_info_path.exists():
             try:
                 run_info = json.loads(run_info_path.read_text(encoding="utf-8"))
-                cutoff_override = run_info.get("linelist_cutoff_date")
+                cutoff_override = run_info.get("training_window_end")
             except (json.JSONDecodeError, OSError) as exc:
                 print(f"  WARNING: could not read {run_info_path.name}: {exc}")
         print(f"  invasion risk source: {source_path}")
@@ -1522,9 +1542,27 @@ def load_invasion_risk_estimates() -> dict | None:
         uniq = sorted({int(round(x)) for x in horizon_windows})
         horizon_window = uniq[0]
 
+    # NOTE: run_info.json's own forecast_target_windows is NOT used here.
+    # write_run_info.R computes window_start = training_window_end + 1 but
+    # window_end = training_cutoff + 7*h -- two different anchors (the actual
+    # last training day vs. its week-anchor, 6 days earlier). For horizon=1
+    # that collapses window_start == window_end (both land on the same day),
+    # and for horizon=2 it understates the span by 6 days. Rather than
+    # surfacing that upstream inconsistency, derive both dates ourselves from
+    # a single, consistent anchor: cutoff_date (already training_window_end
+    # for the spatiotemporal source -- see above). Forecasting starts the day
+    # after training ends and runs for horizon_window full weeks.
+    forecast_start_date = None
     forecast_end_date = None
-    if cutoff_date is not None and horizon_window is not None:
-        forecast_end_date = cutoff_date + timedelta(weeks=int(horizon_window))
+    if cutoff_date is not None:
+        if key_outputs_dir is not None:
+            # Only for the new source, where cutoff_date is reliably the last
+            # training day -- the legacy CSV's cutoff_date has unverified
+            # semantics, so leave forecast_start_date unset there (JS falls
+            # back to its pre-existing cutoff_date-as-start behaviour).
+            forecast_start_date = cutoff_date + timedelta(days=1)
+        if horizon_window is not None:
+            forecast_end_date = cutoff_date + timedelta(weeks=int(horizon_window))
 
     zones: dict[str, dict] = {}
     for _, row in df.iterrows():
@@ -1572,6 +1610,9 @@ def load_invasion_risk_estimates() -> dict | None:
         "horizon_window": horizon_window,
         "forecasting_window": horizon_window,
         "cutoff_date": cutoff_date.isoformat() if cutoff_date else None,
+        "forecast_start_date": (
+            forecast_start_date.isoformat() if forecast_start_date else None
+        ),
         "forecast_end_date": (
             forecast_end_date.isoformat() if forecast_end_date else None
         ),
