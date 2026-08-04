@@ -133,6 +133,7 @@ def build_shared_payload() -> dict:
           f"{len(matrices['datasets'])} datasets")
     flow_latest, flow_yyyymm = load_flowminder_latest_sparse()
     flow_catalogs = {"flowminder_latest": flow_latest}
+    import_force_pairwise = load_bayes_import_force_pairwise()
     flow_arc_layer = _extra_layer_from_def(FLOW_ARC_LAYER_DEF)
     if flow_yyyymm:
         period = _flowminder_period_labels(flow_yyyymm)
@@ -188,6 +189,7 @@ def build_shared_payload() -> dict:
         "province_boundaries": province_boundaries,
         "onset_trends": onset_trends,
         "invasion_risk": invasion_risk,
+        "import_force_pairwise": import_force_pairwise,
         "phr_context": phr_context_by_lang.get("en", {"national": [], "by_nom": {}}),
         "phr_context_by_lang": phr_context_by_lang,
         "confirmed_timeseries": confirmed_timeseries,
