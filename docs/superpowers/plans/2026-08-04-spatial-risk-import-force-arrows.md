@@ -8,7 +8,7 @@
 
 **Width metric note (from spec decision #2):** because normalization is per-zone, the width is mathematically **share-of-destination** — `foi`, `share_of_dest`, and `import_force` produce *identical* widths (they differ only by the destination's constant hazard `H_i = β·Λ_i`, which cancels). `foi` is carried for the **tooltip only** (its "contribution to weekly invasion probability" reading); swapping `foi`→`share` in the width calc would change nothing visually. Both `foi` and `share` stay in each edge triple because the tooltip shows both.
 
-**Width-curve note (from spec decision #3):** the pairwise path uses the sqrt curve (`flowArcWeight`, `1 + 4·√frac`); the confirmed-cases **fallback** keeps its existing *linear* curve (`flowArcWeightNormalized`, `1 + 4·frac`). Endpoints match (frac 0 and 1); only mid-range widths differ, and only in the degraded/data-absent mode. Accepted intentionally — not worth changing the established fallback curve for a path that won't run in production.
+**Width-curve note (from spec decision #3):** the pairwise path uses the sqrt curve (`flowArcWeight`, `1 + 4·√frac`); the confirmed-cases **fallback** keeps its existing *linear* curve (`flowArcWeightNormalized`, `1 + 4·frac`). Endpoints match (frac 0 and 1); only mid-range widths differ, and only in the degraded/data-absent mode (older build or a CI publish failure — rarely runs in production). Accepted intentionally — not worth changing the established fallback curve.
 
 **Tech Stack:** Python 3.10+ (pandas), vanilla JS (Leaflet), YAML locales. Build entry point: `python Scripts/build_dashboard.py`.
 
@@ -226,7 +226,7 @@ def load_bayes_import_force_pairwise() -> dict | None:
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `cd Scripts && python -m pytest ../tests/test_import_force_pairwise.py -v`
-Expected: PASS (2 passed).
+Expected: PASS (4 passed).
 
 - [ ] **Step 5: Register the loader in `__all__`**
 
@@ -516,7 +516,7 @@ After a full build (Task 4 Step 3), confirm the heavy key is on spatial-risk onl
 its cost. The build already prints each page's MB; also measure the key directly:
 
 ```bash
-cd Scripts && python -c "import json; from common.payload import build_shared_payload" 2>/dev/null || true
+cd Scripts
 # Sizes of the emitted pages (spatial-risk should be the only large one):
 ls -lh output/spatial-risk.html output/trends.html output/index.html | awk '{print $5, $9}'
 # The heavy key must appear ONLY in spatial-risk.html:
