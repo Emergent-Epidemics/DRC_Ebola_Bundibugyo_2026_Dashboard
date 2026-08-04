@@ -299,7 +299,7 @@ __NAV_LINKS__
         <span class="swatch" style="background:#b23b2e"></span>
         <span data-i18n="ui.legend.flow_in">inflow to hub</span>
       </div>
-      <div data-i18n="ui.legend.importation_pressure_width">Line width ∝ confirmed cases in the external origin zone (Flowminder inflows only), 0–1 vs max for selected zone</div>
+      <div data-i18n="ui.legend.importation_pressure_width">Red inflows only; line width ∝ each origin's modelled import-force contribution to the selected zone (next-week forecast), scaled 0–1 vs that zone's top source</div>
     </div>
   </div>
 </div>
@@ -442,6 +442,14 @@ def _render_nav(active_view: str, assets_prefix: str) -> str:
     return "\n".join(links)
 
 
+# Payload keys only one view reads; stripped from every OTHER page's inline
+# payload so a big per-view blob doesn't bloat pages that never use it. Map:
+# payload key -> set of view_ids allowed to carry it.
+_PAGE_SCOPED_PAYLOAD_KEYS = {
+    "import_force_pairwise": {"epi-trends"},
+}
+
+
 def render_page(view_id: str, payload: dict, assets_prefix: str = "assets/") -> str:
     """Assemble one full page. ``view_id`` is one of the ids in NAV_ITEMS
     (map | trends | epi-trends | context | clinical-symptoms |
@@ -457,7 +465,11 @@ def render_page(view_id: str, payload: dict, assets_prefix: str = "assets/") -> 
     if view_id not in PAGE_FILENAMES:
         raise ValueError(f"unknown view_id {view_id!r}; expected one of {list(PAGE_FILENAMES)}")
 
-    payload_json = json.dumps(payload, separators=(",", ":"), default=json_default,
+    scoped_payload = {
+        k: v for k, v in payload.items()
+        if k not in _PAGE_SCOPED_PAYLOAD_KEYS or view_id in _PAGE_SCOPED_PAYLOAD_KEYS[k]
+    }
+    payload_json = json.dumps(scoped_payload, separators=(",", ":"), default=json_default,
                                allow_nan=False)
 
     head = HEAD_TEMPLATE.replace("__PAGE_TITLE__", PAGE_TITLES[view_id])

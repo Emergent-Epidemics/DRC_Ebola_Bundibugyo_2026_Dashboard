@@ -99,6 +99,7 @@ ui:
   show_genomes: "Afficher le nombre de séquences génomiques"
   show_flow_arcs: "Afficher les flux Flowminder entrants et sortants"
   importation_pressure_tooltip: "{from} → {to} : pression d'importation {pressure} (cas externes {cases} ; {count} personnes)"
+  import_force_tooltip: "{from} → {to} : contribution à la force d'importation {foi} ({share} du risque d'importation de {to})"
   legend: "Légende"
   zone: "Zone"
   hover_zone: "Survolez une zone de santé."
@@ -208,7 +209,7 @@ ui:
     flow_in: "flux entrant vers le pôle"
     flow_hub: "pôle sélectionné"
     flow_width: "(épaisseur ∝ √personnes)"
-    importation_pressure_width: "Entrées rouges uniquement ; épaisseur ∝ cas confirmés dans la zone d'origine externe (0–1 vs max pour la zone sélectionnée)"
+    importation_pressure_width: "Entrées rouges uniquement ; épaisseur ∝ contribution modélisée de chaque origine à la force d'importation de la zone sélectionnée (prévision semaine suivante), échelle 0–1 vs la principale origine de cette zone"
     log_scale: "(échelle log)"
     linear_scale: "(échelle linéaire)"
   case_tooltip:

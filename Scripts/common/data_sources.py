@@ -120,6 +120,8 @@ __all__ = [
     '_SPATIOTEMPORAL_DATE_RE',
     '_latest_spatiotemporal_key_outputs_dir',
     'load_invasion_risk_estimates',
+    'load_bayes_import_force_pairwise',
+    '_latest_spatiotemporal_pairwise_csv',
     'reconcile_invasion_active_cases',
     '_CONFIRMED_TS_LONG',
     '_CONFIRMED_TS_PROCESSED',
@@ -1635,6 +1637,111 @@ def load_invasion_risk_estimates() -> dict | None:
             {"id": "hautuele", "label": "Haut-Uele", "rr": "rr_hautuele", "rank": "rr_hautuele_rank", "province": "Haut-Uele"},
         ],
         "zones": zones,
+    }
+
+
+def _latest_spatiotemporal_pairwise_csv() -> Path | None:
+    """Pairwise import-force CSV from the SAME dated folder as the risk table.
+
+    Reuses _latest_spatiotemporal_key_outputs_dir() so the arrows and the
+    invasion-risk table always come from one pipeline run. The reports CSV is
+    a sibling of key_outputs: <date>/spatiotemporal/reports/.
+    """
+    ko = _latest_spatiotemporal_key_outputs_dir()
+    if ko is None:
+        return None
+    csv = ko.parent / "reports" / "bayes_pairwise_import_force.csv"
+    return csv if csv.exists() else None
+
+
+def load_bayes_import_force_pairwise() -> dict | None:
+    """Directed pairwise import-force (horizon 1) for spatial-risk arrow widths.
+
+    Emits a sparse ``in_by_dest`` map keyed by health-zone ``nom``; each value
+    is a list of ``[origin_nom, foi, share_of_dest]`` triples sorted by ``foi``
+    descending. engine.js normalizes width per selected zone
+    (``foi / max foi for that zone``). Returns None if the file is absent, so
+    the build falls back to the confirmed-cases arrows.
+    """
+    csv_path = _latest_spatiotemporal_pairwise_csv()
+    if csv_path is None:
+        print("  NOTE: no bayes_pairwise_import_force.csv found; "
+              "spatial-risk arrows fall back to confirmed cases")
+        return None
+    df = pd.read_csv(csv_path)
+    if df.empty:
+        print(f"  WARNING: {csv_path.name} is empty")
+        return None
+    df.columns = [str(c).strip() for c in df.columns]
+    required = {"origin_zone", "dest_zone", "horizon", "foi", "share_of_dest"}
+    missing = required - set(df.columns)
+    if missing:
+        print(f"  WARNING: {csv_path.name} missing columns: {sorted(missing)}")
+        return None
+
+    # Numeric compare (NOT stringified) — a blank cell makes pandas parse the
+    # column as float, so "1" would read as "1.0" and a string match would drop
+    # every row and silently disable the feature. See test_loader_handles_float_horizon.
+    df = df[pd.to_numeric(df["horizon"], errors="coerce") == 1].copy()
+    df["foi"] = pd.to_numeric(df["foi"], errors="coerce")
+    df["share_of_dest"] = pd.to_numeric(df["share_of_dest"], errors="coerce")
+    df = df.dropna(subset=["foi"])
+    df = df[df["foi"] > 0]
+    if df.empty:
+        print(f"  WARNING: {csv_path.name} has no positive horizon==1 rows")
+        return None
+
+    in_by_dest: dict[str, list] = {}
+    for dest, grp in df.groupby("dest_zone", sort=False):
+        if pd.isna(dest):
+            continue
+        dest_nom = str(dest).strip()
+        if not dest_nom:
+            continue
+        grp = grp.sort_values("foi", ascending=False)
+        edges = []
+        for _, r in grp.iterrows():
+            ov = r["origin_zone"]
+            if pd.isna(ov):
+                continue
+            origin = str(ov).strip()
+            if not origin:
+                continue
+            share = r["share_of_dest"]
+            edges.append([
+                origin,
+                float(r["foi"]),
+                float(share) if pd.notna(share) else None,
+            ])
+        if edges:
+            in_by_dest[dest_nom] = edges
+
+    # beta = foi / import_force is a single global constant (spec: "derivable
+    # from any row"); take the first positive-import_force row rather than a
+    # median, so genuine data drift would surface as a wrong value instead of
+    # being averaged away. Informational only — engine.js never reads it.
+    beta = None
+    if "import_force" in df.columns:
+        imp = pd.to_numeric(df["import_force"], errors="coerce")
+        good = df.loc[imp > 0]
+        if not good.empty:
+            first = good.iloc[0]
+            beta = float(first["foi"] / float(imp.loc[good.index[0]]))
+
+    # Provenance: the dated outputs folder (<date>/spatiotemporal/reports/...),
+    # so a maintainer can confirm arrows and the invasion-risk table share a run.
+    yyyymmdd = csv_path.parents[2].name
+
+    n_edges = sum(len(v) for v in in_by_dest.values())
+    print(f"  import-force pairwise: {len(in_by_dest)} dest zones, "
+          f"{n_edges} h=1 edges"
+          + (f", beta={beta:.4g}" if beta is not None else ""))
+    return {
+        "in_by_dest": in_by_dest,
+        "horizon": 1,
+        "beta": beta,
+        "yyyymmdd": yyyymmdd,
+        "source": csv_path.name,
     }
 
 

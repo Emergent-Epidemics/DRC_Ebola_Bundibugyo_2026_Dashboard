@@ -99,6 +99,7 @@ ui:
   show_genomes: "Show numbers of genome sequences"
   show_flow_arcs: "Show Flowminder in- and out-flow"
   importation_pressure_tooltip: "{from} → {to}: importation pressure {pressure} (external cases {cases}; {count} persons)"
+  import_force_tooltip: "{from} → {to}: import-force contribution {foi} ({share} of {to}'s importation risk)"
   legend: "Legend"
   zone: "Zone"
   hover_zone: "Hover a health zone."
@@ -208,7 +209,7 @@ ui:
     flow_in: "inflow to hub"
     flow_hub: "selected hub"
     flow_width: "(line width ∝ √persons)"
-    importation_pressure_width: "Red inflows only; line width ∝ confirmed cases in the external origin zone (0–1 vs max for selected zone)"
+    importation_pressure_width: "Red inflows only; line width ∝ each origin's modelled import-force contribution to the selected zone (next-week forecast), scaled 0–1 vs that zone's top source"
     log_scale: "(log scale)"
     linear_scale: "(linear scale)"
   case_tooltip:
