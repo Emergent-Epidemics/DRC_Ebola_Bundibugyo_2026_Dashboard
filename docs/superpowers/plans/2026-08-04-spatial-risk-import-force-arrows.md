@@ -2,9 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the Spatial Risk tab's inflow arrows scale with each origin's Bayesian import-force contribution (`foi`, h=1) to the selected zone, instead of the origin's raw confirmed-case count.
+**Goal:** Make the Spatial Risk tab's inflow arrows scale with each origin's Bayesian import-force contribution to the selected zone (per-zone normalized, h=1), instead of the origin's raw confirmed-case count.
 
-**Architecture:** A new Python loader reads `bayes_pairwise_import_force.csv` from the same dated spatiotemporal outputs folder the invasion-risk table already uses, and emits a sparse `{dest_nom: [[origin_nom, foi, share], …]}` map into a new `PAYLOAD.import_force_pairwise` key. `engine.js` draws pairwise-source arrows on the `epi-trends` view, width = `1 + 4·√(foi / max foi for the selected zone)` (per-zone normalized, sqrt-compressed), falling back to the existing confirmed-cases path when the data is absent.
+**Architecture:** A new Python loader reads `bayes_pairwise_import_force.csv` from the same dated spatiotemporal outputs folder the invasion-risk table already uses, and emits a sparse `{dest_nom: [[origin_nom, foi, share], …]}` map into a new `PAYLOAD.import_force_pairwise` key (page-scoped to the spatial-risk page — see Task 2). `engine.js` draws pairwise-source arrows on the `epi-trends` view, width = `1 + 4·√(foi / max foi for the selected zone)`, sqrt-compressed and normalized against the selected zone's own maximum.
+
+**Width metric note (from spec decision #2):** because normalization is per-zone, the width is mathematically **share-of-destination** — `foi`, `share_of_dest`, and `import_force` produce *identical* widths (they differ only by the destination's constant hazard `H_i = β·Λ_i`, which cancels). `foi` is carried for the **tooltip only** (its "contribution to weekly invasion probability" reading); swapping `foi`→`share` in the width calc would change nothing visually. Both `foi` and `share` stay in each edge triple because the tooltip shows both.
+
+**Width-curve note (from spec decision #3):** the pairwise path uses the sqrt curve (`flowArcWeight`, `1 + 4·√frac`); the confirmed-cases **fallback** keeps its existing *linear* curve (`flowArcWeightNormalized`, `1 + 4·frac`). Endpoints match (frac 0 and 1); only mid-range widths differ, and only in the degraded/data-absent mode. Accepted intentionally — not worth changing the established fallback curve for a path that won't run in production.
 
 **Tech Stack:** Python 3.10+ (pandas), vanilla JS (Leaflet), YAML locales. Build entry point: `python Scripts/build_dashboard.py`.
 
@@ -74,6 +78,36 @@ def test_loader_builds_sorted_h1_edges(tmp_path, monkeypatch):
 def test_loader_returns_none_when_absent(tmp_path, monkeypatch):
     monkeypatch.setattr(ds, "DASHBOARD_PLOTS_DIR", tmp_path)  # empty
     assert ds.load_bayes_import_force_pairwise() is None
+
+
+# H2 regression: a blank horizon cell forces pandas to parse the column as
+# float, so horizon 1 reads as 1.0. A stringify-then-compare-to-"1" filter would
+# match zero rows and silently return None. The numeric filter must still work.
+FLOAT_HORIZON_CSV = (
+    "origin_zone,dest_zone,horizon,w_ji,source_origin,import_force,foi,"
+    "dest_import_force_total,dest_hazard_week,share_of_dest,origin_province,dest_province\n"
+    "Bunia,Aba,1,0.1,10,1.0,0.16,2.0,0.32,0.5,Ituri,Haut-Uele\n"
+    "Nizi,Aba,,0.05,4,0.2,0.032,2.0,0.32,0.1,Ituri,Haut-Uele\n"  # blank horizon -> float col
+)
+
+
+def test_loader_handles_float_horizon_column(tmp_path, monkeypatch):
+    out = _make_outputs(tmp_path)
+    (out / "2026-08-03" / "spatiotemporal" / "reports"
+     / "bayes_pairwise_import_force.csv").write_text(FLOAT_HORIZON_CSV)
+    monkeypatch.setattr(ds, "DASHBOARD_PLOTS_DIR", out)
+    result = ds.load_bayes_import_force_pairwise()
+    assert result is not None
+    assert [e[0] for e in result["in_by_dest"]["Aba"]] == ["Bunia"]  # only the h==1 row
+
+
+def test_loader_returns_none_on_missing_columns(tmp_path, monkeypatch):
+    out = _make_outputs(tmp_path)
+    (out / "2026-08-03" / "spatiotemporal" / "reports"
+     / "bayes_pairwise_import_force.csv").write_text(
+        "origin_zone,dest_zone,horizon\nBunia,Aba,1\n")  # no foi/share
+    monkeypatch.setattr(ds, "DASHBOARD_PLOTS_DIR", out)
+    assert ds.load_bayes_import_force_pairwise() is None
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -85,7 +119,8 @@ Expected: FAIL — `AttributeError: module 'common.data_sources' has no attribut
 - [ ] **Step 3: Implement the resolver + loader**
 
 In `Scripts/common/data_sources.py`, immediately after `load_invasion_risk_estimates()`
-ends (line 1638, before the `_INVASION_AFFECTED_MASK_FIELDS` block at line 1641), add:
+ends (its `return {…}` closes ~line 1638), just before the `_INVASION_AFFECTED_MASK_FIELDS`
+assignment (re-anchor by that symbol, not the raw line number), add:
 
 ```python
 def _latest_spatiotemporal_pairwise_csv() -> Path | None:
@@ -127,7 +162,10 @@ def load_bayes_import_force_pairwise() -> dict | None:
         print(f"  WARNING: {csv_path.name} missing columns: {sorted(missing)}")
         return None
 
-    df = df[df["horizon"].astype(str).str.strip() == "1"].copy()
+    # Numeric compare (NOT stringified) — a blank cell makes pandas parse the
+    # column as float, so "1" would read as "1.0" and a string match would drop
+    # every row and silently disable the feature. See test_loader_handles_float_horizon.
+    df = df[pd.to_numeric(df["horizon"], errors="coerce") == 1].copy()
     df["foi"] = pd.to_numeric(df["foi"], errors="coerce")
     df["share_of_dest"] = pd.to_numeric(df["share_of_dest"], errors="coerce")
     df = df.dropna(subset=["foi"])
@@ -156,12 +194,21 @@ def load_bayes_import_force_pairwise() -> dict | None:
         if edges:
             in_by_dest[dest_nom] = edges
 
+    # beta = foi / import_force is a single global constant (spec: "derivable
+    # from any row"); take the first positive-import_force row rather than a
+    # median, so genuine data drift would surface as a wrong value instead of
+    # being averaged away. Informational only — engine.js never reads it.
     beta = None
     if "import_force" in df.columns:
         imp = pd.to_numeric(df["import_force"], errors="coerce")
-        mask = imp > 0
-        if bool(mask.any()):
-            beta = float((df.loc[mask, "foi"] / imp[mask]).median())
+        good = df.loc[imp > 0]
+        if not good.empty:
+            first = good.iloc[0]
+            beta = float(first["foi"] / float(imp.loc[good.index[0]]))
+
+    # Provenance: the dated outputs folder (<date>/spatiotemporal/reports/...),
+    # so a maintainer can confirm arrows and the invasion-risk table share a run.
+    yyyymmdd = csv_path.parents[2].name
 
     n_edges = sum(len(v) for v in in_by_dest.values())
     print(f"  import-force pairwise: {len(in_by_dest)} dest zones, "
@@ -171,6 +218,7 @@ def load_bayes_import_force_pairwise() -> dict | None:
         "in_by_dest": in_by_dest,
         "horizon": 1,
         "beta": beta,
+        "yyyymmdd": yyyymmdd,
         "source": csv_path.name,
     }
 ```
@@ -201,10 +249,16 @@ git commit -m "feat: load pairwise import-force CSV for spatial-risk arrows"
 
 ---
 
-## Task 2: Wire the loader into the payload
+## Task 2: Wire the loader into the payload (page-scoped)
 
 **Files:**
 - Modify: `Scripts/common/payload.py` (call site near line 134; return dict at 152–194)
+- Modify: `Scripts/common/chrome.py` (add page-scope filter in `render_page`, line 445)
+
+**Why page-scoping:** `render_page()` (chrome.py:470) serializes the *entire* shared payload
+into `<script id="payload">` on **every** page. `import_force_pairwise` is ~130k triples and
+is only read on the `epi-trends` (spatial-risk) page, so injecting it into the shared payload
+would add multiple MB to all 7 pages. Step 3 strips it from every page except spatial-risk.
 
 - [ ] **Step 1: Call the loader alongside the flow catalog**
 
@@ -224,7 +278,36 @@ In the `return {…}` dict, immediately after the `"invasion_risk": invasion_ris
         "import_force_pairwise": import_force_pairwise,
 ```
 
-- [ ] **Step 3: Verify the payload key populates**
+- [ ] **Step 3: Page-scope the heavy key in `render_page`**
+
+In `Scripts/common/chrome.py`, add a module-level map near the other constants (above
+`def render_page`, ~line 445):
+
+```python
+# Payload keys only one view reads; stripped from every OTHER page's inline
+# payload so a big per-view blob doesn't bloat pages that never use it. Map:
+# payload key -> set of view_ids allowed to carry it.
+_PAGE_SCOPED_PAYLOAD_KEYS = {
+    "import_force_pairwise": {"epi-trends"},
+}
+```
+
+Then, inside `render_page`, replace the `payload_json = json.dumps(payload, …)` line
+(currently line 460–461) with a filtered copy:
+
+```python
+    scoped_payload = {
+        k: v for k, v in payload.items()
+        if k not in _PAGE_SCOPED_PAYLOAD_KEYS or view_id in _PAGE_SCOPED_PAYLOAD_KEYS[k]
+    }
+    payload_json = json.dumps(scoped_payload, separators=(",", ":"),
+                              default=json_default, allow_nan=False)
+```
+
+engine.js reads `PAYLOAD.import_force_pairwise || null`, so the other pages (where the key
+is absent) simply see `null` — and they never call `renderFlowArcs` on `epi-trends` anyway.
+
+- [ ] **Step 4: Verify the payload key populates (spatial-risk only)**
 
 Requires the pairwise CSV checked out locally (see Task 5, Step 1 for the one-time data
 setup). From the repo root:
@@ -233,20 +316,20 @@ setup). From the repo root:
 cd Scripts && BUILD_DIR=../../BDBV2026-Data/build DATA_ROOT=../Data \
   DASHBOARD_PLOTS_DIR=../../BDBV2026-Processed_Sensitive_Data/outputs \
   INSP_SITREP_FETCH=0 python -c "from common.payload import build_shared_payload; \
-  p=build_shared_payload(); ifp=p['import_force_pairwise']; \
-  print('dests:', len(ifp['in_by_dest'])); \
-  print('Aba edges:', ifp['in_by_dest'].get('Aba', [])[:2])"
+  p=build_shared_payload(); ifp=p.get('import_force_pairwise'); \
+  print('LOADER None (do Task 5 Step 1 first)' if ifp is None else \
+        ('dests: %d' % len(ifp['in_by_dest']))); \
+  print('Aba edges:', (ifp or {}).get('in_by_dest', {}).get('Aba', [])[:2])"
 ```
 
-Expected: prints a non-zero dest count and a couple of `[origin, foi, share]` triples for
-Aba. If the pairwise CSV isn't checked out, it prints `dests: 0`-style `NoneType` — do
-Task 5 Step 1 first.
+Expected (data present): a non-zero dest count and a couple of `[origin, foi, share]`
+triples for Aba. If it prints `LOADER None`, do Task 5 Step 1 first.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add Scripts/common/payload.py
-git commit -m "feat: expose import_force_pairwise in dashboard payload"
+git add Scripts/common/payload.py Scripts/common/chrome.py
+git commit -m "feat: expose import_force_pairwise in payload, scoped to spatial-risk page"
 ```
 
 ---
@@ -334,33 +417,38 @@ for the hub. Add this block immediately BEFORE `inSorted.forEach(function(pair) 
     && IMPORT_FORCE_PAIRWISE.in_by_dest
     && IMPORT_FORCE_PAIRWISE.in_by_dest[hubNom]) || null;
   if (pairwiseEdges) {
+    // Only origins with a centroid are drawable; compute the per-zone max foi
+    // over THOSE, so the widest *visible* arrow reaches full width even if a
+    // centroid-less origin had a higher foi (L3).
+    const drawable = pairwiseEdges
+      .map(function(e) {
+        return {origin: e[0], foi: e[1], share: e[2], start: zoneCentroid(e[0])};
+      })
+      .filter(function(e) { return !!e.start; });
     let maxFoi = 0;
-    pairwiseEdges.forEach(function(e) { if (e[1] > maxFoi) maxFoi = e[1]; });
-    pairwiseEdges.forEach(function(e) {
-      const origin = e[0];
-      const foi = e[1];
-      const share = e[2];
-      const start = zoneCentroid(origin);
-      if (!start) return;
-      const pts = quadraticBezierPoints(start[0], start[1], hub[0], hub[1], 1);
+    drawable.forEach(function(e) { if (e.foi > maxFoi) maxFoi = e.foi; });
+    drawable.forEach(function(e) {
+      const pts = quadraticBezierPoints(e.start[0], e.start[1], hub[0], hub[1], 1);
       const line = L.polyline(pts, {
         color: FLOW_OUT_COLOR,
-        weight: flowArcWeight(foi, maxFoi),        // 1 + 4*sqrt(foi/maxFoi)
+        weight: flowArcWeight(e.foi, maxFoi),      // 1 + 4*sqrt(foi/maxFoi)
         opacity: 0.82,
         pane: "flow-arcs",
       });
       line.bindTooltip(tf("ui.import_force_tooltip", {
-        from: hubDisplayName(origin),
+        from: hubDisplayName(e.origin),
         to: flowHubDisplayName(),
-        foi: foi.toPrecision(2),
-        share: (share != null ? (share * 100).toFixed(1) + "%" : "—"),
+        foi: e.foi.toPrecision(2),
+        share: (e.share != null ? (e.share * 100).toFixed(1) + "%" : "—"),
       }), {direction: "top", sticky: true});
       line.addTo(flowArcLayer);
       addFlowWingMarker(pts, FLOW_OUT_COLOR, {nearEnd: true});
     });
+    // inTotal == inShown here (both the drawable pairwise set) so the stats
+    // object stays internally consistent (L1); these fields aren't displayed.
     flowArcStats = {
       outTotal: outs.length, outShown: 0,
-      inTotal: ins.length, inShown: pairwiseEdges.length,
+      inTotal: drawable.length, inShown: drawable.length,
       metric: "import_force", maxMetric: maxFoi,
     };
     flowArcLayer.addTo(map);
@@ -417,9 +505,34 @@ ls /tmp/st-plots/outputs/2026-08-03/spatiotemporal/reports/bayes_pairwise_import
 ```
 
 Then use `DASHBOARD_PLOTS_DIR=/tmp/st-plots/outputs` in the Task 2/4 build commands
-instead of the sibling path.
+instead of the sibling path. **Keep only one dated dir under `/tmp/st-plots/outputs`** —
+`_latest_spatiotemporal_key_outputs_dir()` picks the lexicographically newest date, so a
+stray extra date folder would silently retarget the build and the awk spot-check below
+(L6).
 
-- [ ] **Step 2: Spot-check rendered widths against the CSV**
+- [ ] **Step 2: Measure payload size and confirm page-scoping (H1)**
+
+After a full build (Task 4 Step 3), confirm the heavy key is on spatial-risk only and note
+its cost. The build already prints each page's MB; also measure the key directly:
+
+```bash
+cd Scripts && python -c "import json; from common.payload import build_shared_payload" 2>/dev/null || true
+# Sizes of the emitted pages (spatial-risk should be the only large one):
+ls -lh output/spatial-risk.html output/trends.html output/index.html | awk '{print $5, $9}'
+# The heavy key must appear ONLY in spatial-risk.html:
+for f in output/*.html; do
+  n=$(grep -c '"import_force_pairwise"' "$f");
+  echo "$f: import_force_pairwise occurrences=$n";
+done
+```
+
+Expected: `output/spatial-risk.html` contains the key (occurrences ≥ 1); **every other page
+reports 0**. Note spatial-risk.html's size delta vs the other pages — if it is
+unreasonably large for a single page (rough guide: > ~2 MB added over `trends.html`),
+flag it and revisit the spec's per-zone cap in a follow-up. This is the measurement the
+spec deferred the cap decision on.
+
+- [ ] **Step 3: Spot-check rendered widths against the CSV**
 
 For the zone you inspected, confirm the top-3 origins by `foi` in the CSV match the three
 widest arrows:
@@ -433,14 +546,14 @@ awk -F, 'NR==1 || ($2=="Aba" && $3==1)' \
 Expected: header + the three highest-`foi` rows for Aba; their `origin_zone` order matches
 the three thickest arrows into Aba on the map.
 
-- [ ] **Step 3: Verify the fallback path**
+- [ ] **Step 4: Verify the fallback path**
 
 Temporarily point at a plots dir with no spatiotemporal reports (e.g. an older date), or
 rename the CSV, rebuild, and confirm the build log prints
 `no bayes_pairwise_import_force.csv found; … fall back to confirmed cases` and the arrows
 render via the old confirmed-cases metric (no crash, `spatial-risk.html` still valid).
 
-- [ ] **Step 4: Final commit (if any verification fixups were needed)**
+- [ ] **Step 5: Final commit (if any verification fixups were needed)**
 
 ```bash
 git add -A && git commit -m "test: verify import-force arrows end-to-end"
@@ -452,8 +565,17 @@ git add -A && git commit -m "test: verify import-force arrows end-to-end"
 
 - **Spec coverage:** loader + payload key (Task 1–2), pairwise-only arrows h=1 (Task 4),
   per-zone sqrt-normalized width via `flowArcWeight` (Task 4 Step 2), foi+share tooltip
-  (Task 3–4), legend update (Task 3), fallback (Task 4 Step 2 + Task 5 Step 3), all-sources
+  (Task 3–4), legend update (Task 3), fallback (Task 4 Step 2 + Task 5 Step 4), all-sources
   no-cap (Task 1 Step 3). Covered.
+- **Plan-review incorporations:** H1 payload bloat — key page-scoped to `epi-trends` via
+  `render_page` filter (Task 2 Step 3) + size/scoping measurement (Task 5 Step 2). H2 — numeric
+  horizon compare + float-horizon regression test (Task 1). M1 — width == share-of-destination
+  documented (header); `foi`/`share` both retained (tooltip shows both). M2 — linear-fallback vs
+  sqrt-pairwise documented as intentional (header). M3 — `beta` from first positive row, not
+  median. L1 — `inTotal == inShown` in pairwise branch. L2 — `yyyymmdd` provenance added. L3 —
+  `maxFoi` over drawable edges only. L4 — added missing-columns + float-horizon tests; JS render
+  is manual-verify-only (Task 4 Step 3). L5 — None-guarded verification one-liner. L6 —
+  single-date scratch note. L7 — re-anchored by symbol.
 - **`flowArcWeight` reuse:** `flowArcWeight(count, maxCount) = 1 + 4·√(count/maxCount)`
   already exists (engine.js:576) and is the sqrt mapping the spec calls for — reused
   directly with `(foi, maxFoi)`, no new helper.
