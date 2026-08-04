@@ -216,21 +216,14 @@ __NAV_LINKS__
 <div id="epi-trends-panel">
   <h2 id="epi-trends-title" data-i18n="ui.epi_trends_title">Health zones ranked by national relative risk of invasion</h2>
   <p id="epi-trends-subtitle"></p>
-  <!-- Scope buttons reuse the Trends tab's segmented-control classes
-       (.trends-scope-row/.trends-scope-btn) -- same look, only two options
-       here (no "Health Zone" scope: a ranked table of one zone doesn't mean
-       much, so picking a zone via search below just selects/highlights its
-       row instead of filtering the list -- see the epi-search-results click
-       handler in wireEpiTrendsUi()). Search wrap shares the Trends tab's
-       .location-search-wrap/.location-search-results classes for styling. -->
+  <!-- The table always shows the national ranking; there is no geographic
+       scope toggle. The search box below only matches health zones (provinces
+       are filtered out in renderEpiSearchResults()), and picking one
+       selects/highlights its row rather than filtering the list -- see the
+       epi-search-results click handler in wireEpiTrendsUi(). Search wrap
+       shares the Trends tab's .location-search-wrap/.location-search-results
+       classes for styling. -->
   <div class="epi-controls">
-    <div class="trends-scope-row epi-scope-row" role="group"
-         data-i18n-aria="ui.trends_scope" aria-label="Geographic scope">
-      <button type="button" class="trends-scope-btn epi-scope-btn active" data-scope="national"
-              data-i18n="ui.trends_scope_national">National</button>
-      <button type="button" class="trends-scope-btn epi-scope-btn" data-scope="province"
-              data-i18n="ui.trends_scope_province">Provincial</button>
-    </div>
     <div id="epi-search-wrap" class="location-search-wrap">
       <input type="search" id="epi-search-input" autocomplete="off" spellcheck="false"
              data-i18n-placeholder="ui.trends_search_placeholder"
@@ -256,11 +249,9 @@ __NAV_LINKS__
           <th class="num sortable" data-sort="p_invasion" tabindex="0" role="button"
               data-i18n-aria="ui.epi_col_p_invasion" aria-label="Invasion probability"><span class="th-label" data-i18n="ui.epi_col_p_invasion">Invasion probability</span><span class="sort-arrow" aria-hidden="true"></span></th>
           <th class="num sortable" data-sort="p_ci" tabindex="0" role="button"
-              data-i18n-aria="ui.epi_col_p_ci" aria-label="95% CI"><span class="th-label" data-i18n="ui.epi_col_p_ci">95% CI</span><span class="sort-arrow" aria-hidden="true"></span></th>
+              data-i18n-aria="ui.epi_col_p_ci" aria-label="95% CrI"><span class="th-label" data-i18n="ui.epi_col_p_ci">95% CrI</span><span class="sort-arrow" aria-hidden="true"></span></th>
           <th class="num sortable" data-sort="norm_rr" tabindex="0" role="button"
-              data-i18n-aria="ui.epi_col_norm_rr" aria-label="Normalised Relative Risk"><span class="th-label" data-i18n="ui.epi_col_norm_rr">Normalised Relative Risk</span><span class="sort-arrow" aria-hidden="true"></span></th>
-          <th class="num sortable" data-sort="rr" tabindex="0" role="button"
-              data-i18n-aria="ui.epi_col_rr" aria-label="Relative risk"><span class="th-label" data-i18n="ui.epi_col_rr">Relative risk</span><span class="sort-arrow" aria-hidden="true"></span></th>
+              data-i18n-aria="ui.epi_col_norm_rr" aria-label="Relative risk (norm.)"><span class="th-label" data-i18n="ui.epi_col_norm_rr">Relative risk (norm.)</span><span class="sort-arrow" aria-hidden="true"></span></th>
           <th class="num sortable" data-sort="rr_rank" tabindex="0" role="button"
               data-i18n-aria="ui.epi_col_rr_rank" aria-label="Rank"><span class="th-label" data-i18n="ui.epi_col_rr_rank">Rank</span><span class="sort-arrow" aria-hidden="true"></span></th>
           <th class="num sortable" data-sort="priority" tabindex="0" role="button"
