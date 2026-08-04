@@ -120,6 +120,7 @@ __all__ = [
     '_SPATIOTEMPORAL_DATE_RE',
     '_latest_spatiotemporal_key_outputs_dir',
     'load_invasion_risk_estimates',
+    'reconcile_invasion_active_cases',
     '_CONFIRMED_TS_LONG',
     '_CONFIRMED_TS_PROCESSED',
     '_CONFIRMED_TS_SKIP_NOMS',
@@ -1635,6 +1636,105 @@ def load_invasion_risk_estimates() -> dict | None:
         ],
         "zones": zones,
     }
+
+
+# National + provincial invasion outputs the model masks to NA for an
+# already-affected zone -- we clear the same set when reconciling one in.
+_INVASION_AFFECTED_MASK_FIELDS = (
+    "p_case_invasion", "p_case_lo", "p_case_hi",
+    "rr_nat", "rr_nat_rank",
+    "rr_ituri", "rr_ituri_rank",
+    "rr_nordkivu", "rr_nordkivu_rank",
+    "rr_hautuele", "rr_hautuele_rank",
+    "priority", "priority_rank",
+)
+
+
+def _compact_ranks(rows: list[dict], rank_key: str) -> None:
+    """Renumber ``rank_key`` over ``rows`` to a contiguous rank, closing the gaps
+    left by removed zones while preserving the model's original ordering and ties.
+
+    Re-ranks from the ORIGINAL rank values (not the rounded rr_nat / priority
+    values the payload carries), so it reproduces the model's unrounded
+    tie-breaking exactly: the payload rounds priority to 4dp (many collisions the
+    model's rank does not share), so re-ranking off the stored value would
+    diverge. new_rank = 1 + (number of rows with a strictly smaller original
+    rank) -- min_rank over the original ranks. Rows with a None rank are skipped.
+    """
+    orig = sorted(r[rank_key] for r in rows if r.get(rank_key) is not None)
+    for r in rows:
+        v = r.get(rank_key)
+        if v is None:
+            continue
+        r[rank_key] = 1 + sum(1 for x in orig if x < v)
+
+
+def reconcile_invasion_active_cases(invasion_risk: dict | None,
+                                    zone_data: dict) -> dict | None:
+    """Move at-risk zones that already have confirmed cases into the affected set.
+
+    The invasion model's ``was_active_before`` reflects the (sitrep-lagged) case
+    data available when the model ran; the model runs on the line-list cadence
+    and consumes a sitrep snapshot that trails real cases by 1-3 days. The
+    dashboard builds later, so its per-zone ``confirmed_cases`` can already show a
+    case the model hadn't ingested -- leaving that zone in the ranked at-risk
+    table with an invasion probability it shouldn't have. Because national
+    relative risk is normalised across the at-risk set (rr_nat = mu / mean(mu)),
+    such a zone also distorts every other zone's rr_nat and rank.
+
+    Reconcile one-directionally (at-risk -> affected, never the reverse; matches
+    the model's "affected once a case appears" definition), mask its invasion
+    outputs like the model does, then renormalise rr_nat and re-rank
+    rr_nat_rank / priority_rank over the cleaned set. The raw ``download_csv`` is
+    left untouched. See
+    docs/superpowers/specs/2026-08-04-invasion-active-case-reconciliation-design.md.
+
+    Mutates and returns ``invasion_risk`` (returns it unchanged when there is
+    nothing to load or reconcile).
+    """
+    if not invasion_risk:
+        return invasion_risk
+    zones = invasion_risk.get("zones") or {}
+
+    reconciled = []
+    for nom, row in zones.items():
+        if row.get("was_active_before"):
+            continue
+        try:
+            conf = float((zone_data.get(nom) or {}).get("confirmed_cases") or 0)
+        except (TypeError, ValueError):
+            conf = 0.0
+        if conf > 0:
+            row["was_active_before"] = True
+            for field in _INVASION_AFFECTED_MASK_FIELDS:
+                if field in row:
+                    row[field] = None
+            reconciled.append(nom)
+
+    if not reconciled:
+        return invasion_risk
+
+    # Cleaned national at-risk set (zones still carrying a national rr_nat).
+    at_risk = [row for row in zones.values()
+               if not row.get("was_active_before") and row.get("rr_nat") is not None]
+
+    # rr_nat = mu / mean(mu over at-risk); rr_nat is proportional to mu, so
+    # renormalising by the cleaned-set mean of the OLD rr_nat values (which
+    # equals new_mean / old_mean) yields mu / new_mean -- the corrected rr_nat.
+    rr_vals = [row["rr_nat"] for row in at_risk]
+    mean_rr = (sum(rr_vals) / len(rr_vals)) if rr_vals else 0
+    if mean_rr:
+        for row in at_risk:
+            row["rr_nat"] = row["rr_nat"] / mean_rr
+    _compact_ranks(at_risk, "rr_nat_rank")
+
+    priority_rows = [row for row in zones.values()
+                     if not row.get("was_active_before") and row.get("priority") is not None]
+    _compact_ranks(priority_rows, "priority_rank")
+
+    print(f"  reconciled {len(reconciled)} zone(s) at-risk->affected from latest "
+          f"confirmed cases: {', '.join(sorted(reconciled))}")
+    return invasion_risk
 
 
 # ---------------------------------------------------------------------------
