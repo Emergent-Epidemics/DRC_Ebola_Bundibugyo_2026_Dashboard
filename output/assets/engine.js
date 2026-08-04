@@ -10,6 +10,7 @@ const MATRIX_INDEX = {};
 })();
 let matrixOriginNom = PAYLOAD.matrix_default_origin || "Mongbwalu";
 const FLOW_CATALOGS = PAYLOAD.flow_catalogs || {};
+const IMPORT_FORCE_PAIRWISE = PAYLOAD.import_force_pairwise || null;
 const FLOW_ARC_LAYER = PAYLOAD.flow_arc_layer || null;
 let flowHubNom = PAYLOAD.flow_default_hub || "Mongbwalu";
 let flowHubUserSelected = !!(PAYLOAD.flow_arcs_available && FLOW_ARC_LAYER);
@@ -681,6 +682,46 @@ function renderFlowArcs(hubNom, layer) {
       line.addTo(flowArcLayer);
       addFlowWingMarker(pts, FLOW_OUT_COLOR);
     });
+  }
+
+  const pairwiseEdges = (useImportPressure && IMPORT_FORCE_PAIRWISE
+    && IMPORT_FORCE_PAIRWISE.in_by_dest
+    && IMPORT_FORCE_PAIRWISE.in_by_dest[hubNom]) || null;
+  if (pairwiseEdges) {
+    // Only origins with a centroid are drawable; compute the per-zone max foi
+    // over THOSE, so the widest *visible* arrow reaches full width even if a
+    // centroid-less origin had a higher foi.
+    const drawable = pairwiseEdges
+      .map(function(e) {
+        return {origin: e[0], foi: e[1], share: e[2], start: zoneCentroid(e[0])};
+      })
+      .filter(function(e) { return !!e.start; });
+    let maxFoi = 0;
+    drawable.forEach(function(e) { if (e.foi > maxFoi) maxFoi = e.foi; });
+    drawable.forEach(function(e) {
+      const pts = quadraticBezierPoints(e.start[0], e.start[1], hub[0], hub[1], 1);
+      const line = L.polyline(pts, {
+        color: FLOW_OUT_COLOR,
+        weight: flowArcWeight(e.foi, maxFoi),      // 1 + 4*sqrt(foi/maxFoi)
+        opacity: 0.82,
+        pane: "flow-arcs",
+      });
+      line.bindTooltip(tf("ui.import_force_tooltip", {
+        from: hubDisplayName(e.origin),
+        to: flowHubDisplayName(),
+        foi: e.foi.toPrecision(2),
+        share: (e.share != null ? (e.share * 100).toFixed(1) + "%" : "—"),
+      }), {direction: "top", sticky: true});
+      line.addTo(flowArcLayer);
+      addFlowWingMarker(pts, FLOW_OUT_COLOR, {nearEnd: true});
+    });
+    flowArcStats = {
+      outTotal: outs.length, outShown: 0,
+      inTotal: drawable.length, inShown: drawable.length,
+      metric: "import_force", maxMetric: maxFoi,
+    };
+    flowArcLayer.addTo(map);
+    return;
   }
 
   inSorted.forEach(function(pair) {
