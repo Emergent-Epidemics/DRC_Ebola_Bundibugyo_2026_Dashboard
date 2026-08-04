@@ -1651,15 +1651,21 @@ _INVASION_AFFECTED_MASK_FIELDS = (
 
 
 def _compact_ranks(rows: list[dict], rank_key: str) -> None:
-    """Renumber ``rank_key`` over ``rows`` to a contiguous rank, closing the gaps
-    left by removed zones while preserving the model's original ordering and ties.
+    """Renumber ``rank_key`` over ``rows``, closing the gaps left by removed zones
+    while preserving the model's original ordering and ties.
 
     Re-ranks from the ORIGINAL rank values (not the rounded rr_nat / priority
     values the payload carries), so it reproduces the model's unrounded
     tie-breaking exactly: the payload rounds priority to 4dp (many collisions the
     model's rank does not share), so re-ranking off the stored value would
-    diverge. new_rank = 1 + (number of rows with a strictly smaller original
-    rank) -- min_rank over the original ranks. Rows with a None rank are skipped.
+    diverge.
+
+    ``new_rank = 1 + (rows with a strictly smaller original rank)`` is the whole
+    computation -- this is dplyr ``min_rank`` applied to the original ranks: it
+    re-packs toward 1..N, but tied zones share the lower rank and a tie therefore
+    still leaves the usual min_rank gap after it (so e.g. two zones tied last
+    among N land at N-1, not N) -- matching what the model itself emits. Rows with
+    a None rank are skipped.
     """
     orig = sorted(r[rank_key] for r in rows if r.get(rank_key) is not None)
     for r in rows:
