@@ -212,4 +212,25 @@ jobs:
             exit 0
           fi
           git commit -m "CI: rebuild dashboard from ${DATA_REPO}@${DATA_REF} and ${PROCESSED_DATA_REPO}@${LINELIST_REF}"
-          git push origin "HEAD:${{ steps.refs.outputs.dashboard_ref }}"
+          # On a PR merge this workflow and pr-preview.yml both push to the same
+          # branch (they're in different concurrency groups, so nothing
+          # serialises them), which makes a bare push a non-fast-forward. Rebase
+          # onto the latest remote tip and retry. The two never touch the same
+          # paths -- this job writes output/ + root HTML + assets/, pr-preview
+          # writes the pr-preview/ umbrella dir -- so the rebase can't conflict.
+          branch="${{ steps.refs.outputs.dashboard_ref }}"
+          attempts=5
+          for attempt in $(seq 1 "${attempts}"); do
+            if git push origin "HEAD:${branch}"; then
+              echo "Pushed on attempt ${attempt}."
+              exit 0
+            fi
+            # Last attempt failed: don't rebase (there'd be no push after it) --
+            # fail now so every rebase is always followed by another push try.
+            if [ "${attempt}" -eq "${attempts}" ]; then
+              echo "::error::push to ${branch} failed after ${attempts} attempts"
+              exit 1
+            fi
+            echo "Push rejected (attempt ${attempt}); rebasing onto origin/${branch} and retrying..."
+            git pull --rebase origin "${branch}" || { git rebase --abort 2>/dev/null || true; echo "::error::rebase onto origin/${branch} failed"; exit 1; }
+          done
