@@ -736,15 +736,12 @@ function renderFlowArcs(hubNom, layer) {
 const INVASION_RISK = PAYLOAD.invasion_risk || null;
 const INVASION_ZONES = (INVASION_RISK && INVASION_RISK.zones) || {};
 const INVASION_SCOPES = (INVASION_RISK && INVASION_RISK.scopes) || [];
-// epiScopeMode tracks which of the two scope buttons (National/Provincial)
-// is active; epiScopeId is the specific INVASION_SCOPES entry actually
-// applied to filter the table. In province mode, epiScopeId stays null until
-// a province is picked via the location search box -- epiCurrentScope()
-// returns null in that state rather than silently falling back to national,
-// so the table shows an explicit "pick a province" empty state instead of
-// quietly displaying the wrong data (see epiCurrentScope() below).
-let epiScopeMode = "national"; // "national" | "province"
-let epiScopeId = "national";
+// The Spatial Risk table always shows the national ranking -- there is no
+// geographic scope toggle any more (the old National/Provincial buttons were
+// removed). epiCurrentScope() therefore always resolves to the "national"
+// INVASION_SCOPES entry (rr_nat / rr_nat_rank); the province-specific columns
+// still ship in the payload and CSV download, they're just no longer surfaced
+// in the UI.
 // Sortable column headers replace the old "rank by relative risk / rank by
 // vulnerability-based priority" buttons -- any column can be sorted by
 // clicking (or Enter/Space on) its header, see wireEpiTrendsUi().
@@ -804,19 +801,15 @@ function renderEpiStraightLinks(hubNom) {
 }
 
 function epiCurrentScope() {
-  // Provincial scope with nothing picked yet: no scope applies (table shows
-  // the "search for a province" empty state) -- don't fall back to national,
-  // that would silently show the wrong data while the Provincial button
-  // still looks active.
-  if (epiScopeMode === "province" && !epiScopeId) return null;
-  return INVASION_SCOPES.find(function(s) { return s.id === epiScopeId; }) || INVASION_SCOPES[0] || null;
+  // Always the national scope (rr_nat / rr_nat_rank) -- the provincial toggle
+  // was removed, so there is no other scope to resolve to.
+  return INVASION_SCOPES.find(function(s) { return s.id === "national"; }) || INVASION_SCOPES[0] || null;
 }
 
 function epiZoneVisible(row) {
-  const scope = epiCurrentScope();
-  if (!scope) return false;
-  if (!scope.province) return true;
-  return row && row.province === scope.province;
+  // National scope shows every zone; nothing to filter now that the
+  // provincial toggle is gone.
+  return !!epiCurrentScope();
 }
 
 function epiFlowConnectedNoms(hubNom) {
@@ -847,12 +840,8 @@ function epiFmtNum(v, digits) {
 function updateEpiTitle() {
   const el = document.getElementById("epi-trends-title");
   if (!el) return;
-  const scope = epiCurrentScope();
-  if (!scope || scope.id === "national") {
-    el.textContent = t("ui.epi_trends_title");
-  } else {
-    el.textContent = tf("ui.epi_trends_title_province", {province: scope.label});
-  }
+  // Always the national ranking now that the provincial scope is gone.
+  el.textContent = t("ui.epi_trends_title");
 }
 
 function epiCapitalizeFirst(text) {
@@ -1040,9 +1029,9 @@ function setEpiSelected(nom) {
 // Extracts the value used to sort a given column -- shared by the click
 // handler (which just needs to know which column) and epiSortedRows(). "zone"
 // and "province" are strings; everything else is numeric-or-null. "norm_rr"
-// (the on-screen "Normalised Relative Risk" column) is item.rr divided by a
-// constant (the max across visible rows), so it sorts identically to "rr" --
-// no need to recompute the normalised value just to sort by it.
+// (the on-screen "Relative risk (norm.)" column) is item.rr divided by a
+// constant (the max across visible rows), so it sorts identically to the raw
+// relative risk -- no need to recompute the normalised value just to sort by it.
 function epiSortValue(item, key) {
   switch (key) {
     case "province": return item.row.province || "";
@@ -1051,7 +1040,6 @@ function epiSortValue(item, key) {
     // No single natural sort key for a range -- use the lower bound.
     case "p_ci": return item.row.p_case_lo;
     case "norm_rr": return item.rr;
-    case "rr": return item.rr;
     case "rr_rank": return item.rrRank;
     case "priority": return item.priority;
     case "priority_rank": return item.priorityRank;
@@ -1115,7 +1103,7 @@ function renderEpiTrendsTable() {
     // returned null) and "a scope is active but happens to match zero zones" --
     // same prompt either way, since the fix in both cases is "search for a
     // province above".
-    tbody.innerHTML = "<tr class='epi-empty-row'><td colspan='9' class='trends-empty'>" +
+    tbody.innerHTML = "<tr class='epi-empty-row'><td colspan='8' class='trends-empty'>" +
       escHtml(t("ui.epi_scope_empty")) + "</td></tr>";
     return;
   }
@@ -1137,7 +1125,6 @@ function renderEpiTrendsTable() {
       "<td class='num'>" + epiFmtNum(pInv, 3) + "</td>" +
       "<td class='num'>" + epiFmtCi(pLo, pHi, 3) + "</td>" +
       "<td class='num'>" + epiFmtNum(norm, 3) + "</td>" +
-      "<td class='num'>" + epiFmtNum(item.rr, 2) + "</td>" +
       "<td class='num'>" + (item.rrRank == null ? "—" : item.rrRank) + "</td>" +
       "<td class='num'>" + epiFmtNum(item.priority, 3) + "</td>" +
       "<td class='num'>" + (item.priorityRank == null ? "—" : item.priorityRank) + "</td>" +
@@ -3270,22 +3257,8 @@ if (!PAYLOAD.flow_arcs_available || !FLOW_ARC_LAYER) {
     if (splitHandle) splitHandle.style.display = "none";
     return;
   }
-  const epiScopeButtons = document.querySelectorAll(".epi-scope-btn");
   const epiSearchInput = document.getElementById("epi-search-input");
   const epiSearchResults = document.getElementById("epi-search-results");
-
-  function epiFitMapToProvince(provinceName) {
-    const layers = [];
-    geoLayer.eachLayer(function(layer) {
-      if (layer.feature && layer.feature.properties.province === provinceName) {
-        layers.push(layer);
-      }
-    });
-    if (layers.length) {
-      const group = L.featureGroup(layers);
-      map.fitBounds(group.getBounds(), {padding: [30, 30], maxZoom: 8});
-    }
-  }
 
   function epiClearSearchUi() {
     if (epiSearchInput) epiSearchInput.value = "";
@@ -3295,32 +3268,11 @@ if (!PAYLOAD.flow_arcs_available || !FLOW_ARC_LAYER) {
     }
   }
 
-  function epiSetScopeButtonActive(kind) {
-    epiScopeButtons.forEach(function(b) {
-      b.classList.toggle("active", (b.getAttribute("data-scope") || "national") === kind);
-    });
-  }
-
-  // Picking a province (from search) filters the table to it -- the
-  // Provincial button switches active if it wasn't already.
-  function epiApplyProvince(provinceName) {
-    const scope = INVASION_SCOPES.find(function(s) { return s.province === provinceName; });
-    epiScopeMode = "province";
-    epiScopeId = scope ? scope.id : null;
-    epiSetScopeButtonActive("province");
-    setEpiSelected(null);
-    recomputeEpiTrends();
-    if (scope) epiFitMapToProvince(provinceName);
-  }
-
-  // Picking a health zone doesn't filter the table (a ranked list of one
-  // zone isn't useful) -- switch to National so it's guaranteed visible,
-  // then select/highlight its row, same as clicking that row directly.
+  // Picking a health zone from search selects/highlights its row (a ranked
+  // list of one zone isn't useful, so it doesn't filter the table), same as
+  // clicking that row directly. setEpiSelected() re-renders the table, so the
+  // scroll-into-view happens after it.
   function epiApplyHealthZone(nom) {
-    epiScopeMode = "national";
-    epiScopeId = "national";
-    epiSetScopeButtonActive("national");
-    recomputeEpiTrends();
     setEpiSelected(nom);
     if (tbody) {
       const tr = Array.prototype.find.call(
@@ -3331,30 +3283,9 @@ if (!PAYLOAD.flow_arcs_available || !FLOW_ARC_LAYER) {
     }
   }
 
-  epiScopeButtons.forEach(function(btn) {
-    btn.addEventListener("click", function() {
-      const kind = btn.getAttribute("data-scope") || "national";
-      epiSetScopeButtonActive(kind);
-      epiClearSearchUi();
-      if (kind === "national") {
-        epiScopeMode = "national";
-        epiScopeId = "national";
-        setEpiSelected(null);
-        recomputeEpiTrends();
-        map.setView([INITIAL_VIEW.lat, INITIAL_VIEW.lon], INITIAL_VIEW.zoom);
-      } else {
-        // No province picked yet -- table shows the "search above" empty
-        // state (see epiCurrentScope()/renderEpiTrendsTable()) until one is.
-        epiScopeMode = "province";
-        epiScopeId = null;
-        setEpiSelected(null);
-        recomputeEpiTrends();
-      }
-    });
-  });
-
-  // Shares TRENDS_LOCATION_INDEX with the Trends tab (every province +
-  // health zone) rather than building a second copy of the same index.
+  // Shares TRENDS_LOCATION_INDEX with the Trends tab (every province + health
+  // zone), but this page has no provincial scope, so province entries are
+  // filtered out -- only health zones are shown/selectable here.
   function renderEpiSearchResults(query) {
     if (!epiSearchResults) return;
     const q = String(query || "").trim().toLowerCase();
@@ -3364,7 +3295,7 @@ if (!PAYLOAD.flow_arcs_available || !FLOW_ARC_LAYER) {
       return;
     }
     const items = TRENDS_LOCATION_INDEX.filter(function(it) {
-      return it.haystack.indexOf(q) >= 0;
+      return it.kind === "health_zone" && it.haystack.indexOf(q) >= 0;
     });
     if (!items.length) {
       epiSearchResults.innerHTML = "<div class='zone-search-empty'>" +
@@ -3389,8 +3320,7 @@ if (!PAYLOAD.flow_arcs_available || !FLOW_ARC_LAYER) {
       if (!btn) return;
       const kind = btn.getAttribute("data-kind");
       const id = btn.getAttribute("data-id");
-      if (kind === "province") epiApplyProvince(id);
-      else if (kind === "health_zone") epiApplyHealthZone(id);
+      if (kind === "health_zone") epiApplyHealthZone(id);
       epiClearSearchUi();
     });
   }

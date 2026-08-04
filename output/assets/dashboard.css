@@ -340,8 +340,8 @@
   #epi-trends-panel h2 {
     margin:0; font-size:14px; color:#2a2a27; font-weight:700;
   }
-  /* Scope buttons on the left, location search on the right -- same row
-     layout as #trends-controls on the Trends tab. */
+  /* Holds just the location search now (the National/Provincial scope buttons
+     were removed) -- same row layout as #trends-controls on the Trends tab. */
   .epi-controls {
     display:flex; align-items:center; justify-content:space-between;
     gap:10px; flex-wrap:wrap;
