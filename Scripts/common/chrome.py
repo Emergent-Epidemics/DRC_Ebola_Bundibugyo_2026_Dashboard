@@ -299,7 +299,7 @@ __NAV_LINKS__
         <span class="swatch" style="background:#b23b2e"></span>
         <span data-i18n="ui.legend.flow_in">inflow to hub</span>
       </div>
-      <div data-i18n="ui.legend.importation_pressure_width">Line width ∝ confirmed cases in the external origin zone (Flowminder inflows only), 0–1 vs max for selected zone</div>
+      <div data-i18n="ui.legend.importation_pressure_width">Red inflows only; line width ∝ each origin's modelled import-force contribution to the selected zone (next-week forecast), scaled 0–1 vs that zone's top source</div>
     </div>
   </div>
 </div>
