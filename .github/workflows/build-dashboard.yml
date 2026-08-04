@@ -219,13 +219,18 @@ jobs:
           # paths -- this job writes output/ + root HTML + assets/, pr-preview
           # writes the pr-preview/ umbrella dir -- so the rebase can't conflict.
           branch="${{ steps.refs.outputs.dashboard_ref }}"
-          for attempt in 1 2 3 4 5; do
+          attempts=5
+          for attempt in $(seq 1 "${attempts}"); do
             if git push origin "HEAD:${branch}"; then
               echo "Pushed on attempt ${attempt}."
               exit 0
             fi
+            # Last attempt failed: don't rebase (there'd be no push after it) --
+            # fail now so every rebase is always followed by another push try.
+            if [ "${attempt}" -eq "${attempts}" ]; then
+              echo "::error::push to ${branch} failed after ${attempts} attempts"
+              exit 1
+            fi
             echo "Push rejected (attempt ${attempt}); rebasing onto origin/${branch} and retrying..."
             git pull --rebase origin "${branch}" || { git rebase --abort 2>/dev/null || true; echo "::error::rebase onto origin/${branch} failed"; exit 1; }
           done
-          echo "::error::push to ${branch} failed after 5 attempts"
-          exit 1
