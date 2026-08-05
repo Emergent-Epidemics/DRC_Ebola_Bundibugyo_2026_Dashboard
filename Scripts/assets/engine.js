@@ -8,12 +8,13 @@ const MATRIX_INDEX = {};
 (function buildMatrixIndex() {
   (MATRICES.zones || []).forEach(function(nom, i) { MATRIX_INDEX[nom] = i; });
 })();
-let matrixOriginNom = PAYLOAD.matrix_default_origin || "Mongbwalu";
+let matrixOriginNom = null;         // set only via the focused zone (setMapSelection)
 const FLOW_CATALOGS = PAYLOAD.flow_catalogs || {};
 const IMPORT_FORCE_PAIRWISE = PAYLOAD.import_force_pairwise || null;
 const FLOW_ARC_LAYER = PAYLOAD.flow_arc_layer || null;
-let flowHubNom = PAYLOAD.flow_default_hub || "Mongbwalu";
-let flowHubUserSelected = !!(PAYLOAD.flow_arcs_available && FLOW_ARC_LAYER);
+let flowHubNom = null;              // set only via the focused zone (setMapSelection)
+let flowHubUserSelected = false;
+let mapSelectedNom = null;          // the single "focused zone" for the snapshot view
 let flowArcStats = null;
 let activeView = "map";
 const MATRIX_ORIGIN_FILL = "#5b9bd5";
@@ -192,6 +193,44 @@ function setFlowHub(nom) {
   flowHubUserSelected = !!nom;
   recompute();
   syncMatrixUi();
+}
+
+function featureByNom(nom) {
+  if (!nom) return null;
+  const feats = (PAYLOAD.geometry && PAYLOAD.geometry.features) || [];
+  for (let i = 0; i < feats.length; i++) {
+    if (feats[i].properties && feats[i].properties.nom === nom) return feats[i];
+  }
+  return null;
+}
+
+// The snapshot view's single focused zone. Drives the info box, the persistent
+// highlight, and — where the active layer cares — the flow-arc origin and the
+// matrix travel origin. Passing the already-focused nom (or null) clears focus.
+function setMapSelection(nom) {
+  const next = (nom && nom === mapSelectedNom) ? null : (nom || null);
+  mapSelectedNom = next;
+  flowHubNom = next;
+  flowHubUserSelected = !!next;
+  matrixOriginNom = next;
+  applyMatrixOriginToLayers();
+  rebuildLayerSelect();
+  recompute();
+  syncMatrixUi();
+  renderMapInfoBox();
+}
+
+function renderMapInfoBox() {
+  const el = document.getElementById("info-body");
+  if (!el) return;
+  const feat = featureByNom(mapSelectedNom);
+  if (!feat) {
+    el.className = "info-empty";
+    el.textContent = t("ui.hover_zone");   // "Select a health zone."
+    return;
+  }
+  el.className = "";
+  el.innerHTML = infoHTML(feat);
 }
 
 function applyStaticI18n() {
@@ -1438,6 +1477,16 @@ function styleFn(feature) {
       fillColor: EPICENTER_FILL,
       fillOpacity: 0.88
     };
+  }
+  if (activeView === "map" && ref === mapSelectedNom) {
+    // Focus highlight: a heavy dark border, distinct from the amber (#ffae42)
+    // hover. Keep whatever fill the layer would give, so the border is the
+    // focus signal and the fill still conveys the layer value/role.
+    const base = has ? {
+      fillColor: valueToColor(v, ref, layer),
+      fillOpacity: (currentDomain.isLog ? v <= 0 : v === 0) ? 0.55 : 0.85
+    } : { fillOpacity: 0 };
+    return Object.assign({ color: "#1a1a1a", weight: 2.4 }, base);
   }
   if (!has) {
     return { color: "#111", weight: zoomWeight(0.35), fillOpacity: 0 };
@@ -3679,16 +3728,9 @@ wireModal("terms-modal", ["terms-btn", "header-terms-btn"], "terms-close");
   }
 })();
 
-// Pre-populate the zone info panel with Mongbwalu.
-(function preloadMongbwalu() {
-  for (const feat of PAYLOAD.geometry.features) {
-    if ((feat.properties.nom || "").toLowerCase() === "mongbalu") {
-      document.getElementById("info-body").className = "";
-      document.getElementById("info-body").innerHTML = infoHTML(feat);
-      return;
-    }
-  }
-})();
+// The snapshot info box starts empty (placeholder) until a zone is focused.
+// (The #info-body element keeps its `info-empty` class from chrome.py, and
+// applyStaticI18n in initDashboardI18n fills it with the placeholder string.)
 
 (function initDashboardI18n() {
   LAYERS = (I18N.layers && I18N.layers[currentLang]) || PAYLOAD.layers;
