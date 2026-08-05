@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from shapely.geometry import mapping, shape
-from shapely.ops import unary_union
+from shapely.ops import polylabel, unary_union
 from shapely.validation import make_valid
 
 from common.paths import (
@@ -51,6 +51,7 @@ from common.paths import (
 __all__ = [
     'SIMPLIFY_TOL',
     'COORD_DECIMALS',
+    'CENTRE_TOL',
     'TRAVEL_FROM_ZONE',
     'EPICENTER_ITURI_SINGLE',
     'EPICENTER_ITURI_COHORT',
@@ -219,6 +220,7 @@ __all__ = [
 
 SIMPLIFY_TOL = 0.001     # ~110 m at the equator; ~10× fewer vertices than raw
 COORD_DECIMALS = 5
+CENTRE_TOL = 0.0001      # ~11 m: search precision for the pole of inaccessibility
 
 TRAVEL_FROM_ZONE = "Mongbwalu"
 # Canonical ``nom`` values for outbreak epicentres (Flowminder outflow sources).
@@ -586,6 +588,26 @@ def _round_coords(geom_dict: dict, ndigits: int) -> dict:
 # geometry: read DRC health-zone polygons, match per-zone metadata rows
 # ---------------------------------------------------------------------------
 
+def _zone_centre(geom):
+    """Return a well-inside anchor point for a zone's label/marker/arrows.
+
+    Uses the pole of inaccessibility (``polylabel``) -- the interior point
+    farthest from any edge -- instead of the area-weighted ``.centroid``. The
+    centroid is *not* guaranteed to lie inside the polygon and drifts outside on
+    crescent-shaped or otherwise concave zones (and into the gaps of
+    MultiPolygons); the pole of inaccessibility is always inside and reads as
+    visually central. ``polylabel`` only accepts a single Polygon, so for
+    MultiPolygons we anchor on the largest-area part. Falls back to
+    ``representative_point()`` (also always inside) if polylabel ever fails.
+    """
+    target = (max(geom.geoms, key=lambda p: p.area)
+              if geom.geom_type == "MultiPolygon" else geom)
+    try:
+        return polylabel(target, tolerance=CENTRE_TOL)
+    except Exception:
+        return target.representative_point()
+
+
 def load_features_from_geojson() -> tuple[list[dict], dict[str, tuple[float, float]]]:
     """Load zone polygons from the build GeoJSON, keyed by nom."""
     with open(BUILD_GEOJSON) as f:
@@ -598,7 +620,8 @@ def load_features_from_geojson() -> tuple[list[dict], dict[str, tuple[float, flo
         geom = make_valid(shape(feat["geometry"]))
         if geom.is_empty or geom.geom_type not in {"Polygon", "MultiPolygon"}:
             continue
-        orig_centroid = geom.centroid
+        # Anchor on the full-resolution geometry, before simplify() below.
+        centre_pt = _zone_centre(geom)
         if SIMPLIFY_TOL > 0:
             geom = geom.simplify(SIMPLIFY_TOL, preserve_topology=True)
         if geom.is_empty:
@@ -615,7 +638,7 @@ def load_features_from_geojson() -> tuple[list[dict], dict[str, tuple[float, flo
             "geometry": gdict,
             "properties": props,
         })
-        centroids[nom] = (float(orig_centroid.x), float(orig_centroid.y))
+        centroids[nom] = (float(centre_pt.x), float(centre_pt.y))
     return feats, centroids
 
 
