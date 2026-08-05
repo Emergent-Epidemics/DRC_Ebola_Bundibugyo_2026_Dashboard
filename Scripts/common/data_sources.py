@@ -651,6 +651,10 @@ def _strip_slivers(geom, min_area: float):
             return keep_parts[0], dropped_ring_max, dropped_part_max
         return MultiPolygon(keep_parts), dropped_ring_max, dropped_part_max
 
+    # Unexpected non-areal geometry (e.g. a GeometryCollection from a degenerate
+    # union). Inputs are pre-filtered to Polygon/MultiPolygon so this should be
+    # unreachable, but surface it rather than silently reporting a clean 0.0.
+    print(f"  WARNING: _strip_slivers passed through unexpected {geom.geom_type}")
     return geom, dropped_ring_max, dropped_part_max
 
 
@@ -864,13 +868,16 @@ def build_province_boundaries() -> dict:
 
     # Sliver-cleanup visibility: print the largest ring/part dropped so a
     # shrinking empirical gap (a genuine large hole/island nearing the threshold)
-    # is noticeable in the build log, and sanity-check the helper honoured its
-    # threshold.
+    # is noticeable in the build log. The printed values are the real per-build
+    # signal to watch.
     print(
         f"  province sliver cleanup: largest dropped ring {max_dropped_ring:.2e} "
         f"deg^2, largest dropped part {max_dropped_part:.2e} deg^2 "
         f"(threshold {PROVINCE_SLIVER_MAX:.0e})"
     )
+    # Regression guard on _strip_slivers itself (NOT a per-build data check): it
+    # must never report having dropped something at/above its own threshold. True
+    # by construction today; this trips only if a future edit breaks that contract.
     assert max_dropped_ring < PROVINCE_SLIVER_MAX and max_dropped_part < PROVINCE_SLIVER_MAX
 
     return {"type": "FeatureCollection", "features": out}
