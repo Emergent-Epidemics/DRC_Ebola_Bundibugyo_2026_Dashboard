@@ -1655,6 +1655,21 @@ function infoHTML(feature) {
   return h;
 }
 
+// Lightweight per-zone readout for the snapshot hover tooltip: the active
+// layer's label and this zone's value (matrix layers → travel time/distance
+// from the focused origin). "No data" when the layer has no value here.
+function layerHoverTooltipHTML(feature) {
+  const ref = feature.properties.nom;
+  const name = feature.properties.name || t("ui.case_tooltip.unnamed");
+  const layer = getLayer(layerSelect.value);
+  const v = currentValues.get(ref);
+  const has = v != null && !Number.isNaN(v);
+  const body = has
+    ? (layer ? layer.label + ": " : "") + fmtLegend(v, layer && layer.legend_round != null ? layer.legend_round : "int")
+    : t("ui.layer_no_data");
+  return "<strong>" + name + "</strong><br/>" + body;
+}
+
 const geoLayer = L.geoJSON(PAYLOAD.geometry, {
   style: styleFn,
   onEachFeature: function (feature, layer) {
@@ -1677,8 +1692,9 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         }
         e.target.setStyle({weight: 1.6, color: "#ffae42"});
         e.target.bringToFront();
-        document.getElementById("info-body").className = "";
-        document.getElementById("info-body").innerHTML = infoHTML(feature);
+        // Hover no longer fills the info box (that follows the focused zone).
+        // Show a lightweight, layer-aware tooltip instead.
+        e.target.bindTooltip(layerHoverTooltipHTML(feature), {sticky: true, direction: "top"}).openTooltip(e.latlng);
       },
       mouseout: function(e) {
         if (activeView === "trends") {
@@ -1700,7 +1716,10 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
           geoLayer.resetStyle(e.target);
           return;
         }
+        if (e.target.getTooltip()) e.target.unbindTooltip();
         geoLayer.resetStyle(e.target);
+        // resetStyle re-applies styleFn, which already paints the focus border
+        // for the focused zone, so leaving a focused zone keeps its highlight.
       },
       click: function(e) {
         if (activeView === "trends") {
