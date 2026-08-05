@@ -3,6 +3,11 @@ const ZONE_DATA = PAYLOAD.zone_data;
 const I18N = PAYLOAD.i18n || {};
 let LAYERS = PAYLOAD.layers;
 const TRAVEL_FROM = PAYLOAD.travel_from || "Mongbwalu";
+// Fixed epicentre reference for the info box's "Distance from ..." rows. This is
+// deliberately independent of the interactive selection / travel-layer origin:
+// the info box always reports the selected zone's distance from the epicentre,
+// not from itself.
+const DISTANCE_ORIGIN_NOM = PAYLOAD.matrix_default_origin || TRAVEL_FROM;
 const MATRICES = PAYLOAD.matrices || {};
 const MATRIX_INDEX = {};
 (function buildMatrixIndex() {
@@ -1641,10 +1646,10 @@ function infoHTML(feature) {
   h += "<tr><td>" + info.flowminder_may + "</td><td>" + fmt(z.flowminder_short_trips__outflow_20260524__outflow_20260524, "cal") + "</td></tr>";
   h += "</table>";
 
-  h += "<h4>" + tf("ui.info.distance_from", {origin: matrixOriginDisplayName()}) + "</h4>";
+  h += "<h4>" + tf("ui.info.distance_from", {origin: hubDisplayName(DISTANCE_ORIGIN_NOM)}) + "</h4>";
   h += "<table>";
-  h += "<tr><td>" + info.travel_time_h + "</td><td>" + fmt(matrixValue("osrm__travel_time", matrixOriginNom, ref, 60)) + "</td></tr>";
-  h += "<tr><td>" + info.road_distance_km + "</td><td>" + fmt(matrixValue("osrm__road_distance", matrixOriginNom, ref, 1)) + "</td></tr>";
+  h += "<tr><td>" + info.travel_time_h + "</td><td>" + fmt(matrixValue("osrm__travel_time", DISTANCE_ORIGIN_NOM, ref, 60)) + "</td></tr>";
+  h += "<tr><td>" + info.road_distance_km + "</td><td>" + fmt(matrixValue("osrm__road_distance", DISTANCE_ORIGIN_NOM, ref, 1)) + "</td></tr>";
   h += "</table>";
 
   if (z.genomic_sequence_count) {
