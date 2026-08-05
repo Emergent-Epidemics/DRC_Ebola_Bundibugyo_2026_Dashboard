@@ -2,10 +2,10 @@
 
 **Date:** 2026-08-05
 **Branch:** `provincial-mode-map-clarity` (off `main`)
-**Status:** Design approved; critical-review points §§1–10 incorporated (original
-§§1–6, second-look §7 + §2b retraction, third-read §8 line-numbers / §9 invariant
-anchor / §10 post-round ring check); see `…-design-review.md`. Pending final user
-sign-off.
+**Status:** Design approved; critical-review points §§1–13 incorporated across four
+review passes (original §§1–6; second-look §7 + §2b retraction; third-read §8–§10;
+final §11 detached sliver parts / §12 grid-size bracket / §13 square-degree units).
+See `…-design-review.md`. Ready to plan.
 
 ## Problem
 
@@ -137,8 +137,8 @@ branch changes.
 > search**, not just the map outline. Therefore a **province-count invariant** is
 > part of this change (see below), and it matters more than the interior-ring count.
 
-In `build_province_boundaries()`, eliminate the sliver holes, before the existing
-`simplify` / coordinate-round steps:
+In `build_province_boundaries()`, eliminate the sliver artefacts (interior-ring
+holes and detached parts), before the existing `simplify` / coordinate-round steps:
 
 1. **Snap** each source zone geometry to a small coordinate grid
    (`shapely.set_precision`) so shared edges between adjacent zones coincide
@@ -148,12 +148,27 @@ In `build_province_boundaries()`, eliminate the sliver holes, before the existin
    safe order **`make_valid` → `set_precision` → `make_valid`**, and skip any zone
    that comes out empty/invalid (as the existing loop already does).
 2. **Union** as today (`unary_union`).
-3. **Drop sliver holes.** Strip interior rings whose area is below a threshold
-   from each Polygon / MultiPolygon part, via a small helper that rebuilds each
-   polygon keeping only its exterior ring plus interior rings at or above the
-   threshold. DRC provinces have no legitimate donut holes, so this is safe;
-   keeping a threshold rather than stripping every interior ring is a deliberate
-   safety net.
+3. **Drop sliver holes *and* sliver parts (from review §11).** A small helper
+   cleans each dissolved geometry two ways, using the same area threshold:
+   - **Interior rings:** rebuild each part keeping its exterior ring plus only
+     interior rings at or above the threshold (drops the ~6,145 hole slivers).
+   - **Detached exterior parts:** for a MultiPolygon, drop whole parts below the
+     threshold. `unary_union` can leave tiny detached fragments where two zone
+     edges cross rather than coincide; the strip-holes rebuild would otherwise keep
+     such a fragment (it has its own valid exterior ring) and draw it. This slips
+     **both** other guards — it rides inside the province's single MultiPolygon
+     feature (province-count invariant still matches) and it has no hole (ring
+     count still ~0) — so it needs its own pass.
+
+   Both are safe for DRC provinces (no legitimate donut holes, no legitimate small
+   island exclaves — provinces are contiguous land), and both keep a threshold
+   rather than blindly stripping, as a deliberate safety net.
+
+   **Empirical grounding (current geometry):** the four MultiPolygon provinces each
+   have exactly one real part of 5–10 deg² and secondary parts ≤ 4e-4 deg²
+   (≈ 5 km²) down to ~1e-7 deg² — a >1000× gap with nothing in between. So a
+   threshold anywhere in that gap cleanly separates real land from slivers, for
+   both rings and parts.
 
 Then the payload is rebuilt so `trends.html` (and the other pages) pick up the
 cleaned geometry.
@@ -186,13 +201,30 @@ count would still match, and the province would silently vanish anyway — the e
 failure this guard exists to catch, just one step upstream of `set_precision`.
 Comparing against the raw province set closes that loop.
 
-**Threshold as a guard, not a hand-tuned magic number (from review §5).** The
-donut-hole-free assumption is load-bearing, so make it self-checking: after
-cleanup, log the *largest* interior-ring area that was dropped, and assert it stays
-below an absolute bound. A future source/geometry change that introduces a genuine
-(large) hole then trips a loud build failure instead of silently erasing it. This
-also gives the threshold a principled value (comfortably above observed sliver
-areas, comfortably below that bound) rather than an eyeballed one.
+**Threshold as a guard, not a hand-tuned magic number (from review §5, §11).** The
+no-small-holes / no-small-islands assumption is load-bearing, so make it
+self-checking: after cleanup, log the *largest dropped* area — for **both** interior
+rings and detached parts — and assert each stays below an absolute bound. A future
+source/geometry change that introduces a genuine (large) hole or a real island then
+trips a loud build failure instead of silently erasing it. This also gives the
+threshold a principled value (comfortably above observed sliver areas ≈ 4e-4 deg²,
+comfortably below the real-part/real-outline scale of ≥ ~0.8 deg²) rather than an
+eyeballed one.
+
+**Units (from review §13).** Geometry is EPSG:4326 lon/lat, so the sliver
+threshold and the absolute bound above are in **square degrees**, not m² — state
+this at the constants so nobody sets a metric value off by orders of magnitude.
+(DRC straddles the equator, so deg² is reasonably uniform across provinces; no
+reprojection needed. 1 deg² ≈ 12,300 km² near the equator.)
+
+**`set_precision` grid size — bracket it (from review §12).** Snapping perturbs
+*every* vertex (including the province's outer edge) by up to ~half a grid cell, so
+"exterior outline unchanged" means *visually* unchanged at display scale, not
+byte-identical. Keep the grid in the window **`[1e-5, <1e-3]` degrees**: at/above
+the `COORD_DECIMALS = 5` quantum (~1e-5 deg ≈ 1 m; below it, the final rounding
+erases the snap) and comfortably below `SIMPLIFY_TOL = 0.001` (~110 m; at/above it,
+snapping fights simplify and visibly moves the outline). Pick within that bracket,
+don't tune blind.
 
 **Validate ring count on the final, post-round geometry (from review §10).** The
 drop-slivers step runs before the existing `simplify` / `_round_coords`
@@ -217,10 +249,11 @@ interior-ring count collapses without eroding the exterior outline).
   one feature per input province (count unchanged), each keeping its `province`
   property — asserted in the builder, so a geometry regression fails the build
   loudly.** Trends search and plot generation still list every province.
-- Interior-ring (hole) count across all province boundary features drops to ~0 —
-  checked on the **final post-round geometry** (re-running the diagnosis geometry
-  check), each province's exterior outline unchanged, and the largest dropped
-  interior-ring area logged and below the asserted bound.
+- On the **final post-round geometry**: interior-ring (hole) count drops to ~0 and
+  no MultiPolygon retains a sub-threshold detached part (both re-checked via the
+  diagnosis geometry script); each province's exterior outline is visually
+  unchanged at display scale; and the largest dropped ring **and** largest dropped
+  part are logged and below their asserted (square-degree) bounds.
 - A selected province shows a clean red outline with no internal lines.
 - `national` / `health_zone` scopes and the `map` / `epi-trends` views are
   **behaviourally** unchanged. The province outlines shown in national/health_zone
@@ -233,8 +266,9 @@ interior-ring count collapses without eroding the exterior outline).
   single `weight: 0` step) and the `geoLayer` `mouseover` / `mouseout` province
   branch (route to `setTrendsProvinceHover`). No new style constants.
 - `Scripts/common/data_sources.py` — `build_province_boundaries()` (make_valid →
-  set_precision → make_valid, union, drop-slivers) plus a small strip-small-holes
-  helper, the **province-count invariant assertion**, and the largest-dropped-ring
-  logging/assertion.
+  set_precision → make_valid, union, drop-slivers) plus a small helper that strips
+  both sub-threshold interior rings **and** sub-threshold detached parts, the
+  **province-count invariant assertion**, and largest-dropped-ring / -part
+  logging/assertions (square-degree units).
 - Rebuild of `output/` + served `assets/` and the inlined payload in the HTML
   pages (build artifact).

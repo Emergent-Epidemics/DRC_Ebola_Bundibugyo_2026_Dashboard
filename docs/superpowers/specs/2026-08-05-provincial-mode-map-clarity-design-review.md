@@ -347,6 +347,79 @@ run on the pre-round geometry.
 
 ---
 
+## Final review (spec commit `c18f8b6`)
+
+**Verdict: the spec is ready to implement.** All ten review points (§§1–10) are
+incorporated accurately, and I re-verified *every* code citation in the current
+spec against the source — all correct now, including the newly-changed
+`styleFn:1422–1454`, hub/epicenter/no-data/data branch lines, `getLayer:1427`,
+`setTrendsScope:2378` / `showProvinceOutlines:2385`, `data_sources.py:736/739/744`,
+`payload.py:107`, and `COORD_DECIMALS = 5`. The §8 line-number defect is fixed,
+the §9 invariant is correctly re-anchored to the raw source province set, and §10
+correctly pins the ring check to post-round geometry. No blocking issues remain.
+
+The items below are genuinely new — untouched by the first three passes — and are
+polish, not blockers. Only §11 has real teeth.
+
+### 🟠 11. The cleanup strips interior *rings* but not detached sliver *polygons*
+
+Every part of the design targets interior rings (holes). But `unary_union` of the
+snapped zones can also leave **tiny detached exterior polygons** — a stray
+micro-fragment where two zone edges cross rather than coincide. The strip-holes
+helper (§3 step 3) rebuilds "exterior ring + large interior rings" per part, so a
+spurious *small part* survives intact: it keeps its own exterior ring and is drawn.
+
+Crucially, this slips **both** existing guards:
+- The province-count invariant (§9) counts *features per province*, and a spurious
+  part rides inside that province's single MultiPolygon feature — count still
+  matches, assertion passes.
+- The interior-ring count (§10 / success criteria) is ~0 — a detached part has no
+  hole, so the ring check is clean while a visible sliver polygon remains.
+
+**Complication:** small detached parts are not always junk — a province with a
+genuine lake island or river-island exclave legitimately unions to a MultiPolygon.
+So this can't be a blind "drop all small parts."
+
+**Recommendation:** State explicitly whether the union can produce spurious
+exterior slivers. Either (a) confirm empirically it produces none (add a check:
+count MultiPolygon parts below the same area threshold and assert 0, logging any),
+or (b) if it does, extend the helper to drop sub-threshold *parts* as well as
+rings — guarded by the same "no legitimate small islands in DRC provinces"
+assumption, made explicit and self-checked the way §5 handles holes.
+
+### 🟡 12. `set_precision` also moves the *exterior* boundary — pin the grid-size relationship
+
+Snapping to a grid perturbs every vertex, including the province's outer edge, by
+up to ~half a grid cell — the same operation that closes internal slivers also
+nudges the exterior. The "exterior outline unchanged" criterion therefore means
+*visually* unchanged at display scale, not byte-identical. To keep that true, the
+grid size needs a stated relationship to the existing constants: comfortably below
+`SIMPLIFY_TOL = 0.001` (~110 m; else snap fights simplify) and at/above the
+`COORD_DECIMALS = 5` quantum (~1 m; else rounding erases the snap). The spec calls
+the grid "tunable" but gives no bracket — name the `[1e-5, <1e-3]` window so it
+isn't tuned blind.
+
+### 🟡 13. Threshold/bound units are square degrees (EPSG:4326) — say so
+
+Geometry is in lon/lat degrees, so both the sliver-drop threshold and the §5
+"absolute bound" on the largest dropped ring are in **square degrees**, not m².
+Harmless but easy to mis-set an eyeballed constant by orders of magnitude if an
+implementer assumes metric. One clarifying word ("in the layer's native degrees")
+prevents it. (DRC straddles the equator, so a degree² is reasonably uniform across
+provinces — no reprojection needed.)
+
+### Confirmed strength — hover coverage survives the stroke suppression
+
+Worth recording as a *positive*: setting `weight: 0` removes only the stroke;
+zone fills keep `fillOpacity > 0` (data zones use `dataOpacity`, zero-case zones
+`mutedOpacity ≈ 0.48–0.55`, and no-data never fires — §1). In Leaflet/SVG a path
+with a non-zero fill still receives pointer events, so every province stays fully
+covered by hit-testable zone fills and the §2 province-hover works everywhere
+inside a province. There is no hover dead-zone. (This would only break if some
+trends zone had `fillOpacity: 0` — which the §1 analysis rules out.)
+
+---
+
 ## Suggested pre-implementation checklist
 
 1. Fix the national/health_zone "visually unchanged" wording (§1). **Blocking** —
@@ -372,3 +445,11 @@ run on the pre-round geometry.
    trips the assertion (§9).
 10. Ensure the "~0 interior rings" check runs on the final post-round geometry
     (§10).
+
+**After final read (spec addresses §§1–10; all citations verified correct):**
+
+11. Handle (or rule out) detached sliver *polygons*, which slip both the
+    province-count and interior-ring guards (§11). The one item with real teeth.
+12. Bracket the `set_precision` grid size against `SIMPLIFY_TOL`/`COORD_DECIMALS`
+    (§12).
+13. Note that threshold/bound units are square degrees (§13).
