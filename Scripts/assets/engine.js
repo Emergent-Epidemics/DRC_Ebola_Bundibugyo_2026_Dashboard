@@ -3190,12 +3190,14 @@ function syncMarkerToggles(from) {
 }
 
 function caseMarkerTooltip(c) {
-  const totalDeaths = (c.confirmed_deaths || 0) + (c.suspected_deaths || 0);
+  const row = function(label, val) {
+    return "<div class='case-tt-row'><span>" + label + "</span><span>" + fmt(Number(val) || 0) + "</span></div>";
+  };
   return (
-    "<strong>" + (c.name || t("ui.case_tooltip.unnamed")) + "</strong><br/>" +
-    t("ui.case_tooltip.confirmed") + ": " + c.confirmed + "  ·  " +
-    t("ui.case_tooltip.suspected") + ": " + c.suspected +
-    (totalDeaths > 0 ? "<br/>" + t("ui.case_tooltip.deaths") + ": " + totalDeaths : "")
+    "<strong>" + (c.name || t("ui.case_tooltip.unnamed")) + "</strong>" +
+    row(t("ui.case_tooltip.suspected_cases"), c.suspected) +
+    row(t("ui.case_tooltip.confirmed_cases"), c.confirmed) +
+    row(t("ui.case_tooltip.confirmed_deaths"), c.confirmed_deaths)
   );
 }
 
