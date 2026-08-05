@@ -1,5 +1,7 @@
 import importlib
+import json
 
+import pytest
 from shapely.geometry import Polygon, MultiPolygon
 
 ds = importlib.import_module("common.data_sources")
@@ -66,9 +68,6 @@ def test_strip_slivers_keeps_largest_when_all_parts_sub_threshold():
     assert abs(part_max - 1e-4) < 1e-12      # the dropped one, not the kept one
 
 
-import json
-
-
 def _feature(nom, province, square_coords):
     return {
         "type": "Feature",
@@ -78,11 +77,14 @@ def _feature(nom, province, square_coords):
 
 
 def test_build_province_boundaries_preserves_every_province(tmp_path, monkeypatch):
-    # Two provinces, two adjacent zones each. Zones share an edge with a tiny
-    # misalignment so the naive union would leave a seam sliver.
+    # Two provinces, two adjacent zones each. Alpha's zones have a SUB-GRID seam
+    # gap (3e-6 < PROVINCE_SNAP_GRID = 1e-5): the naive union would leave them as
+    # a 2-part MultiPolygon, but the set_precision snap closes the seam so they
+    # merge into a single Polygon. That merge is what discriminates the new
+    # pipeline from the old.
     features = [
         _feature("z1", "Alpha", _square(0, 0, 2)),
-        _feature("z2", "Alpha", _square(2.0001, 0, 2)),   # ~1e-4 gap at the seam
+        _feature("z2", "Alpha", _square(2 + 3e-6, 0, 2)),   # sub-grid seam gap
         _feature("z3", "Beta", _square(0, 10, 2)),
         _feature("z4", "Beta", _square(2.0, 10, 2)),
     ]
@@ -94,6 +96,9 @@ def test_build_province_boundaries_preserves_every_province(tmp_path, monkeypatc
     out = ds.build_province_boundaries()
     provinces = sorted(f["properties"]["province"] for f in out["features"])
     assert provinces == ["Alpha", "Beta"]          # invariant: 2 in -> 2 out
+    by_prov = {f["properties"]["province"]: f["geometry"] for f in out["features"]}
+    # snap closed Alpha's sub-grid seam -> single merged Polygon (not MultiPolygon)
+    assert by_prov["Alpha"]["type"] == "Polygon"
     for f in out["features"]:
         g = f["geometry"]
         parts = [g["coordinates"]] if g["type"] == "Polygon" else g["coordinates"]
@@ -116,6 +121,5 @@ def test_build_province_boundaries_raises_when_a_province_is_lost(tmp_path, monk
     path.write_text(json.dumps(fc))
     monkeypatch.setattr(ds, "BUILD_GEOJSON", path)
 
-    import pytest
     with pytest.raises(ValueError, match="Ghost"):
         ds.build_province_boundaries()

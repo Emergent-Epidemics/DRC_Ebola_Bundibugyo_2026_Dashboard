@@ -861,9 +861,6 @@ def build_province_boundaries() -> dict:
             "the geometry pipeline must preserve every province (plots + search "
             "derive their province list from this output)."
         )
-    assert len(out) == len(raw_provinces), (
-        f"province count {len(out)} != {len(raw_provinces)} raw provinces"
-    )
 
     # Sliver-cleanup visibility: print the largest ring/part dropped so a
     # shrinking empirical gap (a genuine large hole/island nearing the threshold)
