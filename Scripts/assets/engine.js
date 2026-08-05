@@ -1733,24 +1733,18 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
           setEpiSelected(nom === epiSelectedNom ? null : nom);
           return;
         }
-        const layer = getLayer(layerSelect.value);
-        if (activeView === "map" && flowArcsOverlayActive()) {
+        if (activeView === "map") {
           L.DomEvent.stop(e);
-          // Re-clicking the current flow origin clears it (arcs disappear);
-          // empty-map click clears too -- see the map "click" handler below.
-          const nom = feature.properties.nom;
-          setFlowHub(nom === flowHubNom ? null : nom);
+          // One "focused zone" for the snapshot view: click to focus, click the
+          // focused zone again to clear. Focus drives the info box, the flow-arc
+          // origin, and the matrix travel origin. No click-to-zoom.
+          setMapSelection(feature.properties.nom);
           return;
         }
-        if (activeView === "map" && layerUsesMatrix(layer)) {
-          L.DomEvent.stop(e);
-          setMatrixOrigin(feature.properties.nom);
-          return;
-        }
-        map.fitBounds(e.target.getBounds(), {padding:[40,40]});
       },
       dblclick: function(e) {
         if (activeView === "context") return;
+        if (activeView === "map") return;   // no zoom-to-zone on the snapshot view
         if (activeView === "trends" && trendsScope === "national") {
           return;
         }
@@ -1783,10 +1777,9 @@ map.on("zoomend", function () {
 map.on("click", function() {
   if (activeView === "context") clearContextSelection();
   if (activeView === "epi-trends") setEpiSelected(null);
-  // Snapshot: clearing the flow origin (arcs off) is its deselect. Only while
-  // arcs are the active overlay -- matrix layers keep their origin, and their
-  // arcs are already suppressed so flowArcsOverlayActive() is false there.
-  if (activeView === "map" && flowArcsOverlayActive()) setFlowHub(null);
+  // Snapshot: clicking empty map clears the focused zone (info box → placeholder,
+  // highlight cleared, arcs cleared, matrix choropleth goes empty).
+  if (activeView === "map") setMapSelection(null);
 });
 
 // --- health-zone search ---
@@ -1915,11 +1908,10 @@ function selectHealthZone(nom) {
     map.fitBounds(layer.getBounds(), {padding: [40, 40], maxZoom: 10});
   } else if (activeView === "map") {
     clearSearchHighlight();
-    if (flowArcsOverlayActive()) {
-      setFlowHub(nom);
-    } else if (layerUsesMatrix(getLayer(layerSelect.value))) {
-      setMatrixOrigin(nom);
-    }
+    // Searching focuses the zone (persistent highlight + info box come from the
+    // focus state itself, not a transient overlay). Keep the zoom-to-frame: a
+    // searched zone may be offscreen, unlike an already-visible clicked one.
+    setMapSelection(nom);
     map.fitBounds(layer.getBounds(), {padding: [40, 40], maxZoom: 10});
     layer.setStyle({weight: 1.6, color: "#ffae42"});
     layer.bringToFront();
@@ -1929,13 +1921,7 @@ function selectHealthZone(nom) {
       infoBody.className = "";
       infoBody.innerHTML = infoHTML(feature);
     }
-    searchHighlightTimer = setTimeout(function() {
-      if (searchHighlightLayer === layer && layer !== contextSelectedLayer) {
-        geoLayer.resetStyle(layer);
-      }
-      searchHighlightLayer = null;
-      searchHighlightTimer = null;
-    }, 2500);
+    // No transient timer: the focus highlight is persistent via styleFn.
   }
 
   if (zoneSearchInput) zoneSearchInput.value = displayName;
@@ -3286,15 +3272,8 @@ function handleCaseMarkerClick(nom) {
     return true;
   }
   if (activeView === "map") {
-    if (flowArcsOverlayActive()) {
-      setFlowHub(nom === flowHubNom ? null : nom);
-      return true;
-    }
-    // Matrix layers need an origin, so no toggle-to-null here.
-    if (layerUsesMatrix(getLayer(layerSelect.value))) {
-      setMatrixOrigin(nom);
-      return true;
-    }
+    setMapSelection(nom);
+    return true;
   }
   return false;
 }
