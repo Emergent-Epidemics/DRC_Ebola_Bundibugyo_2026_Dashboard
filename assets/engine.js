@@ -3,17 +3,23 @@ const ZONE_DATA = PAYLOAD.zone_data;
 const I18N = PAYLOAD.i18n || {};
 let LAYERS = PAYLOAD.layers;
 const TRAVEL_FROM = PAYLOAD.travel_from || "Mongbwalu";
+// Fixed epicentre reference for the info box's "Distance from ..." rows. This is
+// deliberately independent of the interactive selection / travel-layer origin:
+// the info box always reports the selected zone's distance from the epicentre,
+// not from itself.
+const DISTANCE_ORIGIN_NOM = PAYLOAD.matrix_default_origin || TRAVEL_FROM;
 const MATRICES = PAYLOAD.matrices || {};
 const MATRIX_INDEX = {};
 (function buildMatrixIndex() {
   (MATRICES.zones || []).forEach(function(nom, i) { MATRIX_INDEX[nom] = i; });
 })();
-let matrixOriginNom = PAYLOAD.matrix_default_origin || "Mongbwalu";
+let matrixOriginNom = null;         // set only via the focused zone (setMapSelection)
 const FLOW_CATALOGS = PAYLOAD.flow_catalogs || {};
 const IMPORT_FORCE_PAIRWISE = PAYLOAD.import_force_pairwise || null;
 const FLOW_ARC_LAYER = PAYLOAD.flow_arc_layer || null;
-let flowHubNom = PAYLOAD.flow_default_hub || "Mongbwalu";
-let flowHubUserSelected = !!(PAYLOAD.flow_arcs_available && FLOW_ARC_LAYER);
+let flowHubNom = null;              // set only via the focused zone (setMapSelection)
+let flowHubUserSelected = false;
+let mapSelectedNom = null;          // the single "focused zone" for the snapshot view
 let flowArcStats = null;
 let activeView = "map";
 const MATRIX_ORIGIN_FILL = "#5b9bd5";
@@ -117,7 +123,7 @@ function hubDisplayName(nom) {
   return zoneDisplayName(nom) || TRAVEL_FROM;
 }
 function matrixOriginDisplayName() {
-  return hubDisplayName(matrixOriginNom);
+  return matrixOriginNom ? hubDisplayName(matrixOriginNom) : "—";
 }
 function flowHubDisplayName() {
   return hubDisplayName(flowHubNom);
@@ -176,22 +182,42 @@ function syncMatrixUi() {
     updateLegend(layer);
   }
 }
-function setMatrixOrigin(nom) {
-  if (!nom || nom === matrixOriginNom) return;
-  matrixOriginNom = nom;
+function featureByNom(nom) {
+  if (!nom) return null;
+  const feats = (PAYLOAD.geometry && PAYLOAD.geometry.features) || [];
+  for (let i = 0; i < feats.length; i++) {
+    if (feats[i].properties && feats[i].properties.nom === nom) return feats[i];
+  }
+  return null;
+}
+
+// The snapshot view's single focused zone. Drives the info box, the persistent
+// highlight, and — where the active layer cares — the flow-arc origin and the
+// matrix travel origin. Passing the already-focused nom (or null) clears focus.
+function setMapSelection(nom) {
+  const next = (nom && nom === mapSelectedNom) ? null : (nom || null);
+  mapSelectedNom = next;
+  flowHubNom = next;
+  flowHubUserSelected = !!next;
+  matrixOriginNom = next;
   applyMatrixOriginToLayers();
   rebuildLayerSelect();
   recompute();
   syncMatrixUi();
+  renderMapInfoBox();
 }
-function setFlowHub(nom) {
-  // Snapshot's flow-arc origin. A null nom clears it (arcs disappear) -- the
-  // tab's "nothing selected" state. Matrix-layer origins are separate and
-  // always stay set, since a matrix choropleth needs an origin to render.
-  flowHubNom = nom || null;
-  flowHubUserSelected = !!nom;
-  recompute();
-  syncMatrixUi();
+
+function renderMapInfoBox() {
+  const el = document.getElementById("info-body");
+  if (!el) return;
+  const feat = featureByNom(mapSelectedNom);
+  if (!feat) {
+    el.className = "info-empty";
+    el.textContent = t("ui.hover_zone");   // "Select a health zone."
+    return;
+  }
+  el.className = "";
+  el.innerHTML = infoHTML(feat);
 }
 
 function applyStaticI18n() {
@@ -459,16 +485,10 @@ function setLang(lang) {
     renderEpiLegendBars();
     renderEpiTrendsTable();
   } else {
-    const infoBody = document.getElementById("info-body");
-    if (infoBody && !infoBody.classList.contains("info-empty")) {
-      for (const feat of PAYLOAD.geometry.features) {
-        if ((feat.properties.name || "").toLowerCase() === (TRAVEL_FROM || "Mongbwalu").toLowerCase() ||
-            (feat.properties.nom || "").toLowerCase() === "mongbalu") {
-          infoBody.innerHTML = infoHTML(feat);
-          break;
-        }
-      }
-    }
+    // Map view: re-render the focused zone's info box (or the placeholder) in
+    // the new language. applyStaticI18n early-returns for a non-empty info box,
+    // so this is the path that keeps a selected zone localized.
+    renderMapInfoBox();
   }
 }
 
@@ -1439,6 +1459,16 @@ function styleFn(feature) {
       fillOpacity: 0.88
     };
   }
+  if (activeView === "map" && ref === mapSelectedNom) {
+    // Focus highlight: a heavy dark border, distinct from the amber (#ffae42)
+    // hover. Keep whatever fill the layer would give, so the border is the
+    // focus signal and the fill still conveys the layer value/role.
+    const base = has ? {
+      fillColor: valueToColor(v, ref, layer),
+      fillOpacity: (currentDomain.isLog ? v <= 0 : v === 0) ? 0.55 : 0.85
+    } : { fillOpacity: 0 };
+    return Object.assign({ color: "#1a1a1a", weight: 2.4 }, base);
+  }
   if (!has) {
     return { color: "#111", weight: zoomWeight(0.35), fillOpacity: 0 };
   }
@@ -1476,10 +1506,17 @@ function fmt(v, kind) {
 function updateLayerMeta(layer) {
   let html = layer.source || "";
   if (layerUsesMatrix(layer)) {
-    const originLine = tf("ui.matrix_origin", {origin: matrixOriginDisplayName()});
+    const originLine = matrixOriginNom
+      ? tf("ui.matrix_origin", {origin: matrixOriginDisplayName()})
+      : t("ui.matrix_select_hint");
     html = (html ? html + "<br>" : "") + originLine;
   }
-  if (flowArcsOverlayActive()) {
+  if (flowArcsOverlayActive() && !flowHubNom) {
+    // Nothing focused: prompt to pick a zone instead of showing a stale
+    // "Selected location: <default>" line (flowHubDisplayName falls back to
+    // TRAVEL_FROM when the hub is null).
+    html = (html ? html + "<br>" : "") + t("ui.hints.flow");
+  } else if (flowArcsOverlayActive()) {
     const flowLayer = flowArcLayerDef();
     const hubLine = tf("ui.flow_hub", {hub: flowHubDisplayName()});
     html = (html ? html + "<br>" : "") + hubLine;
@@ -1591,10 +1628,10 @@ function infoHTML(feature) {
   h += "<tr><td>" + info.flowminder_may + "</td><td>" + fmt(z.flowminder_short_trips__outflow_20260524__outflow_20260524, "cal") + "</td></tr>";
   h += "</table>";
 
-  h += "<h4>" + tf("ui.info.distance_from", {origin: matrixOriginDisplayName()}) + "</h4>";
+  h += "<h4>" + tf("ui.info.distance_from", {origin: hubDisplayName(DISTANCE_ORIGIN_NOM)}) + "</h4>";
   h += "<table>";
-  h += "<tr><td>" + info.travel_time_h + "</td><td>" + fmt(matrixValue("osrm__travel_time", matrixOriginNom, ref, 60)) + "</td></tr>";
-  h += "<tr><td>" + info.road_distance_km + "</td><td>" + fmt(matrixValue("osrm__road_distance", matrixOriginNom, ref, 1)) + "</td></tr>";
+  h += "<tr><td>" + info.travel_time_h + "</td><td>" + fmt(matrixValue("osrm__travel_time", DISTANCE_ORIGIN_NOM, ref, 60)) + "</td></tr>";
+  h += "<tr><td>" + info.road_distance_km + "</td><td>" + fmt(matrixValue("osrm__road_distance", DISTANCE_ORIGIN_NOM, ref, 1)) + "</td></tr>";
   h += "</table>";
 
   if (z.genomic_sequence_count) {
@@ -1604,6 +1641,21 @@ function infoHTML(feature) {
     h += "</table>";
   }
   return h;
+}
+
+// Lightweight per-zone readout for the snapshot hover tooltip: the active
+// layer's label and this zone's value (matrix layers → travel time/distance
+// from the focused origin). "No data" when the layer has no value here.
+function layerHoverTooltipHTML(feature) {
+  const ref = feature.properties.nom;
+  const name = feature.properties.name || t("ui.case_tooltip.unnamed");
+  const layer = getLayer(layerSelect.value);
+  const v = currentValues.get(ref);
+  const has = v != null && !Number.isNaN(v);
+  const body = has
+    ? (layer ? layer.label + ": " : "") + fmtLegend(v, layer && layer.legend_round != null ? layer.legend_round : "int")
+    : t("ui.layer_no_data");
+  return "<strong>" + name + "</strong><br/>" + body;
 }
 
 const geoLayer = L.geoJSON(PAYLOAD.geometry, {
@@ -1628,8 +1680,9 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         }
         e.target.setStyle({weight: 1.6, color: "#ffae42"});
         e.target.bringToFront();
-        document.getElementById("info-body").className = "";
-        document.getElementById("info-body").innerHTML = infoHTML(feature);
+        // Hover no longer fills the info box (that follows the focused zone).
+        // Show a lightweight, layer-aware tooltip instead.
+        e.target.bindTooltip(layerHoverTooltipHTML(feature), {sticky: true, direction: "top"}).openTooltip(e.latlng);
       },
       mouseout: function(e) {
         if (activeView === "trends") {
@@ -1651,7 +1704,10 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
           geoLayer.resetStyle(e.target);
           return;
         }
+        if (e.target.getTooltip()) e.target.unbindTooltip();
         geoLayer.resetStyle(e.target);
+        // resetStyle re-applies styleFn, which already paints the focus border
+        // for the focused zone, so leaving a focused zone keeps its highlight.
       },
       click: function(e) {
         if (activeView === "trends") {
@@ -1684,24 +1740,18 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
           setEpiSelected(nom === epiSelectedNom ? null : nom);
           return;
         }
-        const layer = getLayer(layerSelect.value);
-        if (activeView === "map" && flowArcsOverlayActive()) {
+        if (activeView === "map") {
           L.DomEvent.stop(e);
-          // Re-clicking the current flow origin clears it (arcs disappear);
-          // empty-map click clears too -- see the map "click" handler below.
-          const nom = feature.properties.nom;
-          setFlowHub(nom === flowHubNom ? null : nom);
+          // One "focused zone" for the snapshot view: click to focus, click the
+          // focused zone again to clear. Focus drives the info box, the flow-arc
+          // origin, and the matrix travel origin. No click-to-zoom.
+          setMapSelection(feature.properties.nom);
           return;
         }
-        if (activeView === "map" && layerUsesMatrix(layer)) {
-          L.DomEvent.stop(e);
-          setMatrixOrigin(feature.properties.nom);
-          return;
-        }
-        map.fitBounds(e.target.getBounds(), {padding:[40,40]});
       },
       dblclick: function(e) {
         if (activeView === "context") return;
+        if (activeView === "map") return;   // no zoom-to-zone on the snapshot view
         if (activeView === "trends" && trendsScope === "national") {
           return;
         }
@@ -1734,10 +1784,9 @@ map.on("zoomend", function () {
 map.on("click", function() {
   if (activeView === "context") clearContextSelection();
   if (activeView === "epi-trends") setEpiSelected(null);
-  // Snapshot: clearing the flow origin (arcs off) is its deselect. Only while
-  // arcs are the active overlay -- matrix layers keep their origin, and their
-  // arcs are already suppressed so flowArcsOverlayActive() is false there.
-  if (activeView === "map" && flowArcsOverlayActive()) setFlowHub(null);
+  // Snapshot: clicking empty map clears the focused zone (info box → placeholder,
+  // highlight cleared, arcs cleared, matrix choropleth goes empty).
+  if (activeView === "map") setMapSelection(null);
 });
 
 // --- health-zone search ---
@@ -1866,27 +1915,12 @@ function selectHealthZone(nom) {
     map.fitBounds(layer.getBounds(), {padding: [40, 40], maxZoom: 10});
   } else if (activeView === "map") {
     clearSearchHighlight();
-    if (flowArcsOverlayActive()) {
-      setFlowHub(nom);
-    } else if (layerUsesMatrix(getLayer(layerSelect.value))) {
-      setMatrixOrigin(nom);
-    }
+    // Searching focuses the zone (persistent highlight + info box come from the
+    // focus state itself, not a transient overlay). Keep the zoom-to-frame: a
+    // searched zone may be offscreen, unlike an already-visible clicked one.
+    setMapSelection(nom);
     map.fitBounds(layer.getBounds(), {padding: [40, 40], maxZoom: 10});
-    layer.setStyle({weight: 1.6, color: "#ffae42"});
-    layer.bringToFront();
-    searchHighlightLayer = layer;
-    const infoBody = document.getElementById("info-body");
-    if (infoBody) {
-      infoBody.className = "";
-      infoBody.innerHTML = infoHTML(feature);
-    }
-    searchHighlightTimer = setTimeout(function() {
-      if (searchHighlightLayer === layer && layer !== contextSelectedLayer) {
-        geoLayer.resetStyle(layer);
-      }
-      searchHighlightLayer = null;
-      searchHighlightTimer = null;
-    }, 2500);
+    // No transient timer: the focus highlight is persistent via styleFn.
   }
 
   if (zoneSearchInput) zoneSearchInput.value = displayName;
@@ -3190,12 +3224,14 @@ function syncMarkerToggles(from) {
 }
 
 function caseMarkerTooltip(c) {
-  const totalDeaths = (c.confirmed_deaths || 0) + (c.suspected_deaths || 0);
+  const row = function(label, val) {
+    return "<div class='case-tt-row'><span>" + label + "</span><span>" + fmt(Number(val) || 0) + "</span></div>";
+  };
   return (
-    "<strong>" + (c.name || t("ui.case_tooltip.unnamed")) + "</strong><br/>" +
-    t("ui.case_tooltip.confirmed") + ": " + c.confirmed + "  ·  " +
-    t("ui.case_tooltip.suspected") + ": " + c.suspected +
-    (totalDeaths > 0 ? "<br/>" + t("ui.case_tooltip.deaths") + ": " + totalDeaths : "")
+    "<strong>" + (c.name || t("ui.case_tooltip.unnamed")) + "</strong>" +
+    row(t("ui.case_tooltip.suspected_cases"), c.suspected) +
+    row(t("ui.case_tooltip.confirmed_cases"), c.confirmed) +
+    row(t("ui.case_tooltip.confirmed_deaths"), c.confirmed_deaths)
   );
 }
 
@@ -3235,15 +3271,8 @@ function handleCaseMarkerClick(nom) {
     return true;
   }
   if (activeView === "map") {
-    if (flowArcsOverlayActive()) {
-      setFlowHub(nom === flowHubNom ? null : nom);
-      return true;
-    }
-    // Matrix layers need an origin, so no toggle-to-null here.
-    if (layerUsesMatrix(getLayer(layerSelect.value))) {
-      setMatrixOrigin(nom);
-      return true;
-    }
+    setMapSelection(nom);
+    return true;
   }
   return false;
 }
@@ -3677,16 +3706,9 @@ wireModal("terms-modal", ["terms-btn", "header-terms-btn"], "terms-close");
   }
 })();
 
-// Pre-populate the zone info panel with Mongbwalu.
-(function preloadMongbwalu() {
-  for (const feat of PAYLOAD.geometry.features) {
-    if ((feat.properties.nom || "").toLowerCase() === "mongbalu") {
-      document.getElementById("info-body").className = "";
-      document.getElementById("info-body").innerHTML = infoHTML(feat);
-      return;
-    }
-  }
-})();
+// The snapshot info box starts empty (placeholder) until a zone is focused.
+// (The #info-body element keeps its `info-empty` class from chrome.py, and
+// applyStaticI18n in initDashboardI18n fills it with the placeholder string.)
 
 (function initDashboardI18n() {
   LAYERS = (I18N.layers && I18N.layers[currentLang]) || PAYLOAD.layers;
