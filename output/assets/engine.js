@@ -610,6 +610,20 @@ function importationPressure(sourceNom, movers) {
   return zoneConfirmedCases(sourceNom);
 }
 
+// Legend icon for a flow arrow: a horizontal line with a chevron in the
+// middle, matching the on-map arrows drawn by addFlowWingMarker() (same
+// two-stroke chevron, so the legend reads as the same symbol). Used by the
+// snapshot legend (updateLegend) and mirrored in the static Spatial Risk
+// legend markup in common/chrome.py.
+function flowArrowSwatch(color) {
+  return "<span class='arrow-swatch'>" +
+    "<svg xmlns='http://www.w3.org/2000/svg' width='26' height='12' viewBox='0 0 26 12'>" +
+    "<line x1='1' y1='6' x2='25' y2='6' stroke='" + color + "' stroke-width='1.6' stroke-linecap='round'/>" +
+    "<line x1='10' y1='2' x2='16' y2='6' stroke='" + color + "' stroke-width='1.6' stroke-linecap='round'/>" +
+    "<line x1='10' y1='10' x2='16' y2='6' stroke='" + color + "' stroke-width='1.6' stroke-linecap='round'/>" +
+    "</svg></span>";
+}
+
 function addFlowWingMarker(pts, color, opts) {
   opts = opts || {};
   if (!pts || pts.length < 2) return;
@@ -1525,15 +1539,17 @@ function updateLegend(layer) {
       "<span class='swatch' style='background:" + MATRIX_ORIGIN_FILL + "'></span>" + t("ui.legend.matrix_origin")
     );
   }
+  // Flow arrows go on their own line(s) below the inline zero/no-data row so
+  // the arrow icons read clearly and don't crowd the gray legend.
+  var flowHTML = "";
   if (flowArcsOverlayActive()) {
-    grayParts.push(
-      "<span class='swatch' style='background:" + FLOW_OUT_COLOR + "'></span>" + t("ui.legend.flow_out"),
-      "<span class='swatch' style='background:" + FLOW_IN_COLOR + "'></span>" + t("ui.legend.flow_in")
-    );
+    flowHTML =
+      "<div class='legend-flow-row'>" + flowArrowSwatch(FLOW_OUT_COLOR) + t("ui.legend.flow_out") + "</div>" +
+      "<div class='legend-flow-row'>" + flowArrowSwatch(FLOW_IN_COLOR) + t("ui.legend.flow_in") + "</div>";
     const scaleEl = document.getElementById("legend-scale");
     scaleEl.textContent = (scaleEl.textContent || "") + " · " + t("ui.legend.flow_width");
   }
-  document.getElementById("legend-gray").innerHTML = grayParts.join(" · ");
+  document.getElementById("legend-gray").innerHTML = grayParts.join(" · ") + flowHTML;
 }
 
 function infoHTML(feature) {
