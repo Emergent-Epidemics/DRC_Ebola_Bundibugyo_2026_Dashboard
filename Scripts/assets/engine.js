@@ -1641,7 +1641,11 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         }
         if (activeView === "epi-trends") {
           L.DomEvent.stop(e);
-          setEpiSelected(feature.properties.nom);
+          // Re-clicking the already-selected zone toggles it off. Any other
+          // zone switches the selection to it. (Clicking empty map also
+          // clears -- see the map "click" handler below.)
+          const nom = feature.properties.nom;
+          setEpiSelected(nom === epiSelectedNom ? null : nom);
           return;
         }
         const layer = getLayer(layerSelect.value);
@@ -3154,6 +3158,15 @@ for (const c of ACTIVE_CASES) {
   const m = L.marker([c.lat, c.lon], {icon: caseIcon});
   m._bdbvCase = c;
   m.bindTooltip(caseMarkerTooltip(c), {direction:"top", offset:[0,-8]});
+  // In the Spatial risk view the marker sits above its zone polygon (in the
+  // marker pane) and would otherwise swallow the click, leaving the zone
+  // unselectable via its own case dot. One marker == one zone (c.nom), so
+  // route the click to the same select/toggle logic as clicking the polygon.
+  m.on("click", function(e) {
+    if (activeView !== "epi-trends") return;
+    L.DomEvent.stop(e);
+    setEpiSelected(c.nom === epiSelectedNom ? null : c.nom);
+  });
   caseLayer.addLayer(m);
 }
 
