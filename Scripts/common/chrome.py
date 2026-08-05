@@ -296,7 +296,7 @@ __NAV_LINKS__
     </div>
     <div id="epi-flow-legend" style="margin-top:10px;font-size:11px;color:#5c574f;line-height:1.35">
       <div style="margin-bottom:4px">
-        <span class="swatch" style="background:#b23b2e"></span>
+        <span class="arrow-swatch"><svg xmlns="http://www.w3.org/2000/svg" width="26" height="12" viewBox="0 0 26 12"><line x1="1" y1="6" x2="25" y2="6" stroke="#b23b2e" stroke-width="1.6" stroke-linecap="round"/><line x1="10" y1="2" x2="16" y2="6" stroke="#b23b2e" stroke-width="1.6" stroke-linecap="round"/><line x1="10" y1="10" x2="16" y2="6" stroke="#b23b2e" stroke-width="1.6" stroke-linecap="round"/></svg></span>
         <span data-i18n="ui.legend.flow_in">inflow to selected location</span>
       </div>
       <div data-i18n="ui.legend.importation_pressure_width">Red inflows only; line width ∝ each origin's modelled import-force contribution to the selected zone (next-week forecast), scaled 0–1 vs that zone's top source</div>
