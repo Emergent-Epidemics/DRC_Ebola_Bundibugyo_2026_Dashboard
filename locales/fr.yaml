@@ -82,8 +82,8 @@ scope_tags:
 ui:
   hints:
     context: "Cliquez sur une zone de santé pour voir le contexte de la réponse"
-    travel: "Cliquez sur une zone de santé pour définir l'origine du trajet (double-clic pour zoomer)"
-    flow: "Cliquez sur une zone de santé pour afficher les flux de mobilité (double-clic pour zoomer)"
+    travel: "Cliquez sur une zone de santé pour définir l'origine du trajet"
+    flow: "Cliquez sur une zone de santé pour afficher les flux de mobilité"
     flow_no_data: "Aucune donnée de mobilité disponible pour {zone}."
   methods_btn: "Contributeurs, données et méthodes"
   terms_btn: "Conditions d'utilisation"

@@ -82,8 +82,8 @@ scope_tags:
 ui:
   hints:
     context: "Click a health zone to see response context"
-    travel: "Click a health zone to set travel origin (double-click to zoom)"
-    flow: "Click a health zone to show movement flows (double-click to zoom)"
+    travel: "Click a health zone to set travel origin"
+    flow: "Click a health zone to show movement flows"
     flow_no_data: "No movement data available for {zone}."
   methods_btn: "Contributors, Data, and Methods"
   terms_btn: "Terms of Use"

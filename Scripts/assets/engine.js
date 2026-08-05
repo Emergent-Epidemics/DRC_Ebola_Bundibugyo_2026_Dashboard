@@ -1524,7 +1524,12 @@ function updateLayerMeta(layer) {
       : t("ui.matrix_select_hint");
     html = (html ? html + "<br>" : "") + originLine;
   }
-  if (flowArcsOverlayActive()) {
+  if (flowArcsOverlayActive() && !flowHubNom) {
+    // Nothing focused: prompt to pick a zone instead of showing a stale
+    // "Selected location: <default>" line (flowHubDisplayName falls back to
+    // TRAVEL_FROM when the hub is null).
+    html = (html ? html + "<br>" : "") + t("ui.hints.flow");
+  } else if (flowArcsOverlayActive()) {
     const flowLayer = flowArcLayerDef();
     const hubLine = tf("ui.flow_hub", {hub: flowHubDisplayName()});
     html = (html ? html + "<br>" : "") + hubLine;
