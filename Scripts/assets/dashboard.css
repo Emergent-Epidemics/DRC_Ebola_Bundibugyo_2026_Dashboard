@@ -137,7 +137,10 @@
   .zone-search-empty {
     padding:8px; font-size:12px; color:#888; font-style:italic;
   }
-  #legend       { bottom:calc(var(--view-chrome-height) + 12px); left:12px; max-width:300px; }
+  #legend       { bottom:calc(var(--view-chrome-height) + 12px); left:12px; width:max-content; max-width:min(360px, calc(100vw - 24px)); }
+  /* Size the legend to its widest line so the (sometimes long) layer title
+     stays on one line instead of wrapping. */
+  #legend-title { white-space:nowrap; }
   #info         { top:12px; right:12px; max-width:340px; max-height:80vh; overflow-y:auto; }
   /* Trends tab right-hand rail (map left, plots column right) -- same
      mechanics as #epi-trends-panel/#epi-split-handle below, with its own
@@ -1079,6 +1082,12 @@
   label { display:block; margin-top:6px; font-size:12px; color:#bbb; }
   .swatch { display:inline-block; width:18px; height:12px; margin-right:6px; vertical-align:middle; border:1px solid #444; }
   .swatch-no-data { background:transparent !important; border:1px dashed #888; }
+  /* Flow-arrow legend icon: a line with a mid-line chevron, mirroring the
+     on-map arrows drawn by addFlowWingMarker() in engine.js (see flowArrowSwatch). */
+  .arrow-swatch { display:inline-block; width:26px; height:12px; margin-right:6px; vertical-align:middle; line-height:0; }
+  .arrow-swatch svg { display:block; overflow:visible; }
+  /* Each flow-arrow legend entry sits on its own line below the gray row. */
+  .legend-flow-row { margin-top:3px; }
   .legend-bar { display:block; width:240px; height:12px; }
   .legend-ticks { display:flex; justify-content:space-between; font-size:10px; color:#aaa; width:240px; margin-top:2px; }
   .legend-ticks span { display:inline-block; white-space:nowrap; }
