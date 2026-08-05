@@ -185,9 +185,11 @@ function setMatrixOrigin(nom) {
   syncMatrixUi();
 }
 function setFlowHub(nom) {
-  if (!nom) return;
-  flowHubNom = nom;
-  flowHubUserSelected = true;
+  // Snapshot's flow-arc origin. A null nom clears it (arcs disappear) -- the
+  // tab's "nothing selected" state. Matrix-layer origins are separate and
+  // always stay set, since a matrix choropleth needs an origin to render.
+  flowHubNom = nom || null;
+  flowHubUserSelected = !!nom;
   recompute();
   syncMatrixUi();
 }
@@ -1651,7 +1653,10 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         }
         if (activeView === "context") {
           L.DomEvent.stop(e);
-          selectContextZone(feature.properties.nom, e.target);
+          // Re-clicking the selected zone toggles it off (empty-map click also
+          // clears -- see the map "click" handler below).
+          if (feature.properties.nom === contextSelectedNom) clearContextSelection();
+          else selectContextZone(feature.properties.nom, e.target);
           return;
         }
         if (activeView === "epi-trends") {
@@ -1666,7 +1671,10 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         const layer = getLayer(layerSelect.value);
         if (activeView === "map" && flowArcsOverlayActive()) {
           L.DomEvent.stop(e);
-          setFlowHub(feature.properties.nom);
+          // Re-clicking the current flow origin clears it (arcs disappear);
+          // empty-map click clears too -- see the map "click" handler below.
+          const nom = feature.properties.nom;
+          setFlowHub(nom === flowHubNom ? null : nom);
           return;
         }
         if (activeView === "map" && layerUsesMatrix(layer)) {
@@ -1710,6 +1718,10 @@ map.on("zoomend", function () {
 map.on("click", function() {
   if (activeView === "context") clearContextSelection();
   if (activeView === "epi-trends") setEpiSelected(null);
+  // Snapshot: clearing the flow origin (arcs off) is its deselect. Only while
+  // arcs are the active overlay -- matrix layers keep their origin, and their
+  // arcs are already suppressed so flowArcsOverlayActive() is false there.
+  if (activeView === "map" && flowArcsOverlayActive()) setFlowHub(null);
 });
 
 // --- health-zone search ---
@@ -3187,19 +3199,46 @@ function refreshMarkerTooltips() {
   });
 }
 
+// A case marker sits in the marker pane above its zone polygon and (unlike a
+// path) does not bubble clicks, so without this it would swallow the click and
+// leave the zone unselectable via its own case dot. One marker == one zone
+// (c.nom), so route the click to the same select/toggle logic as clicking the
+// polygon in whichever view is active. Returns true if it handled the click.
+function handleCaseMarkerClick(nom) {
+  if (!nom) return false;
+  if (activeView === "epi-trends") {
+    setEpiSelected(nom === epiSelectedNom ? null : nom);
+    return true;
+  }
+  if (activeView === "context") {
+    if (nom === contextSelectedNom) clearContextSelection();
+    else {
+      const lyr = findGeoLayerByNom(nom);
+      if (lyr) selectContextZone(nom, lyr);
+    }
+    return true;
+  }
+  if (activeView === "map") {
+    if (flowArcsOverlayActive()) {
+      setFlowHub(nom === flowHubNom ? null : nom);
+      return true;
+    }
+    // Matrix layers need an origin, so no toggle-to-null here.
+    if (layerUsesMatrix(getLayer(layerSelect.value))) {
+      setMatrixOrigin(nom);
+      return true;
+    }
+  }
+  return false;
+}
+
 for (const c of ACTIVE_CASES) {
   if (!isFinite(c.lat) || !isFinite(c.lon)) continue;
   const m = L.marker([c.lat, c.lon], {icon: caseIcon});
   m._bdbvCase = c;
   m.bindTooltip(caseMarkerTooltip(c), {direction:"top", offset:[0,-8]});
-  // In the Spatial risk view the marker sits above its zone polygon (in the
-  // marker pane) and would otherwise swallow the click, leaving the zone
-  // unselectable via its own case dot. One marker == one zone (c.nom), so
-  // route the click to the same select/toggle logic as clicking the polygon.
   m.on("click", function(e) {
-    if (activeView !== "epi-trends") return;
-    L.DomEvent.stop(e);
-    setEpiSelected(c.nom === epiSelectedNom ? null : c.nom);
+    if (handleCaseMarkerClick(c.nom)) L.DomEvent.stop(e);
   });
   caseLayer.addLayer(m);
 }
