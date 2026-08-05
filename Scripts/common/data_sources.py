@@ -93,6 +93,7 @@ __all__ = [
     '_f',
     '_i',
     '_round_coords',
+    '_zone_centre',
     'load_features_from_geojson',
     'build_province_boundaries',
     '_load_build_geojson_properties',
