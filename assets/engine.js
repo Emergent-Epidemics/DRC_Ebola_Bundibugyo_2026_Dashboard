@@ -1445,19 +1445,28 @@ function styleFn(feature) {
   const v = currentValues.get(ref);
   const has = v != null && !Number.isNaN(v);
   const layer = getLayer(layerSelect.value);
+  // In Provincial scope, suppress ALL zone-level strokes so the province
+  // outlines (drawn in the province-outline pane) are the only line work. Fills
+  // are untouched, so the choropleth (incl. zero-case muted fills) still reads;
+  // the no-data branch never fires in trends (recomputeTrendsMap coalesces
+  // missing values to 0), so no zone goes fill-less/invisible.
+  const prov = function (s) {
+    if (activeView === "trends" && trendsScope === "province") s.weight = 0;
+    return s;
+  };
   if (isHubZone(ref, layer)) {
-    return {
+    return prov({
       color: "#111", weight: 1.6,
       fillColor: MATRIX_ORIGIN_FILL,
       fillOpacity: 0.92
-    };
+    });
   }
   if (isEpicenterZone(ref, layer)) {
-    return {
+    return prov({
       color: "#111", weight: zoomWeight(0.5),
       fillColor: EPICENTER_FILL,
       fillOpacity: 0.88
-    };
+    });
   }
   if (activeView === "map" && ref === mapSelectedNom) {
     // Focus highlight: a heavy dark border, distinct from the amber (#ffae42)
@@ -1470,17 +1479,17 @@ function styleFn(feature) {
     return Object.assign({ color: "#1a1a1a", weight: 2.4 }, base);
   }
   if (!has) {
-    return { color: "#111", weight: zoomWeight(0.35), fillOpacity: 0 };
+    return prov({ color: "#111", weight: zoomWeight(0.35), fillOpacity: 0 });
   }
   const isOutbreak = layer && layer.palette === "outbreak";
   const dataOpacity = isOutbreak ? 0.72 : 0.85;
   const mutedOpacity = isOutbreak ? 0.48 : 0.55;
   const isZero = currentDomain.isLog ? v <= 0 : v === 0;
-  return {
-    color:"#111", weight:zoomWeight(0.35),
+  return prov({
+    color: "#111", weight: zoomWeight(0.35),
     fillColor: valueToColor(v, ref, layer),
     fillOpacity: isZero ? mutedOpacity : dataOpacity
-  };
+  });
 }
 
 function fmtLegend(v, round) {
@@ -1665,6 +1674,13 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
       mouseover: function(e) {
         if (activeView === "trends") {
           if (trendsScope === "national") return;
+          if (trendsScope === "province") {
+            // Highlight the parent province's outline (matches click-to-select),
+            // rather than the individual zone. Gated inside setTrendsProvinceHover
+            // to no-op once a province is selected.
+            setTrendsProvinceHover(feature.properties.province);
+            return;
+          }
           e.target.setStyle({weight: 1.6, color: "#ffae42"});
           e.target.bringToFront();
           return;
@@ -1686,6 +1702,12 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
       },
       mouseout: function(e) {
         if (activeView === "trends") {
+          if (trendsScope === "province") {
+            // Zone was never restyled on hover in province scope; just clear the
+            // province-outline highlight.
+            setTrendsProvinceHover(null);
+            return;
+          }
           geoLayer.resetStyle(e.target);
           if (trendsScope === "health_zone" && trendsSelectedKey &&
               feature.properties.nom === trendsSelectedKey) {
