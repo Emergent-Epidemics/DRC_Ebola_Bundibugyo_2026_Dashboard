@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from shapely import STRtree, set_precision
-from shapely.geometry import mapping, shape
+from shapely.geometry import MultiPolygon, Polygon, mapping, shape
 from shapely.ops import polygonize, polylabel, unary_union
 from shapely.validation import make_valid
 
@@ -616,8 +616,6 @@ def _strip_slivers(geom, min_area: float):
     Returns ``(cleaned_geom, dropped_ring_max, dropped_part_max)`` -- the largest
     dropped ring/part area seen (0.0 if none), for the caller to log and sanity-check.
     """
-    from shapely.geometry import Polygon, MultiPolygon
-
     dropped_ring_max = 0.0
     dropped_part_max = 0.0
 
@@ -636,16 +634,19 @@ def _strip_slivers(geom, min_area: float):
         return clean_polygon(geom), dropped_ring_max, dropped_part_max
 
     if geom.geom_type == "MultiPolygon":
-        keep_parts = []
-        for part in geom.geoms:
-            if part.area >= min_area:
-                keep_parts.append(clean_polygon(part))
-            else:
-                dropped_part_max = max(dropped_part_max, part.area)
-        if not keep_parts:
-            # Defensive: never drop every part (would erase a province). Keep the
-            # largest untouched; the caller's invariant still guards the roster.
-            keep_parts = [clean_polygon(max(geom.geoms, key=lambda p: p.area))]
+        parts = list(geom.geoms)
+        kept = [p for p in parts if p.area >= min_area]
+        if not kept:
+            # Defensive: never erase a province. Keep the largest part; only the
+            # genuinely-dropped remainder counts toward dropped_part_max.
+            largest = max(parts, key=lambda p: p.area)
+            kept = [largest]
+            dropped = [p for p in parts if p is not largest]
+        else:
+            dropped = [p for p in parts if p.area < min_area]
+        for p in dropped:
+            dropped_part_max = max(dropped_part_max, p.area)
+        keep_parts = [clean_polygon(p) for p in kept]
         if len(keep_parts) == 1:
             return keep_parts[0], dropped_ring_max, dropped_part_max
         return MultiPolygon(keep_parts), dropped_ring_max, dropped_part_max

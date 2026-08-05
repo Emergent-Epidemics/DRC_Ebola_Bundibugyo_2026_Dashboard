@@ -52,3 +52,15 @@ def test_strip_slivers_keeps_multiple_large_parts():
     assert cleaned.geom_type == "MultiPolygon"
     assert len(cleaned.geoms) == 2
     assert part_max == 0.0
+
+
+def test_strip_slivers_keeps_largest_when_all_parts_sub_threshold():
+    # Pathological: every part is below threshold. Never erase the province --
+    # keep the largest, and report only the genuinely-dropped part.
+    big = Polygon(_square(0, 0, 0.02))       # area 4e-4 (< 1e-3 threshold)
+    small = Polygon(_square(100, 100, 0.01))  # area 1e-4, actually dropped
+    mp = MultiPolygon([big, small])
+    cleaned, ring_max, part_max = ds._strip_slivers(mp, ds.PROVINCE_SLIVER_MAX)
+    assert cleaned.geom_type == "Polygon"
+    assert abs(cleaned.area - 4e-4) < 1e-12
+    assert abs(part_max - 1e-4) < 1e-12      # the dropped one, not the kept one
