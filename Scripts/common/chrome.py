@@ -194,7 +194,7 @@ __NAV_LINKS__
     <strong data-i18n="ui.zone">Zone</strong>
     <button id="info-toggle" type="button" data-i18n-aria="ui.aria.toggle_zone" data-i18n-title="ui.aria.collapse_zone" aria-label="Toggle zone details" title="Collapse / expand zone details">−</button>
   </div>
-  <div id="info-body" class="info-empty" data-i18n="ui.hover_zone">Hover a health zone.</div>
+  <div id="info-body" class="info-empty" data-i18n="ui.hover_zone">Select a health zone.</div>
 </div>
 <div id="view-switcher">
   <div id="footer-links">
