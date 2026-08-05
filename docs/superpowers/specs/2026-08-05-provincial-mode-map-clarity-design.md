@@ -2,8 +2,9 @@
 
 **Date:** 2026-08-05
 **Branch:** `provincial-mode-map-clarity` (off `main`)
-**Status:** Design approved; critical-review points §§1–6 incorporated
-(see `…-design-review.md`); pending final user sign-off
+**Status:** Design approved; critical-review points §§1–7 incorporated, including
+the second-look addendum (§7 province roster + §2b retraction); see
+`…-design-review.md`. Pending final user sign-off.
 
 ## Problem
 
@@ -49,34 +50,38 @@ outbreak map does not communicate that *provinces* are the selectable unit:
 ### 1. Hide health-zone borders in Provincial scope — `Scripts/assets/engine.js`
 
 `styleFn` has several return points, each hard-coding `color`/`weight` (hub zone,
-epicenter zone, no-data zone, data zone — roughly `engine.js:1461`–`1496`). Rather
-than edit each branch, compute the style as today and then apply a single
-suppression step just before returning, in the non-epi path:
+epicenter zone, no-data zone, data zone — roughly `engine.js:1461`–`1496`); there
+is no single "computed style" object to amend. So compute the style as today, then
+apply one suppression step just before returning, in the non-epi path:
 
 ```js
 // after the normal style object is chosen, before returning:
 if (activeView === "trends" && trendsScope === "province") {
-  style.weight = 0;               // no zone-level stroke in Provincial scope
-  // no-data zones (fillOpacity 0) would otherwise vanish — give them a
-  // faint neutral fill so the province area reads as continuous:
-  if (style.fillOpacity === 0) {
-    style.fillColor = NO_DATA_PROVINCE_FILL;   // faint neutral (define as const)
-    style.fillOpacity = NO_DATA_PROVINCE_OPACITY;  // low, e.g. ~0.06
-  }
+  style.weight = 0;   // no zone-level stroke in Provincial scope
 }
 ```
 
+(Refactoring the branches to build a `style` variable and fall through to a single
+`return style` is the cleanest way to attach this; the implementer may instead add
+an early Provincial-scope branch — either is fine as long as every non-epi branch
+is covered.)
+
 Notes:
-- The blanket `weight: 0` intentionally suppresses **all** zone-level strokes in
-  Provincial scope, including any hub/epicenter emphasis borders. In practice the
-  trends confirmed-cases choropleth is not a matrix/epicenter layer, so
-  `isHubZone` / `isEpicenterZone` are not reached here anyway (`engine.js:110`,
-  `113`) — but suppressing them unconditionally is the correct behaviour for
-  Provincial scope regardless.
-- **No-data zones** (null value → `fillOpacity: 0`, border-only today) get a faint
-  neutral fill in Provincial scope only, so they don't become blank punch-throughs
-  inside a province. Data zones keep their choropleth fill; only their stroke is
-  removed.
+- **No-data zones do not go invisible** (verified against `recomputeTrendsMap` →
+  `getTrendsConfirmedAt`, `engine.js:2786`, `2741`). In trends scope
+  `recomputeTrendsMap` sets `currentValues` for *every* geometry feature, and
+  `getTrendsConfirmedAt` coalesces any missing zone/series to `0`. So `has` in
+  `styleFn` is always true and the border-only `!has` branch (`engine.js:1486`)
+  never runs in trends — there are no fill-less zones to blank out. Data zones
+  (including zero-case zones, which take the data branch with a muted fill) keep
+  their fill; only the stroke is removed. No faint-fill fallback is needed.
+- **Hub/epicenter branches are suppressed too, by intent.** `styleFn` reads
+  `getLayer(layerSelect.value)` even in trends (`engine.js:1460`), and
+  `isHubZone` / `isEpicenterZone` depend only on that layer's matrix/epicenter
+  config, not the view (`engine.js:104`–`113`) — so if `layerSelect` carries an
+  epicenter/matrix layer, those emphasis borders *can* fire on the trends map. The
+  blanket `weight: 0` strips them in Provincial scope. This is deliberate:
+  Provincial scope removes **all** zone-level strokes, whatever the layer.
 - The province outlines live in the separate `province-outline` map pane (drawn on
   top), so with zone strokes gone they become the only line work. Adjacent data
   zones with different fill values still show a colour boundary — that is the
@@ -119,6 +124,16 @@ branch changes.
 
 ### 3. Clean province outlines — `Scripts/common/data_sources.py`
 
+> **This is not a cosmetic-only change.** `build_province_boundaries()` doubles as
+> the **authoritative province roster**: `payload.py:107` derives `province_names`
+> from its features and feeds them to `load_dashboard_plots(...)` (plot
+> generation), and `engine.js` builds the Trends search dropdown from the same
+> features (`TRENDS_LOCATION_INDEX`). If the new pipeline ever drops a province —
+> zones collapsing to empty under `set_precision`, or a `merged.is_empty` filter
+> (`data_sources.py:744`) — that province silently vanishes from **plots and
+> search**, not just the map outline. Therefore a **province-count invariant** is
+> part of this change (see below), and it matters more than the interior-ring count.
+
 In `build_province_boundaries()`, eliminate the sliver holes, before the existing
 `simplify` / coordinate-round steps:
 
@@ -152,6 +167,14 @@ spike `coverage_union_all` after the snap (verifying the installed shapely/GEOS
 version on the build box first); if it cleanly removes the slivers it can replace
 step 3 and its threshold. Otherwise the strip-holes helper stands.
 
+**Province-count invariant (from review §7) — the load-bearing guard.** Capture
+the set of distinct input provinces before the union loop, and assert the output
+has **exactly one feature per input province** (same count, e.g. 26 in → 26 out),
+each retaining its `province` property. Fail the build loudly if a province would
+be dropped — silent province loss breaks plot generation and Trends search, not
+just the outline. This assertion, not the ring count, is the primary success gate
+for §3.
+
 **Threshold as a guard, not a hand-tuned magic number (from review §5).** The
 donut-hole-free assumption is load-bearing, so make it self-checking: after
 cleanup, log the *largest* interior-ring area that was dropped, and assert it stays
@@ -167,11 +190,14 @@ interior-ring count collapses without eroding the exterior outline).
 ## Success criteria
 
 - Provincial scope: no per-zone strokes on the map; province outlines are the only
-  line work; data-zone choropleth fills still render; no-data zones show a faint
-  neutral fill rather than blank gaps.
+  line work; all zone fills (including zero-case zones) still render as today.
 - Provincial scope: hovering the map highlights the parent province's outline while
   no province is selected; after a province is selected, hover gives no feedback;
   clicking selects the province (unchanged).
+- **Province-count invariant holds: `build_province_boundaries()` returns exactly
+  one feature per input province (count unchanged), each keeping its `province`
+  property — asserted in the builder, so a geometry regression fails the build
+  loudly.** Trends search and plot generation still list every province.
 - Interior-ring (hole) count across all province boundary features drops to ~0
   (verified by re-running the geometry check used during diagnosis), each province's
   exterior outline is unchanged, and the largest dropped interior-ring area is
@@ -184,12 +210,12 @@ interior-ring count collapses without eroding the exterior outline).
 
 ## Files touched
 
-- `Scripts/assets/engine.js` — `styleFn` (province-scope stroke suppression +
-  no-data faint-fill), two new style constants (`NO_DATA_PROVINCE_FILL` /
-  `NO_DATA_PROVINCE_OPACITY`), and the `geoLayer` `mouseover` / `mouseout` province
-  branch (route to `setTrendsProvinceHover`).
+- `Scripts/assets/engine.js` — `styleFn` (province-scope stroke suppression via a
+  single `weight: 0` step) and the `geoLayer` `mouseover` / `mouseout` province
+  branch (route to `setTrendsProvinceHover`). No new style constants.
 - `Scripts/common/data_sources.py` — `build_province_boundaries()` (make_valid →
   set_precision → make_valid, union, drop-slivers) plus a small strip-small-holes
-  helper and the largest-dropped-ring logging/assertion.
+  helper, the **province-count invariant assertion**, and the largest-dropped-ring
+  logging/assertion.
 - Rebuild of `output/` + served `assets/` and the inlined payload in the HTML
   pages (build artifact).

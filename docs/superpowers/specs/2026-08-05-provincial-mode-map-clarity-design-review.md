@@ -23,6 +23,13 @@ hover section that should be corrected before this is handed to an implementer.
 
 Severity legend: 🔴 blocking / must resolve · 🟠 should address · 🟡 minor / nit.
 
+> **Second-look addendum (below the original findings)** revises two items after a
+> deeper read: it **retracts §2(b)** (no-data zones do *not* go invisible — the
+> trends map coalesces missing values to `0`) and adds a **new 🔴 finding** — the
+> geometry function doubles as the authoritative province roster, so the change's
+> blast radius is wider than the spec's "Files touched" admits. Read the addendum
+> alongside the original list.
+
 ---
 
 ## 🔴 1. The "national / health_zone visually unchanged" criterion is contradicted by the geometry change
@@ -204,13 +211,88 @@ empty/invalid province.
 
 ---
 
+## Second look — corrections and a new finding
+
+A deeper pass through the trends data path (`recomputeTrendsMap` →
+`getTrendsConfirmedAt`) and the payload builder (`common/payload.py`) changed my
+read on two points.
+
+### 🔴 7. `build_province_boundaries()` is also the authoritative province roster — the change's blast radius is wider than stated
+
+This is the most important thing the first pass missed. The function's output is
+not consumed only as map outlines. Its **feature set defines the list of
+provinces** used elsewhere:
+
+```
+payload.py:103  province_boundaries = build_province_boundaries()
+payload.py:107  province_names = sorted({ ...feat.properties.province... })   # <- derived from the features
+payload.py:112  onset_trends = load_dashboard_plots(zone_noms=..., provinces=province_names)
+```
+
+and on the client:
+
+```
+engine.js:1766  (PAYLOAD.province_boundaries.features || []).forEach(...)   # builds TRENDS_LOCATION_INDEX
+```
+
+So if the new snap → union → strip pipeline ever drops a province — e.g. a
+small province whose zones collapse to empty under `set_precision`, or a union
+that `merged.is_empty`-filters out (`data_sources.py:744`) — that province
+silently disappears from **plot generation and the Trends search dropdown**, not
+just from the map. The spec frames §3 as a cosmetic outline cleanup and its
+"Files touched" lists only the outline consumers; the real coupling is broader.
+
+**Recommendation:** Add a hard invariant to the success criteria and to the code:
+*"`build_province_boundaries()` returns exactly one feature per input province
+(count unchanged, 26 in → 26 out), each retaining its `province` property."*
+Assert it in the builder so a geometry regression fails loudly instead of quietly
+shrinking the province list. This invariant matters more than the interior-ring
+count the spec currently leads with.
+
+### ↩︎ Retraction of §2(b) — no-data zones do *not* become invisible
+
+My first pass warned that forcing `weight: 0` would make no-data zones vanish
+(no fill + no stroke). That is **wrong for the trends map.** `recomputeTrendsMap`
+fills `currentValues` via `getTrendsConfirmedAt`, which coalesces a missing
+series to `0`:
+
+```
+engine.js:2743  if (!ts || !ts.by_nom) return 0;
+engine.js:2745  if (!series || dateIdx < 0 || dateIdx >= series.length) return 0;
+```
+
+So in trends scope every zone has a numeric value, `has` in `styleFn` is always
+true, and the `!has` no-data branch (`engine.js:1442`) never executes. Zero-case
+zones take the data branch with a muted (but non-zero) fill opacity, so they stay
+visible after the stroke is removed. **No invisible holes.** The §2(a) point
+(there is no single "computed style" to amend — four hard-coded return branches,
+so name the exact edit point) still stands.
+
+### §2(c) refined — hub/epicenter borders *can* structurally fire in trends
+
+Worth confirming rather than dismissing: `styleFn` reads `getLayer(layerSelect
+.value)` even in trends view (it only early-returns for `epi-trends`, not
+`trends`), and `isHubZone` / `isEpicenterZone` depend solely on that layer's
+matrix/epicenter config (`engine.js:104`–`112`) — not on the active view. So if
+`layerSelect` is left on an epicenter/matrix layer, those emphasis borders can
+appear on the trends map, and a blanket `weight: 0` would strip them. Low
+likelihood (trends normally pins confirmed-cases display), but the spec should
+state the intended behaviour rather than leave it to a blanket rule.
+
+---
+
 ## Suggested pre-implementation checklist
 
 1. Fix the national/health_zone "visually unchanged" wording (§1). **Blocking** —
    it's a false guarantee.
-2. Specify the no-data-zone appearance and the concrete `styleFn` edit point (§2).
-3. Correct the "as today" hover claim and confirm the intended post-selection
+2. Add the province-count invariant (26 in → 26 out, `province` property kept) to
+   the success criteria and assert it in the builder (§7). **Blocking** — silent
+   province loss breaks plots + search, not just outlines.
+3. Name the concrete `styleFn` edit point — four hard-coded return branches, no
+   single "computed style" to amend (§2a). No-data-invisibility is *not* a
+   concern (§2b retracted); hub/epicenter behaviour should be stated (§2c).
+4. Correct the "as today" hover claim and confirm the intended post-selection
    behaviour (§3).
-4. Decide `coverage_union_all` vs. snap+strip and record why (§4).
-5. Add a max-dropped-ring-area assertion to protect the donut-hole assumption (§5).
-6. Pin the `make_valid`/`set_precision` ordering (§6).
+5. Decide `coverage_union_all` vs. snap+strip and record why (§4).
+6. Add a max-dropped-ring-area assertion to protect the donut-hole assumption (§5).
+7. Pin the `make_valid`/`set_precision` ordering (§6).
