@@ -498,16 +498,10 @@ function setLang(lang) {
     renderEpiLegendBars();
     renderEpiTrendsTable();
   } else {
-    const infoBody = document.getElementById("info-body");
-    if (infoBody && !infoBody.classList.contains("info-empty")) {
-      for (const feat of PAYLOAD.geometry.features) {
-        if ((feat.properties.name || "").toLowerCase() === (TRAVEL_FROM || "Mongbwalu").toLowerCase() ||
-            (feat.properties.nom || "").toLowerCase() === "mongbalu") {
-          infoBody.innerHTML = infoHTML(feat);
-          break;
-        }
-      }
-    }
+    // Map view: re-render the focused zone's info box (or the placeholder) in
+    // the new language. applyStaticI18n early-returns for a non-empty info box,
+    // so this is the path that keeps a selected zone localized.
+    renderMapInfoBox();
   }
 }
 
