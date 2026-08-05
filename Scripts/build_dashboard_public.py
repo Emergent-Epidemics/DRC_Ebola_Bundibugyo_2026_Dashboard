@@ -4285,7 +4285,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   <div id="epi-flow-legend" style="margin-top:10px;font-size:11px;color:#5c574f;line-height:1.35">
     <div style="margin-bottom:4px">
       <span class="swatch" style="background:#b23b2e"></span>
-      <span data-i18n="ui.legend.flow_in">inflow to hub</span>
+      <span data-i18n="ui.legend.flow_in">inflow to selected location</span>
     </div>
     <div data-i18n="ui.legend.importation_pressure_width">Line width ∝ confirmed cases in the external origin zone (Flowminder inflows only), 0–1 vs max for selected zone</div>
   </div>
