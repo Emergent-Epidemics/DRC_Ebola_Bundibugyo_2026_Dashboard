@@ -27,8 +27,10 @@ def ring_area(ring):
 
 
 def main(path):
-    html = open(path).read()
-    m = re.search(r'<script id="payload" type="application/json">', html)
+    with open(path) as fh:
+        html = fh.read()
+    # Tolerant of attribute order / spacing so a template tweak doesn't falsely fail.
+    m = re.search(r'<script\b[^>]*\bid=["\']payload["\'][^>]*>', html)
     if not m:
         print("FAIL: no payload script in", path)
         return 1

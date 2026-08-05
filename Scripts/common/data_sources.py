@@ -653,9 +653,11 @@ def _strip_slivers(geom, min_area: float):
 
     # Unexpected non-areal geometry (e.g. a GeometryCollection from a degenerate
     # union). Inputs are pre-filtered to Polygon/MultiPolygon so this should be
-    # unreachable, but surface it rather than silently reporting a clean 0.0.
-    print(f"  WARNING: _strip_slivers passed through unexpected {geom.geom_type}")
-    return geom, dropped_ring_max, dropped_part_max
+    # unreachable; fail the build loudly rather than emit non-Polygon GeoJSON the
+    # province-outline layer can't reliably render while reporting a clean 0.0.
+    raise ValueError(
+        f"_strip_slivers got unexpected geometry type {geom.geom_type!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -877,8 +879,14 @@ def build_province_boundaries() -> dict:
     )
     # Regression guard on _strip_slivers itself (NOT a per-build data check): it
     # must never report having dropped something at/above its own threshold. True
-    # by construction today; this trips only if a future edit breaks that contract.
-    assert max_dropped_ring < PROVINCE_SLIVER_MAX and max_dropped_part < PROVINCE_SLIVER_MAX
+    # by construction today; trips only if a future edit breaks that contract.
+    # A raise (not assert) so it survives `python -O`.
+    if not (max_dropped_ring < PROVINCE_SLIVER_MAX and max_dropped_part < PROVINCE_SLIVER_MAX):
+        raise ValueError(
+            f"_strip_slivers reported dropping at/above its threshold: ring "
+            f"{max_dropped_ring:.2e}, part {max_dropped_part:.2e} deg^2 "
+            f"(threshold {PROVINCE_SLIVER_MAX:.0e})"
+        )
 
     return {"type": "FeatureCollection", "features": out}
 

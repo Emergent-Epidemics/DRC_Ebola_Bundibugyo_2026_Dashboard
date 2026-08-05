@@ -68,6 +68,14 @@ def test_strip_slivers_keeps_largest_when_all_parts_sub_threshold():
     assert abs(part_max - 1e-4) < 1e-12      # the dropped one, not the kept one
 
 
+def test_strip_slivers_raises_on_unexpected_geometry_type():
+    # Inputs are pre-filtered to Polygon/MultiPolygon; anything else means the
+    # union produced something unrenderable, so fail loudly rather than pass through.
+    from shapely.geometry import LineString
+    with pytest.raises(ValueError, match="unexpected geometry type"):
+        ds._strip_slivers(LineString([(0, 0), (1, 1)]), ds.PROVINCE_SLIVER_MAX)
+
+
 def _feature(nom, province, square_coords):
     return {
         "type": "Feature",
