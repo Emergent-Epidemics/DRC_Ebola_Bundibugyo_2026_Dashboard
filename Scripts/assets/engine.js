@@ -531,6 +531,15 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   subdomains: "abcd", maxZoom: 19
 }).addTo(map);
 
+// Zone borders read as hairlines at the national default zoom (many small
+// zones packed together) and gain a little presence as you zoom into the
+// outbreak. Scale a resting stroke weight by the current zoom; emphasized
+// strokes (hover, selection, travel origin) keep their fixed weight.
+function zoomWeight(base) {
+  const f = Math.max(0.5, Math.min(2.1, 0.5 + (map.getZoom() - 5) * 0.28));
+  return base * f;
+}
+
 map.createPane("flow-arcs");
 map.getPane("flow-arcs").style.zIndex = "450";
 map.createPane("epi-links");
@@ -1249,7 +1258,7 @@ function epiTrendsStyleFn(feature) {
   const ref = feature.properties.nom;
   const row = INVASION_ZONES[ref];
   if (!row || !epiZoneVisible(row)) {
-    return {color: "#111", weight: 0.25, fillOpacity: 0.04, fillColor: "#222"};
+    return {color: "#111", weight: zoomWeight(0.25), fillOpacity: 0.04, fillColor: "#222"};
   }
   let fill = ZERO_FILL;
   let has = false;
@@ -1277,10 +1286,10 @@ function epiTrendsStyleFn(feature) {
     fill = rgb(lerpColor(epiInvasionDomain.palette, t));
   }
   if (!has) {
-    return {color: "#111", weight: 0.35, fillOpacity: 0};
+    return {color: "#111", weight: zoomWeight(0.35), fillOpacity: 0};
   }
   let opacity = 0.82;
-  let weight = 0.35;
+  let weight = zoomWeight(0.35);
   if (epiSelectedNom) {
     const focus = epiFocusNoms && epiFocusNoms.has(ref);
     if (ref === epiSelectedNom) {
@@ -1409,20 +1418,20 @@ function styleFn(feature) {
   }
   if (isEpicenterZone(ref, layer)) {
     return {
-      color: "#111", weight: 0.5,
+      color: "#111", weight: zoomWeight(0.5),
       fillColor: EPICENTER_FILL,
       fillOpacity: 0.88
     };
   }
   if (!has) {
-    return { color: "#111", weight: 0.35, fillOpacity: 0 };
+    return { color: "#111", weight: zoomWeight(0.35), fillOpacity: 0 };
   }
   const isOutbreak = layer && layer.palette === "outbreak";
   const dataOpacity = isOutbreak ? 0.72 : 0.85;
   const mutedOpacity = isOutbreak ? 0.48 : 0.55;
   const isZero = currentDomain.isLog ? v <= 0 : v === 0;
   return {
-    color:"#111", weight:0.35,
+    color:"#111", weight:zoomWeight(0.35),
     fillColor: valueToColor(v, ref, layer),
     fillOpacity: isZero ? mutedOpacity : dataOpacity
   };
@@ -1678,6 +1687,25 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
     });
   }
 }).addTo(map);
+
+// Re-apply zone borders after a zoom so zoomWeight() picks up the new zoom.
+// styleFn already encodes the map/epi-trends selection, so re-styling the whole
+// layer preserves those; the trends/context selection highlight lives outside
+// styleFn, so re-apply it.
+map.on("zoomend", function () {
+  geoLayer.setStyle(styleFn);
+  if (activeView === "trends" && trendsScope === "health_zone" && trendsSelectedKey) {
+    geoLayer.eachLayer(function (layer) {
+      if (layer.feature && layer.feature.properties.nom === trendsSelectedKey) {
+        layer.setStyle({weight: 2, color: "#ffae42"});
+        layer.bringToFront();
+      }
+    });
+  } else if (activeView === "context" && contextSelectedLayer) {
+    contextSelectedLayer.setStyle({weight: 1.6, color: "#ffae42"});
+    contextSelectedLayer.bringToFront();
+  }
+});
 
 map.on("click", function() {
   if (activeView === "context") clearContextSelection();
