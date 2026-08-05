@@ -182,24 +182,6 @@ function syncMatrixUi() {
     updateLegend(layer);
   }
 }
-function setMatrixOrigin(nom) {
-  if (!nom || nom === matrixOriginNom) return;
-  matrixOriginNom = nom;
-  applyMatrixOriginToLayers();
-  rebuildLayerSelect();
-  recompute();
-  syncMatrixUi();
-}
-function setFlowHub(nom) {
-  // Snapshot's flow-arc origin. A null nom clears it (arcs disappear) -- the
-  // tab's "nothing selected" state. Matrix-layer origins are separate and
-  // always stay set, since a matrix choropleth needs an origin to render.
-  flowHubNom = nom || null;
-  flowHubUserSelected = !!nom;
-  recompute();
-  syncMatrixUi();
-}
-
 function featureByNom(nom) {
   if (!nom) return null;
   const feats = (PAYLOAD.geometry && PAYLOAD.geometry.features) || [];
