@@ -1913,14 +1913,6 @@ function selectHealthZone(nom) {
     // searched zone may be offscreen, unlike an already-visible clicked one.
     setMapSelection(nom);
     map.fitBounds(layer.getBounds(), {padding: [40, 40], maxZoom: 10});
-    layer.setStyle({weight: 1.6, color: "#ffae42"});
-    layer.bringToFront();
-    searchHighlightLayer = layer;
-    const infoBody = document.getElementById("info-body");
-    if (infoBody) {
-      infoBody.className = "";
-      infoBody.innerHTML = infoHTML(feature);
-    }
     // No transient timer: the focus highlight is persistent via styleFn.
   }
 
