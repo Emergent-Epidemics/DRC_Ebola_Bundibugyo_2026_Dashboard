@@ -610,6 +610,20 @@ function importationPressure(sourceNom, movers) {
   return zoneConfirmedCases(sourceNom);
 }
 
+// Legend icon for a flow arrow: a horizontal line with a chevron in the
+// middle, matching the on-map arrows drawn by addFlowWingMarker() (same
+// two-stroke chevron, so the legend reads as the same symbol). Used by the
+// snapshot legend (updateLegend) and mirrored in the static Spatial Risk
+// legend markup in common/chrome.py.
+function flowArrowSwatch(color) {
+  return "<span class='arrow-swatch'>" +
+    "<svg xmlns='http://www.w3.org/2000/svg' width='26' height='12' viewBox='0 0 26 12'>" +
+    "<line x1='1' y1='6' x2='25' y2='6' stroke='" + color + "' stroke-width='1.6' stroke-linecap='round'/>" +
+    "<line x1='10' y1='2' x2='16' y2='6' stroke='" + color + "' stroke-width='1.6' stroke-linecap='round'/>" +
+    "<line x1='10' y1='10' x2='16' y2='6' stroke='" + color + "' stroke-width='1.6' stroke-linecap='round'/>" +
+    "</svg></span>";
+}
+
 function addFlowWingMarker(pts, color, opts) {
   opts = opts || {};
   if (!pts || pts.length < 2) return;
@@ -1411,32 +1425,41 @@ function styleFn(feature) {
   const v = currentValues.get(ref);
   const has = v != null && !Number.isNaN(v);
   const layer = getLayer(layerSelect.value);
+  // In Provincial scope, suppress ALL zone-level strokes so the province
+  // outlines (drawn in the province-outline pane) are the only line work. Fills
+  // are untouched, so the choropleth (incl. zero-case muted fills) still reads;
+  // the no-data branch never fires in trends (recomputeTrendsMap coalesces
+  // missing values to 0), so no zone goes fill-less/invisible.
+  const prov = function (s) {
+    if (activeView === "trends" && trendsScope === "province") s.weight = 0;
+    return s;
+  };
   if (isHubZone(ref, layer)) {
-    return {
+    return prov({
       color: "#111", weight: 1.6,
       fillColor: MATRIX_ORIGIN_FILL,
       fillOpacity: 0.92
-    };
+    });
   }
   if (isEpicenterZone(ref, layer)) {
-    return {
+    return prov({
       color: "#111", weight: zoomWeight(0.5),
       fillColor: EPICENTER_FILL,
       fillOpacity: 0.88
-    };
+    });
   }
   if (!has) {
-    return { color: "#111", weight: zoomWeight(0.35), fillOpacity: 0 };
+    return prov({ color: "#111", weight: zoomWeight(0.35), fillOpacity: 0 });
   }
   const isOutbreak = layer && layer.palette === "outbreak";
   const dataOpacity = isOutbreak ? 0.72 : 0.85;
   const mutedOpacity = isOutbreak ? 0.48 : 0.55;
   const isZero = currentDomain.isLog ? v <= 0 : v === 0;
-  return {
-    color:"#111", weight:zoomWeight(0.35),
+  return prov({
+    color: "#111", weight: zoomWeight(0.35),
     fillColor: valueToColor(v, ref, layer),
     fillOpacity: isZero ? mutedOpacity : dataOpacity
-  };
+  });
 }
 
 function fmtLegend(v, round) {
@@ -1525,15 +1548,17 @@ function updateLegend(layer) {
       "<span class='swatch' style='background:" + MATRIX_ORIGIN_FILL + "'></span>" + t("ui.legend.matrix_origin")
     );
   }
+  // Flow arrows go on their own line(s) below the inline zero/no-data row so
+  // the arrow icons read clearly and don't crowd the gray legend.
+  var flowHTML = "";
   if (flowArcsOverlayActive()) {
-    grayParts.push(
-      "<span class='swatch' style='background:" + FLOW_OUT_COLOR + "'></span>" + t("ui.legend.flow_out"),
-      "<span class='swatch' style='background:" + FLOW_IN_COLOR + "'></span>" + t("ui.legend.flow_in")
-    );
+    flowHTML =
+      "<div class='legend-flow-row'>" + flowArrowSwatch(FLOW_OUT_COLOR) + t("ui.legend.flow_out") + "</div>" +
+      "<div class='legend-flow-row'>" + flowArrowSwatch(FLOW_IN_COLOR) + t("ui.legend.flow_in") + "</div>";
     const scaleEl = document.getElementById("legend-scale");
     scaleEl.textContent = (scaleEl.textContent || "") + " · " + t("ui.legend.flow_width");
   }
-  document.getElementById("legend-gray").innerHTML = grayParts.join(" · ");
+  document.getElementById("legend-gray").innerHTML = grayParts.join(" · ") + flowHTML;
 }
 
 function infoHTML(feature) {
@@ -1597,6 +1622,13 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
       mouseover: function(e) {
         if (activeView === "trends") {
           if (trendsScope === "national") return;
+          if (trendsScope === "province") {
+            // Highlight the parent province's outline (matches click-to-select),
+            // rather than the individual zone. Gated inside setTrendsProvinceHover
+            // to no-op once a province is selected.
+            setTrendsProvinceHover(feature.properties.province);
+            return;
+          }
           e.target.setStyle({weight: 1.6, color: "#ffae42"});
           e.target.bringToFront();
           return;
@@ -1617,6 +1649,12 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
       },
       mouseout: function(e) {
         if (activeView === "trends") {
+          if (trendsScope === "province") {
+            // Zone was never restyled on hover in province scope; just clear the
+            // province-outline highlight.
+            setTrendsProvinceHover(null);
+            return;
+          }
           geoLayer.resetStyle(e.target);
           if (trendsScope === "health_zone" && trendsSelectedKey &&
               feature.properties.nom === trendsSelectedKey) {
