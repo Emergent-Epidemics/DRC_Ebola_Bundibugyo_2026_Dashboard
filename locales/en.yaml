@@ -82,8 +82,8 @@ scope_tags:
 ui:
   hints:
     context: "Click a health zone to see response context"
-    travel: "Click a health zone to set travel origin (double-click to zoom)"
-    flow: "Click a health zone to show movement flows (double-click to zoom)"
+    travel: "Click a health zone to set travel origin"
+    flow: "Click a health zone to show movement flows"
     flow_no_data: "No movement data available for {zone}."
   methods_btn: "Contributors, Data, and Methods"
   terms_btn: "Terms of Use"
@@ -102,7 +102,9 @@ ui:
   import_force_tooltip: "{from} → {to}: import-force contribution {foi} ({share} of {to}'s importation risk)"
   legend: "Legend"
   zone: "Zone"
-  hover_zone: "Hover a health zone."
+  hover_zone: "Select a health zone."
+  layer_no_data: "No data"
+  matrix_select_hint: "Select a health zone to show travel times."
   matrix_origin: "Travel origin: {origin}"
   flow_hub: "Selected location: {hub}"
   flow_no_data: "No Flowminder movement pairs for this zone."
@@ -216,6 +218,9 @@ ui:
     confirmed: "confirmed"
     suspected: "suspected"
     deaths: "deaths"
+    suspected_cases: "Suspected cases"
+    confirmed_cases: "Confirmed cases"
+    confirmed_deaths: "Confirmed deaths"
     unnamed: "(unnamed)"
   genome_tooltip: "{n} sequences"
   info:
