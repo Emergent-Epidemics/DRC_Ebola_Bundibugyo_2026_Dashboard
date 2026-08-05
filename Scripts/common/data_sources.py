@@ -26,8 +26,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from shapely import STRtree
-from shapely.geometry import mapping, shape
+from shapely import STRtree, set_precision
+from shapely.geometry import MultiPolygon, Polygon, mapping, shape
 from shapely.ops import polygonize, polylabel, unary_union
 from shapely.validation import make_valid
 
@@ -52,6 +52,8 @@ from common.paths import (
 __all__ = [
     'SIMPLIFY_TOL',
     'COORD_DECIMALS',
+    'PROVINCE_SNAP_GRID',
+    'PROVINCE_SLIVER_MAX',
     'CENTRE_TOL',
     'TRAVEL_FROM_ZONE',
     'EPICENTER_ITURI_SINGLE',
@@ -97,6 +99,7 @@ __all__ = [
     '_zone_centre',
     '_polygonal',
     '_clean_coverage',
+    '_strip_slivers',
     'load_features_from_geojson',
     'build_province_boundaries',
     '_load_build_geojson_properties',
@@ -224,6 +227,18 @@ __all__ = [
 
 SIMPLIFY_TOL = 0.001     # ~110 m at the equator; ~10× fewer vertices than raw
 COORD_DECIMALS = 5
+
+# --- province-outline dissolve cleanup (build_province_boundaries) ---------
+# All three are in EPSG:4326 native units (degrees / square degrees), NOT metres.
+# 1 deg^2 ~ 12,300 km^2 near the equator.
+PROVINCE_SNAP_GRID = 1e-5     # set_precision grid, degrees (~1 m). In
+                             # [COORD_DECIMALS quantum, SIMPLIFY_TOL): snaps shared
+                             # zone edges together to close seam gaps, without
+                             # visibly moving the province outline.
+PROVINCE_SLIVER_MAX = 1e-3   # deg^2: drop interior rings AND detached parts below
+                             # this. Observed slivers <= ~4e-4 deg^2; the real part
+                             # of every province is >= ~0.8 deg^2 -- a >1000x gap.
+
 CENTRE_TOL = 0.0001      # ~11 m: search precision for the pole of inaccessibility
 
 TRAVEL_FROM_ZONE = "Mongbwalu"
@@ -588,6 +603,63 @@ def _round_coords(geom_dict: dict, ndigits: int) -> dict:
     return g
 
 
+def _strip_slivers(geom, min_area: float):
+    """Drop interior rings and detached parts below ``min_area`` (square degrees).
+
+    ``unary_union`` of imperfectly-aligned zone polygons leaves two kinds of
+    artefact: tiny interior rings (holes at seam gaps) and tiny detached exterior
+    parts (fragments where edges cross rather than coincide). DRC provinces have
+    no legitimate donut holes and no legitimate small island exclaves, so both are
+    safe to drop below a threshold that sits in the wide empirical gap between
+    sliver and real-part areas.
+
+    Returns ``(cleaned_geom, dropped_ring_max, dropped_part_max)`` -- the largest
+    dropped ring/part area seen (0.0 if none), for the caller to log and sanity-check.
+    """
+    dropped_ring_max = 0.0
+    dropped_part_max = 0.0
+
+    def clean_polygon(poly):
+        nonlocal dropped_ring_max
+        keep = []
+        for ring in poly.interiors:
+            area = Polygon(ring).area
+            if area >= min_area:
+                keep.append(ring)
+            else:
+                dropped_ring_max = max(dropped_ring_max, area)
+        return Polygon(poly.exterior, keep)
+
+    if geom.geom_type == "Polygon":
+        return clean_polygon(geom), dropped_ring_max, dropped_part_max
+
+    if geom.geom_type == "MultiPolygon":
+        parts = list(geom.geoms)
+        kept = [p for p in parts if p.area >= min_area]
+        if not kept:
+            # Defensive: never erase a province. Keep the largest part; only the
+            # genuinely-dropped remainder counts toward dropped_part_max.
+            largest = max(parts, key=lambda p: p.area)
+            kept = [largest]
+            dropped = [p for p in parts if p is not largest]
+        else:
+            dropped = [p for p in parts if p.area < min_area]
+        for p in dropped:
+            dropped_part_max = max(dropped_part_max, p.area)
+        keep_parts = [clean_polygon(p) for p in kept]
+        if len(keep_parts) == 1:
+            return keep_parts[0], dropped_ring_max, dropped_part_max
+        return MultiPolygon(keep_parts), dropped_ring_max, dropped_part_max
+
+    # Unexpected non-areal geometry (e.g. a GeometryCollection from a degenerate
+    # union). Inputs are pre-filtered to Polygon/MultiPolygon so this should be
+    # unreachable; fail the build loudly rather than emit non-Polygon GeoJSON the
+    # province-outline layer can't reliably render while reporting a clean 0.0.
+    raise ValueError(
+        f"_strip_slivers got unexpected geometry type {geom.geom_type!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # geometry: read DRC health-zone polygons, match per-zone metadata rows
 # ---------------------------------------------------------------------------
@@ -721,26 +793,54 @@ def load_features_from_geojson() -> tuple[list[dict], dict[str, tuple[float, flo
 
 
 def build_province_boundaries() -> dict:
-    """Union health-zone polygons into one outline per province."""
+    """Union health-zone polygons into one clean outline per province.
+
+    Also the authoritative province roster: ``payload.py`` derives
+    ``province_names`` from these features (plot generation) and ``engine.js``
+    builds the Trends search dropdown from them. A dropped province silently
+    disappears from plots + search, so the province-count invariant below is
+    asserted, not merely hoped for.
+    """
     if not BUILD_GEOJSON.exists():
         return {"type": "FeatureCollection", "features": []}
 
     with open(BUILD_GEOJSON) as f:
         raw = json.load(f)
 
+    # Distinct provinces in the RAW source, before any geometry filtering. The
+    # invariant compares output against THIS set (not ``by_province`` keys): a
+    # province whose zones are all dropped by the make_valid/geom-type filter
+    # would never enter ``by_province``, so the count would still match while the
+    # province silently vanished.
+    raw_provinces = {
+        (feat.get("properties") or {}).get("province")
+        for feat in (raw.get("features") or [])
+        if (feat.get("properties") or {}).get("province")
+    }
+
     by_province: dict[str, list] = {}
     for feat in raw.get("features") or []:
         prov = (feat.get("properties") or {}).get("province")
         if not prov:
             continue
+        # make_valid -> set_precision (snap shared edges together) -> make_valid.
+        # Snapping can itself re-introduce invalidity, hence the second repair.
         geom = make_valid(shape(feat["geometry"]))
+        geom = make_valid(set_precision(geom, PROVINCE_SNAP_GRID))
         if geom.is_empty or geom.geom_type not in {"Polygon", "MultiPolygon"}:
             continue
         by_province.setdefault(prov, []).append(geom)
 
     out: list[dict] = []
+    max_dropped_ring = 0.0
+    max_dropped_part = 0.0
     for prov in sorted(by_province):
         merged = unary_union(by_province[prov])
+        if merged.is_empty:
+            continue
+        merged, ring_max, part_max = _strip_slivers(merged, PROVINCE_SLIVER_MAX)
+        max_dropped_ring = max(max_dropped_ring, ring_max)
+        max_dropped_part = max(max_dropped_part, part_max)
         if merged.is_empty:
             continue
         if SIMPLIFY_TOL > 0:
@@ -755,6 +855,39 @@ def build_province_boundaries() -> dict:
             "geometry": gdict,
             "properties": {"province": prov},
         })
+
+    # Province-count invariant (the load-bearing guard): every raw province must
+    # survive to exactly one output feature. Fail loudly -- a dropped province
+    # silently breaks plot generation and Trends search, not just the outline.
+    out_provinces = {f["properties"]["province"] for f in out}
+    missing = raw_provinces - out_provinces
+    if missing:
+        raise ValueError(
+            f"build_province_boundaries dropped provinces {sorted(missing)}; "
+            "the geometry pipeline must preserve every province (plots + search "
+            "derive their province list from this output)."
+        )
+
+    # Sliver-cleanup visibility: print the largest ring/part dropped so a
+    # shrinking empirical gap (a genuine large hole/island nearing the threshold)
+    # is noticeable in the build log. The printed values are the real per-build
+    # signal to watch.
+    print(
+        f"  province sliver cleanup: largest dropped ring {max_dropped_ring:.2e} "
+        f"deg^2, largest dropped part {max_dropped_part:.2e} deg^2 "
+        f"(threshold {PROVINCE_SLIVER_MAX:.0e})"
+    )
+    # Regression guard on _strip_slivers itself (NOT a per-build data check): it
+    # must never report having dropped something at/above its own threshold. True
+    # by construction today; trips only if a future edit breaks that contract.
+    # A raise (not assert) so it survives `python -O`.
+    if not (max_dropped_ring < PROVINCE_SLIVER_MAX and max_dropped_part < PROVINCE_SLIVER_MAX):
+        raise ValueError(
+            f"_strip_slivers reported dropping at/above its threshold: ring "
+            f"{max_dropped_ring:.2e}, part {max_dropped_part:.2e} deg^2 "
+            f"(threshold {PROVINCE_SLIVER_MAX:.0e})"
+        )
+
     return {"type": "FeatureCollection", "features": out}
 
 
