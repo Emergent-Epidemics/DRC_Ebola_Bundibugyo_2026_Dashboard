@@ -1622,6 +1622,13 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
       mouseover: function(e) {
         if (activeView === "trends") {
           if (trendsScope === "national") return;
+          if (trendsScope === "province") {
+            // Highlight the parent province's outline (matches click-to-select),
+            // rather than the individual zone. Gated inside setTrendsProvinceHover
+            // to no-op once a province is selected.
+            setTrendsProvinceHover(feature.properties.province);
+            return;
+          }
           e.target.setStyle({weight: 1.6, color: "#ffae42"});
           e.target.bringToFront();
           return;
@@ -1642,6 +1649,12 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
       },
       mouseout: function(e) {
         if (activeView === "trends") {
+          if (trendsScope === "province") {
+            // Zone was never restyled on hover in province scope; just clear the
+            // province-outline highlight.
+            setTrendsProvinceHover(null);
+            return;
+          }
           geoLayer.resetStyle(e.target);
           if (trendsScope === "health_zone" && trendsSelectedKey &&
               feature.properties.nom === trendsSelectedKey) {
