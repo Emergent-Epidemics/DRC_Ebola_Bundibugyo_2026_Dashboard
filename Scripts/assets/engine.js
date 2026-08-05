@@ -118,7 +118,7 @@ function hubDisplayName(nom) {
   return zoneDisplayName(nom) || TRAVEL_FROM;
 }
 function matrixOriginDisplayName() {
-  return hubDisplayName(matrixOriginNom);
+  return matrixOriginNom ? hubDisplayName(matrixOriginNom) : "—";
 }
 function flowHubDisplayName() {
   return hubDisplayName(flowHubNom);
@@ -1525,7 +1525,9 @@ function fmt(v, kind) {
 function updateLayerMeta(layer) {
   let html = layer.source || "";
   if (layerUsesMatrix(layer)) {
-    const originLine = tf("ui.matrix_origin", {origin: matrixOriginDisplayName()});
+    const originLine = matrixOriginNom
+      ? tf("ui.matrix_origin", {origin: matrixOriginDisplayName()})
+      : t("ui.matrix_select_hint");
     html = (html ? html + "<br>" : "") + originLine;
   }
   if (flowArcsOverlayActive()) {
