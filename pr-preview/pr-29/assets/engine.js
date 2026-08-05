@@ -673,6 +673,10 @@ function renderFlowArcs(hubNom, layer) {
         weight: flowArcWeight(count, maxMetric),
         opacity: 0.82,
         pane: "flow-arcs",
+        // Arrows are annotations of the selected zone, not controls. Keep the
+        // hover tooltip but stop clicks bubbling to the map's click handler,
+        // which would otherwise clear the selection (and the arrows with it).
+        bubblingMouseEvents: false,
       });
       line.bindTooltip(tf("ui.flow_arc_tooltip", {
         from: flowHubDisplayName(),
@@ -705,6 +709,7 @@ function renderFlowArcs(hubNom, layer) {
         weight: flowArcWeight(e.foi, maxFoi),      // 1 + 4*sqrt(foi/maxFoi)
         opacity: 0.82,
         pane: "flow-arcs",
+        bubblingMouseEvents: false, // see note on the outflow arc above
       });
       line.bindTooltip(tf("ui.import_force_tooltip", {
         from: hubDisplayName(e.origin),
@@ -742,6 +747,7 @@ function renderFlowArcs(hubNom, layer) {
       weight: weight,
       opacity: 0.82,
       pane: "flow-arcs",
+      bubblingMouseEvents: false, // see note on the outflow arc above
     });
     if (useImportPressure) {
       line.bindTooltip(tf("ui.importation_pressure_tooltip", {
