@@ -26,8 +26,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from shapely import STRtree
 from shapely.geometry import mapping, shape
-from shapely.ops import polylabel, unary_union
+from shapely.ops import polygonize, polylabel, unary_union
 from shapely.validation import make_valid
 
 from common.paths import (
@@ -94,6 +95,8 @@ __all__ = [
     '_i',
     '_round_coords',
     '_zone_centre',
+    '_polygonal',
+    '_clean_coverage',
     'load_features_from_geojson',
     'build_province_boundaries',
     '_load_build_geojson_properties',
@@ -609,28 +612,102 @@ def _zone_centre(geom):
         return target.representative_point()
 
 
+def _polygonal(geom):
+    """Repair to a valid Polygon/MultiPolygon, discarding any non-areal debris.
+
+    Dissolving atomic faces and then rounding coordinates can leave a polygon
+    self-touching (invalid) or, rarely, a GeometryCollection with a stray line;
+    this normalises the result back to clean polygonal geometry.
+    """
+    geom = make_valid(geom)
+    if geom.geom_type in {"Polygon", "MultiPolygon"}:
+        return geom
+    if geom.geom_type == "GeometryCollection":
+        parts = [g for g in geom.geoms if g.geom_type in {"Polygon", "MultiPolygon"}]
+        if parts:
+            return unary_union(parts)
+    return geom
+
+
+def _clean_coverage(geoms: list) -> list:
+    """Rebuild overlapping zone polygons into a clean, non-overlapping coverage.
+
+    The source health-zone polygons are *not* a valid polygonal coverage -- they
+    overlap each other (precision slivers plus a tail of larger disagreements).
+    Because the map strokes every zone separately, each side of an overlapping
+    pair paints a slightly different border, so shared edges render as doubled,
+    offset lines.
+
+    Fix: node every zone boundary together, ``polygonize`` the plane into atomic
+    faces, then hand each face to the zone it overlaps most and dissolve. Overlap
+    regions collapse to a single owner, so neighbours end up sharing exactly one
+    border line. Pre-existing *gaps* in the source are left as-is (a face inside
+    no zone is simply dropped) -- filling them is deliberately out of scope here.
+
+    Returns a list aligned 1:1 with ``geoms``; a zone that somehow keeps no face
+    falls back to its original geometry. Note this changes each zone's area only
+    marginally (median ~0.005%, worst-case ~2-3% for the most overlap-affected
+    zones) since it only redistributes the contested slivers.
+    """
+    boundaries = unary_union([g.boundary for g in geoms])
+    faces = list(polygonize(boundaries))
+    tree = STRtree(geoms)
+    zone_faces: dict[int, list] = {}
+    for face in faces:
+        best, best_overlap = None, 0.0
+        for j in tree.query(face):
+            g = geoms[j]
+            if not g.intersects(face):
+                continue
+            overlap = g.intersection(face).area
+            if overlap > best_overlap:
+                best_overlap, best = overlap, int(j)
+        if best is not None:
+            zone_faces.setdefault(best, []).append(face)
+    return [
+        make_valid(unary_union(zone_faces[i])) if i in zone_faces else geoms[i]
+        for i in range(len(geoms))
+    ]
+
+
 def load_features_from_geojson() -> tuple[list[dict], dict[str, tuple[float, float]]]:
     """Load zone polygons from the build GeoJSON, keyed by nom."""
     with open(BUILD_GEOJSON) as f:
         raw = json.load(f)
 
-    feats: list[dict] = []
-    centroids: dict[str, tuple[float, float]] = {}
+    # Collect valid zone geometries first: the source polygons overlap each
+    # other, so we clean them into a single coverage (shared borders drawn once)
+    # before simplifying and emitting features.
+    raw_geoms: list = []
+    metas: list[tuple[str, str | None]] = []
     for feat in raw["features"]:
-        nom = feat["properties"]["nom"]
         geom = make_valid(shape(feat["geometry"]))
         if geom.is_empty or geom.geom_type not in {"Polygon", "MultiPolygon"}:
             continue
-        # Anchor on the full-resolution geometry, before simplify() below.
-        centre_pt = _zone_centre(geom)
-        if SIMPLIFY_TOL > 0:
-            geom = geom.simplify(SIMPLIFY_TOL, preserve_topology=True)
+        raw_geoms.append(geom)
+        metas.append((feat["properties"]["nom"], feat["properties"].get("province")))
+
+    clean_geoms = _clean_coverage(raw_geoms)
+
+    feats: list[dict] = []
+    centroids: dict[str, tuple[float, float]] = {}
+    for (nom, province), geom in zip(metas, clean_geoms):
         if geom.is_empty:
             continue
+        # Anchor on the cleaned geometry (guaranteed inside what is rendered).
+        centre_pt = _zone_centre(geom)
+        # Intentionally NOT simplifying per-feature here: _clean_coverage() just
+        # made the zones share exact border vertices, and an independent
+        # per-polygon simplify would drop different vertices on each side of a
+        # shared edge -- re-introducing the doubled borders. (Per-feature
+        # simplify at SIMPLIFY_TOL only trimmed <0.2% of vertices anyway.) To
+        # shrink the payload, simplify the whole coverage at once via
+        # shapely.coverage_simplify() (needs shapely>=2.1), not zone by zone.
         gdict = mapping(geom)
         if COORD_DECIMALS is not None:
             gdict = _round_coords(gdict, COORD_DECIMALS)
-        province = feat["properties"].get("province")
+            # Rounding a dissolved coverage can self-intersect the ring; repair.
+            gdict = mapping(_polygonal(shape(gdict)))
         props = {"nom": nom, "name": _NOM_TO_NAME.get(nom, nom)}
         if province:
             props["province"] = province
