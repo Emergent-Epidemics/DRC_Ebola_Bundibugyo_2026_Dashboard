@@ -26,7 +26,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from shapely import STRtree
+from shapely import STRtree, set_precision
 from shapely.geometry import mapping, shape
 from shapely.ops import polygonize, polylabel, unary_union
 from shapely.validation import make_valid
@@ -52,6 +52,8 @@ from common.paths import (
 __all__ = [
     'SIMPLIFY_TOL',
     'COORD_DECIMALS',
+    'PROVINCE_SNAP_GRID',
+    'PROVINCE_SLIVER_MAX',
     'CENTRE_TOL',
     'TRAVEL_FROM_ZONE',
     'EPICENTER_ITURI_SINGLE',
@@ -97,6 +99,7 @@ __all__ = [
     '_zone_centre',
     '_polygonal',
     '_clean_coverage',
+    '_strip_slivers',
     'load_features_from_geojson',
     'build_province_boundaries',
     '_load_build_geojson_properties',
@@ -224,6 +227,18 @@ __all__ = [
 
 SIMPLIFY_TOL = 0.001     # ~110 m at the equator; ~10× fewer vertices than raw
 COORD_DECIMALS = 5
+
+# --- province-outline dissolve cleanup (build_province_boundaries) ---------
+# All three are in EPSG:4326 native units (degrees / square degrees), NOT metres.
+# 1 deg^2 ~ 12,300 km^2 near the equator.
+PROVINCE_SNAP_GRID = 1e-5     # set_precision grid, degrees (~1 m). In
+                             # [COORD_DECIMALS quantum, SIMPLIFY_TOL): snaps shared
+                             # zone edges together to close seam gaps, without
+                             # visibly moving the province outline.
+PROVINCE_SLIVER_MAX = 1e-3   # deg^2: drop interior rings AND detached parts below
+                             # this. Observed slivers <= ~4e-4 deg^2; the real part
+                             # of every province is >= ~0.8 deg^2 -- a >1000x gap.
+
 CENTRE_TOL = 0.0001      # ~11 m: search precision for the pole of inaccessibility
 
 TRAVEL_FROM_ZONE = "Mongbwalu"
@@ -586,6 +601,56 @@ def _round_coords(geom_dict: dict, ndigits: int) -> dict:
     g = dict(geom_dict)
     g["coordinates"] = _walk(g.get("coordinates"))
     return g
+
+
+def _strip_slivers(geom, min_area: float):
+    """Drop interior rings and detached parts below ``min_area`` (square degrees).
+
+    ``unary_union`` of imperfectly-aligned zone polygons leaves two kinds of
+    artefact: tiny interior rings (holes at seam gaps) and tiny detached exterior
+    parts (fragments where edges cross rather than coincide). DRC provinces have
+    no legitimate donut holes and no legitimate small island exclaves, so both are
+    safe to drop below a threshold that sits in the wide empirical gap between
+    sliver and real-part areas.
+
+    Returns ``(cleaned_geom, dropped_ring_max, dropped_part_max)`` -- the largest
+    dropped ring/part area seen (0.0 if none), for the caller to log and sanity-check.
+    """
+    from shapely.geometry import Polygon, MultiPolygon
+
+    dropped_ring_max = 0.0
+    dropped_part_max = 0.0
+
+    def clean_polygon(poly):
+        nonlocal dropped_ring_max
+        keep = []
+        for ring in poly.interiors:
+            area = Polygon(ring).area
+            if area >= min_area:
+                keep.append(ring)
+            else:
+                dropped_ring_max = max(dropped_ring_max, area)
+        return Polygon(poly.exterior, keep)
+
+    if geom.geom_type == "Polygon":
+        return clean_polygon(geom), dropped_ring_max, dropped_part_max
+
+    if geom.geom_type == "MultiPolygon":
+        keep_parts = []
+        for part in geom.geoms:
+            if part.area >= min_area:
+                keep_parts.append(clean_polygon(part))
+            else:
+                dropped_part_max = max(dropped_part_max, part.area)
+        if not keep_parts:
+            # Defensive: never drop every part (would erase a province). Keep the
+            # largest untouched; the caller's invariant still guards the roster.
+            keep_parts = [clean_polygon(max(geom.geoms, key=lambda p: p.area))]
+        if len(keep_parts) == 1:
+            return keep_parts[0], dropped_ring_max, dropped_part_max
+        return MultiPolygon(keep_parts), dropped_ring_max, dropped_part_max
+
+    return geom, dropped_ring_max, dropped_part_max
 
 
 # ---------------------------------------------------------------------------
