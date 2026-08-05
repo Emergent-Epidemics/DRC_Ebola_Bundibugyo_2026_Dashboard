@@ -281,6 +281,72 @@ state the intended behaviour rather than leave it to a blanket rule.
 
 ---
 
+## Third read — verifying the revised spec (commit `120904e`)
+
+The spec now incorporates §§1–7. I re-checked each revision against the code
+rather than taking the edits at face value. **Verdict: the revisions are correct
+and the spec is essentially implementation-ready.** Every substantive point is
+resolved, the §2b retraction is captured accurately, and the new province-count
+invariant is framed exactly right (as the primary success gate for §3, above the
+ring count). Remaining items are one factual fix and two precision refinements —
+none blocking.
+
+### 🟡 8. Three line-number citations in §1 point to the wrong place
+
+The spec's other ~a dozen code citations are accurate (spot-checked: `104`–`113`,
+`736`, `744`, `2002`, `2419`, `2741`, `2786`, `1614`–`1616` all land correctly).
+But the cluster in §1 that describes `styleFn`'s body is off by ~35–45 lines:
+
+| Spec says | Actually at | What's really at the cited line |
+|-----------|-------------|--------------------------------|
+| branches "roughly `engine.js:1461`–`1496`" | `styleFn` is **1422–1453** (hub 1428, epicenter 1435, `!has` 1442, data 1449) | 1461–1496 is `fmtLegend`/`fmt`/`updateLayerMeta` |
+| "`!has` branch (`engine.js:1486`)" | **1442** | 1486 is inside `updateLayerMeta` |
+| "reads `getLayer(layerSelect.value)` … (`engine.js:1460`)" | **1427** | 1460 is `fmtLegend` |
+
+An implementer jumping to those lines lands in unrelated legend code. Likely the
+author read a stale copy (or `build_dashboard_public.py`'s embedded engine.js) for
+that one cluster. Cheap fix; worth doing so the "single `weight: 0` step" is
+attached to the right branches.
+
+### 🟠 9. The province-count invariant has a blind spot in exactly the direction §7 cares about
+
+§3 defines the invariant as "one feature per **input** province," and "input"
+means the keys of `by_province` — which is populated *after* the
+`make_valid` / `geom_type` filter (`data_sources.py:737`–`738`). So a province
+whose zones are **all** dropped by that earlier filter never enters `by_province`,
+the assertion sees a matching count, and the province is still silently missing
+from plots and search — the precise failure §7 was written to prevent, just
+occurring one step upstream of `set_precision`.
+
+**Recommendation:** anchor the invariant to the distinct `province` values in the
+**raw source features** (before any geometry filtering), not to `by_province`
+keys. Then *any* dropped province — filtered-out geometry or snap-collapsed union
+— trips the build. This fully closes §7's loop.
+
+### 🟡 10. Rounding is the last step after drop-holes — confirm the "~0 rings" check runs post-round
+
+The pipeline orders drop-holes *before* the existing `simplify` /
+coordinate-round steps (§3 step 3 + "before the existing simplify / coordinate-
+round steps"), so `_round_coords(COORD_DECIMALS)` runs **after** holes are
+stripped. Coordinate quantization can, in principle, re-introduce a degenerate
+sub-threshold interior ring. Low risk, but the "interior-ring count drops to ~0"
+criterion should be validated on the **final, post-round** geometry (or move
+drop-holes to after rounding) so a quantization artifact can't slip past a check
+run on the pre-round geometry.
+
+### Confirmed accurate in the revision
+
+- `requirements.txt:6` is `shapely>=2.0` — the §3 "pins only `shapely>=2.0`,
+  coverage semantics vary by version" reasoning checks out.
+- §2b retraction (no-data → `0` coalescing) matches `getTrendsConfirmedAt`
+  (`engine.js:2743`, `2745`) exactly.
+- §1's "hub/epicenter can fire in trends" note is right — `styleFn` reads
+  `layerSelect.value` regardless of view; only `epi-trends` early-returns.
+- The invariant using a dynamic count ("same count", not a hard-coded `26`) is
+  the right call.
+
+---
+
 ## Suggested pre-implementation checklist
 
 1. Fix the national/health_zone "visually unchanged" wording (§1). **Blocking** —
@@ -296,3 +362,13 @@ state the intended behaviour rather than leave it to a blanket rule.
 5. Decide `coverage_union_all` vs. snap+strip and record why (§4).
 6. Add a max-dropped-ring-area assertion to protect the donut-hole assumption (§5).
 7. Pin the `make_valid`/`set_precision` ordering (§6).
+
+**After third read (spec now addresses §§1–7; these are the only open items):**
+
+8. Fix the three §1 line-number citations — `1461–1496`/`1486`/`1460` should be
+   `~1428–1453`/`1442`/`1427` (§8). Factual, cheap.
+9. Anchor the province-count invariant to the raw source province set, not
+   `by_province` keys, so a province lost at the earlier geometry filter also
+   trips the assertion (§9).
+10. Ensure the "~0 interior rings" check runs on the final post-round geometry
+    (§10).

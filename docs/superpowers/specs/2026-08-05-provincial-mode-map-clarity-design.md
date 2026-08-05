@@ -2,9 +2,10 @@
 
 **Date:** 2026-08-05
 **Branch:** `provincial-mode-map-clarity` (off `main`)
-**Status:** Design approved; critical-review points §§1–7 incorporated, including
-the second-look addendum (§7 province roster + §2b retraction); see
-`…-design-review.md`. Pending final user sign-off.
+**Status:** Design approved; critical-review points §§1–10 incorporated (original
+§§1–6, second-look §7 + §2b retraction, third-read §8 line-numbers / §9 invariant
+anchor / §10 post-round ring check); see `…-design-review.md`. Pending final user
+sign-off.
 
 ## Problem
 
@@ -34,8 +35,9 @@ outbreak map does not communicate that *provinces* are the selectable unit:
 - No **behavioural** change to `national` or `health_zone` scopes, nor to the
   snapshot (`map`) or `epi-trends` views. One deliberate *visual* side effect: the
   province outline layer renders in national and health_zone scopes too
-  (`setTrendsScope` → `showProvinceOutlines` runs for every trends scope,
-  `engine.js:2419`), drawing from the same `province_boundaries` geometry. Cleaning
+  (`setTrendsScope` at `engine.js:2378` calls `showProvinceOutlines()` at `2385`
+  for every trends scope), drawing from the same `province_boundaries` geometry.
+  Cleaning
   that geometry (§3) removes the internal sliver lines in those scopes as well —
   an intended improvement, not pixel-identity. Do not expect a "no visual diff"
   result there.
@@ -49,10 +51,11 @@ outbreak map does not communicate that *provinces* are the selectable unit:
 
 ### 1. Hide health-zone borders in Provincial scope — `Scripts/assets/engine.js`
 
-`styleFn` has several return points, each hard-coding `color`/`weight` (hub zone,
-epicenter zone, no-data zone, data zone — roughly `engine.js:1461`–`1496`); there
-is no single "computed style" object to amend. So compute the style as today, then
-apply one suppression step just before returning, in the non-epi path:
+`styleFn` (`engine.js:1422`–`1454`) has four non-epi return points, each
+hard-coding `color`/`weight`: hub zone (`1428`), epicenter zone (`1435`), no-data
+zone (`1442`), data zone (`1449`) — there is no single "computed style" object to
+amend. So compute the style as today, then apply one suppression step just before
+returning, in the non-epi path:
 
 ```js
 // after the normal style object is chosen, before returning:
@@ -71,12 +74,12 @@ Notes:
   `getTrendsConfirmedAt`, `engine.js:2786`, `2741`). In trends scope
   `recomputeTrendsMap` sets `currentValues` for *every* geometry feature, and
   `getTrendsConfirmedAt` coalesces any missing zone/series to `0`. So `has` in
-  `styleFn` is always true and the border-only `!has` branch (`engine.js:1486`)
+  `styleFn` is always true and the border-only `!has` branch (`engine.js:1442`)
   never runs in trends — there are no fill-less zones to blank out. Data zones
   (including zero-case zones, which take the data branch with a muted fill) keep
   their fill; only the stroke is removed. No faint-fill fallback is needed.
 - **Hub/epicenter branches are suppressed too, by intent.** `styleFn` reads
-  `getLayer(layerSelect.value)` even in trends (`engine.js:1460`), and
+  `getLayer(layerSelect.value)` even in trends (`engine.js:1427`), and
   `isHubZone` / `isEpicenterZone` depend only on that layer's matrix/epicenter
   config, not the view (`engine.js:104`–`113`) — so if `layerSelect` carries an
   epicenter/matrix layer, those emphasis borders *can* fire on the trends map. The
@@ -167,13 +170,21 @@ spike `coverage_union_all` after the snap (verifying the installed shapely/GEOS
 version on the build box first); if it cleanly removes the slivers it can replace
 step 3 and its threshold. Otherwise the strip-holes helper stands.
 
-**Province-count invariant (from review §7) — the load-bearing guard.** Capture
-the set of distinct input provinces before the union loop, and assert the output
-has **exactly one feature per input province** (same count, e.g. 26 in → 26 out),
-each retaining its `province` property. Fail the build loudly if a province would
-be dropped — silent province loss breaks plot generation and Trends search, not
-just the outline. This assertion, not the ring count, is the primary success gate
-for §3.
+**Province-count invariant (from review §7, §9) — the load-bearing guard.** Assert
+the output has **exactly one feature per input province** (same count, e.g.
+26 in → 26 out), each retaining its `province` property. Fail the build loudly if a
+province would be dropped — silent province loss breaks plot generation and Trends
+search, not just the outline. This assertion, not the ring count, is the primary
+success gate for §3.
+
+Anchor the invariant to the distinct `province` values in the **raw source
+features** — collected *before* any geometry filtering — **not** to the
+`by_province` keys. `by_province` is populated only after the per-zone
+`make_valid` / `geom_type` filter (`data_sources.py:736`–`739`), so a province
+whose zones are *all* dropped by that filter would never enter `by_province`, the
+count would still match, and the province would silently vanish anyway — the exact
+failure this guard exists to catch, just one step upstream of `set_precision`.
+Comparing against the raw province set closes that loop.
 
 **Threshold as a guard, not a hand-tuned magic number (from review §5).** The
 donut-hole-free assumption is load-bearing, so make it self-checking: after
@@ -182,6 +193,14 @@ below an absolute bound. A future source/geometry change that introduces a genui
 (large) hole then trips a loud build failure instead of silently erasing it. This
 also gives the threshold a principled value (comfortably above observed sliver
 areas, comfortably below that bound) rather than an eyeballed one.
+
+**Validate ring count on the final, post-round geometry (from review §10).** The
+drop-slivers step runs before the existing `simplify` / `_round_coords`
+(`COORD_DECIMALS = 5`) steps, and coordinate quantization can in principle
+re-introduce a degenerate sub-threshold interior ring. So run the "~0 interior
+rings" validation against the **final emitted geometry** (after rounding), not the
+pre-round intermediate. If quantization is found to reintroduce rings, move the
+strip-holes pass to *after* `_round_coords` instead.
 
 **Grid size / threshold** are tunable constants chosen during implementation and
 validated against the success criteria below (start conservative, confirm the
@@ -198,10 +217,10 @@ interior-ring count collapses without eroding the exterior outline).
   one feature per input province (count unchanged), each keeping its `province`
   property — asserted in the builder, so a geometry regression fails the build
   loudly.** Trends search and plot generation still list every province.
-- Interior-ring (hole) count across all province boundary features drops to ~0
-  (verified by re-running the geometry check used during diagnosis), each province's
-  exterior outline is unchanged, and the largest dropped interior-ring area is
-  logged and below the asserted bound.
+- Interior-ring (hole) count across all province boundary features drops to ~0 —
+  checked on the **final post-round geometry** (re-running the diagnosis geometry
+  check), each province's exterior outline unchanged, and the largest dropped
+  interior-ring area logged and below the asserted bound.
 - A selected province shows a clean red outline with no internal lines.
 - `national` / `health_zone` scopes and the `map` / `epi-trends` views are
   **behaviourally** unchanged. The province outlines shown in national/health_zone
