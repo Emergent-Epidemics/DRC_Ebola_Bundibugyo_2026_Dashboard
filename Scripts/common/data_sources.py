@@ -787,26 +787,54 @@ def load_features_from_geojson() -> tuple[list[dict], dict[str, tuple[float, flo
 
 
 def build_province_boundaries() -> dict:
-    """Union health-zone polygons into one outline per province."""
+    """Union health-zone polygons into one clean outline per province.
+
+    Also the authoritative province roster: ``payload.py`` derives
+    ``province_names`` from these features (plot generation) and ``engine.js``
+    builds the Trends search dropdown from them. A dropped province silently
+    disappears from plots + search, so the province-count invariant below is
+    asserted, not merely hoped for.
+    """
     if not BUILD_GEOJSON.exists():
         return {"type": "FeatureCollection", "features": []}
 
     with open(BUILD_GEOJSON) as f:
         raw = json.load(f)
 
+    # Distinct provinces in the RAW source, before any geometry filtering. The
+    # invariant compares output against THIS set (not ``by_province`` keys): a
+    # province whose zones are all dropped by the make_valid/geom-type filter
+    # would never enter ``by_province``, so the count would still match while the
+    # province silently vanished.
+    raw_provinces = {
+        (feat.get("properties") or {}).get("province")
+        for feat in (raw.get("features") or [])
+        if (feat.get("properties") or {}).get("province")
+    }
+
     by_province: dict[str, list] = {}
     for feat in raw.get("features") or []:
         prov = (feat.get("properties") or {}).get("province")
         if not prov:
             continue
+        # make_valid -> set_precision (snap shared edges together) -> make_valid.
+        # Snapping can itself re-introduce invalidity, hence the second repair.
         geom = make_valid(shape(feat["geometry"]))
+        geom = make_valid(set_precision(geom, PROVINCE_SNAP_GRID))
         if geom.is_empty or geom.geom_type not in {"Polygon", "MultiPolygon"}:
             continue
         by_province.setdefault(prov, []).append(geom)
 
     out: list[dict] = []
+    max_dropped_ring = 0.0
+    max_dropped_part = 0.0
     for prov in sorted(by_province):
         merged = unary_union(by_province[prov])
+        if merged.is_empty:
+            continue
+        merged, ring_max, part_max = _strip_slivers(merged, PROVINCE_SLIVER_MAX)
+        max_dropped_ring = max(max_dropped_ring, ring_max)
+        max_dropped_part = max(max_dropped_part, part_max)
         if merged.is_empty:
             continue
         if SIMPLIFY_TOL > 0:
@@ -821,6 +849,33 @@ def build_province_boundaries() -> dict:
             "geometry": gdict,
             "properties": {"province": prov},
         })
+
+    # Province-count invariant (the load-bearing guard): every raw province must
+    # survive to exactly one output feature. Fail loudly -- a dropped province
+    # silently breaks plot generation and Trends search, not just the outline.
+    out_provinces = {f["properties"]["province"] for f in out}
+    missing = raw_provinces - out_provinces
+    if missing:
+        raise ValueError(
+            f"build_province_boundaries dropped provinces {sorted(missing)}; "
+            "the geometry pipeline must preserve every province (plots + search "
+            "derive their province list from this output)."
+        )
+    assert len(out) == len(raw_provinces), (
+        f"province count {len(out)} != {len(raw_provinces)} raw provinces"
+    )
+
+    # Sliver-cleanup visibility: print the largest ring/part dropped so a
+    # shrinking empirical gap (a genuine large hole/island nearing the threshold)
+    # is noticeable in the build log, and sanity-check the helper honoured its
+    # threshold.
+    print(
+        f"  province sliver cleanup: largest dropped ring {max_dropped_ring:.2e} "
+        f"deg^2, largest dropped part {max_dropped_part:.2e} deg^2 "
+        f"(threshold {PROVINCE_SLIVER_MAX:.0e})"
+    )
+    assert max_dropped_ring < PROVINCE_SLIVER_MAX and max_dropped_part < PROVINCE_SLIVER_MAX
+
     return {"type": "FeatureCollection", "features": out}
 
 
