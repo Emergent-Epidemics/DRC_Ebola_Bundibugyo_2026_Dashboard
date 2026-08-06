@@ -44,3 +44,19 @@ def test_write_effective_defaults_zero_and_takes_max():
     assert zone_data["Rethy"]["effective_confirmed_cases"] == 5   # harmonised wins
     assert zone_data["Bunia"]["effective_confirmed_cases"] == 900  # sitrep (fresher) wins
     assert zone_data["Ghost"]["effective_confirmed_cases"] == 0    # default 0, no crash
+
+
+def test_markers_use_effective_and_keep_sitrep_suspected():
+    zone_data = {
+        "Rethy": {"confirmed_cases": None, "suspected_cases": 0,
+                  "confirmed_deaths": 0, "effective_confirmed_cases": 5},
+        "Empty": {"confirmed_cases": None, "suspected_cases": 0,
+                  "confirmed_deaths": 0, "effective_confirmed_cases": 0},
+    }
+    centroids = {"Rethy": (30.5, 2.0), "Empty": (25.0, 1.0)}
+    markers = ds.build_active_case_markers(zone_data, centroids)
+    by_nom = {m["nom"]: m for m in markers}
+    assert "Rethy" in by_nom              # harmonised-only zone now gets a marker
+    assert by_nom["Rethy"]["confirmed"] == 5
+    assert by_nom["Rethy"]["suspected"] == 0   # sitrep field still emitted
+    assert "Empty" not in by_nom          # effective 0 -> no marker

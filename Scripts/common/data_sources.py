@@ -3116,7 +3116,7 @@ def build_active_case_markers(zone_data: dict[str, dict],
     for nom, rec in zone_data.items():
         if nom not in centroids:
             continue
-        conf = int(rec.get("confirmed_cases") or 0)
+        conf = int(rec.get("effective_confirmed_cases") or 0)
         if conf <= 0:
             continue
         susp = int(rec.get("suspected_cases") or 0)
