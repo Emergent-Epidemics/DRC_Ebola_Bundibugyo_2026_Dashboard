@@ -3,7 +3,7 @@
 **Date:** 2026-08-06
 **Status:** Draft — revised through 3 review passes; ready for implementation-plan review.
 **Repos touched:** `BDBV2026-Analysis` (model), `BDBV2026-Epidemic_Dashboard` (dashboard), and one config bump in `BDBV2026-Processed_Sensitive_Data` (`ANALYSIS_REF`).
-**Revised** 2026-08-06 after three critical-review passes (`…-review.md`). Pass 1 (provenance/delivery): corrected the delivery path (B1), added name-normalisation + coverage assertion (B2), pinned the invariant to the training cutoff (H1), grounded the no-white guarantee empirically + added a defensive fill (H2), kept sitrep suspected/deaths on the shared marker (M3). Pass 2 (engine render pipeline): added the colour **domain** (`recomputeEpiTrends`) to the engine sites (S1) and its global re-shade consequence (S2); corrected the readout claims — the marker is the *only* spatial-risk confirmed readout, so no ranked-table/hover change (S3/S4); and masked the downloadable CSV to match the map (S5). Pass 3 (file targeting / call order): re-pointed every build-side edit from the **dead** `build_dashboard_public.py` monolith to the live `common/data_sources.py` (F1), and pinned the `effective` write to happen **before** `payload.py:97` so `build_active_case_markers` sees it (F2).
+**Revised** 2026-08-06 after four critical-review passes (`…-review.md`). Pass 1 (provenance/delivery): corrected the delivery path (B1), added name-normalisation + coverage assertion (B2), pinned the invariant to the training cutoff (H1), grounded the no-white guarantee empirically + added a defensive fill (H2), kept sitrep suspected/deaths on the shared marker (M3). Pass 2 (engine render pipeline): added the colour **domain** (`recomputeEpiTrends`) to the engine sites (S1) and its global re-shade consequence (S2); corrected the readout claims — the marker is the *only* spatial-risk confirmed readout, so no ranked-table/hover change (S3/S4); and masked the downloadable CSV to match the map (S5). Pass 3 (file targeting / call order): re-pointed every build-side edit from the **dead** `build_dashboard_public.py` monolith to the live `common/data_sources.py` (F1), and pinned the `effective` write to happen **before** `payload.py:97` so `build_active_case_markers` sees it (F2). Pass 4 (fresh-context, incl. model repo): re-pointed §5 from the **dead** `spatiotemporal_conditional/` tree to the live `spatiotemporal/` (FP-1) and added the `run_all.R` key_outputs gather step; deferred the active-zone assertion past `payload.py:116` (FP-2); added the epi-trends **arrows** as a fourth engine consumer (FP-3); reframed reconcile as a no-op — the fix is the default-0 `effective` write + engine reads (FP-4); documented the download-mask plumbing + its reversal of a documented invariant (FP-5); required a default-0 `effective` write for **all** zones (FP-6); and flagged the mixed-source marker `total` + empirical re-verification (FP-7).
 
 ---
 
@@ -72,13 +72,25 @@ Four moving parts:
 
 ## 5. Model side — new artifact (`BDBV2026-Analysis`)
 
-The model already computes `zone_week` = confirmed cases from line-list ∪ appended sitrep, and
-`affected_zones(zone_week, cutoff)` (`spatiotemporal_conditional/15_workhorse.R`) already means
-`confirmed > 0` up to the training cutoff.
+> **Live path only (FP-1).** The shipped pipeline is **`spatiotemporal/`**, *not*
+> `spatiotemporal_conditional/`: `run_spatiotemporal.sh:55` defaults `PIPELINE=spatiotemporal/run_all.R`,
+> and CI collects `analysis/spatiotemporal/outputs` (`run-spatiotemporal.yml:145`). The two trees
+> **differ** (not copies) and `_conditional/` ships nothing. **Every model edit below targets
+> `spatiotemporal/…`** — editing `spatiotemporal_conditional/` is the model-side mirror of the F1
+> dead-file trap.
 
-Add an export from the same run (`run_all.R`) written into the run's
-`spatiotemporal/key_outputs/` directory, **beside `bayes_risk_scores_all_zones.csv`** (the file
-the dashboard already consumes — see §6):
+The model already computes `zone_week` = confirmed cases from line-list ∪ appended sitrep, and
+`affected_zones(zone_week, cutoff)` (`spatiotemporal/15_workhorse.R:75`) already means
+`confirmed > 0` up to the training cutoff. `bayes_risk_scores_all_zones.csv` (carrying
+`was_active_before`) is written to `OUT_REPORTS` (`spatiotemporal/run_all.R:898`).
+
+Add an export from the same run, in two steps that mirror how `bayes_risk_scores_all_zones.csv`
+already flows:
+
+1. **Write** `harmonised_confirmed_cases.csv` to `OUT_REPORTS` (as at `run_all.R:898`).
+2. **Add it to the `key_outputs/` gather list** (`run_all.R:1453-1481`, which `file.copy`s a
+   fixed set of report files into `key_outputs/`) — otherwise it never reaches `key_outputs/`
+   and the dashboard never sees it. This is the model-side allowlist (B1 refinement).
 
 ```
 key_outputs/harmonised_confirmed_cases.csv
@@ -108,19 +120,22 @@ fallback. So the new artifact must land in that dated `key_outputs/` dir, and th
 resolve it from there too.
 
 ```
-model run writes key_outputs/harmonised_confirmed_cases.csv
+run_all.R writes reports/harmonised_confirmed_cases.csv AND gathers it into key_outputs/ (§5)
   → run-spatiotemporal.yml: analysis/ci/collect_outputs.sh does `cp -R "$KEY/."`
-    (copies the WHOLE key_outputs/ bundle wholesale — no allowlist edit needed for key_outputs;
-     the strict allowlist only governs the separate reports/ copy)
+    (copies the WHOLE key_outputs/ bundle wholesale — no collect_outputs.sh edit needed;
+     its strict allowlist only governs the separate reports/ copy)
   → published to BDBV2026-Processed_Sensitive_Data/main
   → trigger-dashboard-rebuild.yml
   → dashboard reads it from the same dated key_outputs/ dir as bayes_risk_scores_all_zones.csv
 ```
 
-**Required infra step:** bump the pinned `ANALYSIS_REF` in `run-spatiotemporal.yml` to the
-`BDBV2026-Analysis` commit that emits the new artifact (inherent to shipping any model change).
-No `collect_outputs.sh` change is needed *provided the file is written into `key_outputs/`*; if it
-were instead placed under `reports/`, it would need adding to that script's strict allowlist.
+**Required steps (all inherent to shipping the model change, no standalone infra):**
+1. `run_all.R`: write the CSV **and** add it to the `key_outputs/` gather list (§5) — the
+   model-side allowlist. Miss this and the file never leaves the model repo.
+2. Bump the pinned `ANALYSIS_REF` in `run-spatiotemporal.yml` to the `BDBV2026-Analysis` commit
+   that emits it.
+3. `collect_outputs.sh` needs **no** change *because the file is in `key_outputs/`* (wholesale
+   `cp -R`); it would only need an allowlist edit if placed under `reports/` alone.
 
 ## 7. Dashboard build (Python)
 
@@ -148,13 +163,20 @@ happen before line 97** — not alongside the invasion load at 116–121 — or 
     `load_invasion_risk_estimates()` today, which keys by the raw string (`data_sources.py:1806`)
     and is the odd loader out; `load_confirmed_cases_timeseries` and others already normalise
     (`data_sources.py:2152`). (Worth fixing the invasion loader the same way while here.)
-  - **assert coverage:** warn on any `health_zone` not in the GeoJSON `nom` set, and — given the
-    §5 invariant — treat any `was_active_before` zone left without a matched harmonised count as a
-    **build error**, not a silent drop (a silent drop reproduces the white-zone bug).
+  - **`nom`-coverage warning (in the loader):** the GeoJSON `nom` set is available early, so the
+    loader can warn on any `health_zone` not matching a `nom`.
+  - **active-zone hard check (deferred, FP-2):** the invariant-backed "any `was_active_before` zone
+    with no matched harmonised count is a **build error**" check **cannot** live in the loader —
+    F2 runs the loader before line 97, but `was_active_before` is only known after
+    `load_invasion_risk_estimates()` at `:116`. Run this assertion **after line 116** (or inside
+    `reconcile`), where both fields exist. A silent drop here reproduces the white-zone bug.
 - **Effective count:** in `payload.py`, **before line 97** (F2), per zone compute
   **`effective = max(harmonised, sitrep_confirmed)`** with explicit defaults —
   `harmonised.get(nom, 0)` and sitrep `None → 0` (never call `max(None, …)`) — and write it into
-  each `zone_data` rec as **`effective_confirmed_cases`**. `sitrep_confirmed` is the current
+  **every** `zone_data` rec as **`effective_confirmed_cases`**, **defaulting to 0 for all zones**
+  (FP-6). A zone left `undefined` (e.g. one only in the GeoJSON, not the CSV) re-triggers the white
+  state in the engine (`v != null` false → transparent), so the default-0 write for *all* zones —
+  not only CSV-listed ones — is load-bearing. `sitrep_confirmed` is the current
   `zone_data.confirmed_cases` (built in `load_metadata`, `data_sources.py:2875-2885` — live-fetched
   INSP sitrep, WHO epi fallback — often *fresher* than the model's snapshot).
   - **Honest framing (M1):** `max()` is a pragmatic **freshness top-up**, a *lower bound* on the
@@ -162,20 +184,27 @@ happen before line 97** — not alongside the invasion load at 116–121 — or 
     had *and* the sitrep has since grown on other cases, `max` undercounts the true union. This
     never breaks "no white" (`effective ≥ harmonised`), but the displayed count can be lower than
     reality. The §11 follow-up (model always fresh) is what yields the exact union.
-- **Reconcile:** generalise `reconcile_invasion_active_cases()` (`data_sources.py`, called from
-  `payload.py`) to gate on `effective` instead of sitrep-only. Net result:
-  `was_active_before ⟺ effective > 0`; invasion outputs masked for exactly those zones;
-  `rr_nat` / `rr_nat_rank` / `priority_rank` renormalised over the truly-at-risk set. Its
-  one-directional (promote-only) behaviour is unchanged; only its input count widens. **Note:**
-  renormalisation divides by the mean of the *old* `rr_nat` over the cleaned set
-  (`data_sources.py:2071-2075`), so widening the promoted set shifts *every* at-risk zone's
-  `rr_nat` (~6% in the prior analysis) and rank — not only the promoted zones. Expected, not a bug.
+- **Reconcile: leave unchanged (FP-4).** The earlier draft proposed generalising
+  `reconcile_invasion_active_cases()` to gate on `effective`. This is a **no-op** and should be
+  dropped to avoid implying that's where the fix lives: reconcile only inspects *non-active* zones
+  (`if row.was_active_before: continue`), and by the §5 invariant those all have `harmonised = 0`,
+  so `effective = max(0, sitrep) = sitrep` — identical to what it already reads
+  (`data_sources.py:2051`). Reconcile keeps its existing, orthogonal role (promote at-risk zones on
+  fresh sitrep, mask their invasion outputs, renormalise ranks). **The white-zone fix is entirely
+  (a) the default-0 `effective_confirmed_cases` write into `zone_data` and (b) the engine reading
+  it (§8)** — not reconcile.
 - **Payload:** `effective_confirmed_cases` (written above) rides through in `zone_data`.
-- **Downloadable CSV (S5):** `load_invasion_risk_estimates` captures `download_csv` as an
-  unfiltered pre-reconcile snapshot (`data_sources.py:1744`), so it already shows `p_case_invasion`
-  for zones the map masks — and this change *widens* that masked set. Per decision, **mask the
-  download to match the map**: null `p_case_invasion` (and the other `_INVASION_AFFECTED_MASK_FIELDS`)
-  in `download_csv` for zones with `effective > 0`, so the downloaded CSV and the rendered map agree.
+- **Downloadable CSV (S5), with the plumbing FP-5 surfaces.** Per decision, **mask the download to
+  match the map**: null `p_case_invasion` (and the other `_INVASION_AFFECTED_MASK_FIELDS`) for zones
+  with `effective > 0`. Two non-trivial facts the one-liner hid:
+  - `download_csv` is captured as a **serialized all-horizons/all-zones string inside the loader**
+    (`data_sources.py:1744`), *before* reconcile and before `effective` exists. Masking it means
+    either computing `effective` early enough to pass into the loader, or masking the DataFrame
+    (every horizon row per zone) after `effective` is known and re-serialising — real cross-function
+    wiring, not a one-line filter.
+  - It **reverses a documented invariant**: `reconcile`'s docstring states "The raw `download_csv`
+    is left untouched" (`data_sources.py:2036`). That line must be updated and the reversal called
+    out, so the change is a conscious decision rather than a silent contradiction.
 - **Marker builder:** `build_active_case_markers` (**live copy `common/data_sources.py:3049`**,
   not the monolith) gates on `effective_confirmed_cases > 0` (instead of `confirmed_cases > 0`) and
   emits it as the marker's `confirmed` count, while **still emitting the existing sitrep-sourced
@@ -192,10 +221,10 @@ until the §11 follow-up lands, after which it can retire.
 
 ## 8. Dashboard engine (`Scripts/assets/engine.js`)
 
-The spatial-risk confirmed-case surface is **three** functions that must all read the **same**
-`effective` field, so the colour domain, the fill, and the marker can never disagree. (The second
-review confirmed the earlier draft named the fill but not the domain, and mislabelled two readouts
-that don't exist — corrected below.)
+The spatial-risk confirmed-case surface is **four** functions that must all read the **same**
+`effective` field, so the colour domain, the fill, the marker, and the arrows can never disagree.
+(Line numbers below are approximate and drift between builds — resolve against the current tree at
+implementation, FP-7.)
 
 - **Colour domain — `recomputeEpiTrends` (`engine.js:1259-1268`) [S1, was missing].** The orange
   scale `epiCasesDomain` is built by pushing active zones' **`ZONE_DATA[nom].confirmed_cases`**
@@ -211,7 +240,16 @@ that don't exist — corrected below.)
   §7). Shows the **harmonised confirmed** number for the Confirmed row, and **keeps the existing
   sitrep-sourced Suspected and Confirmed-deaths rows** (M3). This is the **only** per-zone
   confirmed readout in the spatial-risk view — so `effective` on the marker already makes colour
-  and number agree, with nothing else to change.
+  and number agree, with nothing else to change. (Note the build's marker `total = conf + susp`
+  (`data_sources.py:3074`) becomes mixed-source once `conf → effective`; fold into the M4 note.)
+- **Arrows — `zoneConfirmedCases` (`engine.js:635`) → `importationPressure` (`:642`) [FP-3].** In
+  epi-trends (`useImportPressure = activeView === "epi-trends"`, `:710`), the confirmed-cases
+  spatial-risk **arrows** are weighted by origin-zone `ZONE_DATA[nom].confirmed_cases`. Left
+  unchanged, a harmonised-only origin (e.g. Rethy) contributes **0** importation pressure while
+  being newly rendered as an active orange zone — an internal contradiction in this very view.
+  `zoneConfirmedCases` should read `effective_confirmed_cases`. (Impact is bounded: this path is
+  **superseded when `IMPORT_FORCE_PAIRWISE` is present** (`:753`), and is the documented fallback —
+  see [[spatial-risk-arrow-width-source]] — but the fallback should still be consistent.)
 
 **No other spatial-risk readout shows a confirmed count (verified — corrects the earlier draft,
 S3/S4):** the ranked table (`renderEpiTrendsTable:1223`) has **no confirmed column** (province /
@@ -269,6 +307,11 @@ null probability), the **defensive no-data fill** in §8 replaces the `fillOpaci
 so any violation surfaces as a visible flagged zone, never silent white. The guarantee is then
 structural, not merely observed.
 
+> **Re-verify before pinning (FP-7).** The empirical counts here (519 / 54 / 7 / 0; "all 466
+> non-active zones have non-null `p_case_invasion`"; the Rethy/Bafwasende specifics) were measured
+> from the `origin/main@5648ee5` payload. `origin/main` moves and local branches lag, so re-run the
+> measurement against the current built payload before pinning the §10 regression fixture to a SHA.
+
 ## 10. Testing
 
 Note: the current tree has **no** tests for `reconcile_invasion_active_cases`,
@@ -279,18 +322,22 @@ extension.
   **evaluated at the run's `training_window_end`** (H1), not over arbitrary horizons.
 - **Build (pytest):**
   - loader parses the CSV and resolves it from the dated `key_outputs/` dir;
-  - `effective = max(harmonised, sitrep)` per zone, with defaults for missing zones (M2): a zone
-    absent from the CSV → `harmonised = 0`; a sitrep `None → 0`; **no crash**;
-  - **name-join integrity (B2):** a `health_zone` needing `_NAME_TO_NOM` normalisation still
-    joins; an unmatched *active* zone raises a build error;
-  - reconcile driven by `effective` — a harmonised-only zone (Rethy-like) ends active with masked
-    invasion; a fresh-sitrep-only zone ends active; a both-zero zone stays at-risk with
-    `p_case_invasion` present;
-  - **download masking (S5):** a zone with `effective > 0` has `p_case_invasion` nulled in
-    `download_csv`, matching the map.
+  - **`effective_confirmed_cases` written for *every* zone, default 0 (FP-6)** — a GeoJSON zone
+    absent from the CSV gets `0`, never `undefined`; a sitrep `None → 0`; `max(None, …)` never
+    called; **no crash**;
+  - **name-join integrity (B2):** a `health_zone` needing `_NAME_TO_NOM` normalisation still joins;
+  - **active-zone coverage assertion runs after `load_invasion_risk_estimates` (FP-2):** a
+    `was_active_before` zone with no matched harmonised count fails the build *there*, not in the
+    loader (where `was_active_before` isn't known yet);
+  - reconcile behaviour is **unchanged (FP-4)** — a fresh-sitrep-only zone still promotes to active;
+    a both-zero zone stays at-risk with `p_case_invasion` present (no test asserts reconcile reads
+    `effective`, since it doesn't);
+  - **download masking (S5):** a zone with `effective > 0` has `p_case_invasion` nulled across
+    **all its horizon rows** in `download_csv`, matching the map.
 - **Engine:**
   - a harmonised-only fixture zone is **included in `epiCasesDomain` `caseVals`** (S1) and renders
     orange with the harmonised count and a marker — not clamped to darkest/lightest;
+  - the same zone's **importation-pressure arrow is non-zero** in epi-trends (FP-3);
   - a both-zero zone renders purple;
   - **null-`p_case_invasion` non-active zone** renders the defensive no-data fill, **not**
     transparent (H2);
