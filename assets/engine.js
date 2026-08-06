@@ -1795,11 +1795,11 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
   }
 }).addTo(map);
 
-// Re-apply zone borders after a zoom so zoomWeight() picks up the new zoom.
-// styleFn already encodes the map/epi-trends selection, so re-styling the whole
-// layer preserves those; the trends/context selection highlight lives outside
-// styleFn, so re-apply it.
-map.on("zoomend", function () {
+// Re-apply zone borders (e.g. after a zoom so zoomWeight() picks up the new
+// zoom). styleFn already encodes the map/epi-trends selection, so re-styling the
+// whole layer preserves those; the trends/context selection highlight lives
+// outside styleFn, so re-apply it.
+function restyleZonesForActiveView() {
   geoLayer.setStyle(styleFn);
   if (activeView === "trends" && trendsScope === "health_zone" && trendsSelectedKey) {
     geoLayer.eachLayer(function (layer) {
@@ -1812,6 +1812,23 @@ map.on("zoomend", function () {
     contextSelectedLayer.setStyle({weight: 1.6, color: "#ffae42"});
     contextSelectedLayer.bringToFront();
   }
+}
+
+map.on("zoomend", restyleZonesForActiveView);
+
+// A pan (or any map move) slides the zones out from under a stationary cursor,
+// and the browser does not reliably fire the zone's mouseout in that case --
+// especially on a fast drag -- so the hover tooltip / floating readout / hover
+// highlight would otherwise stay stranded until the zone is hovered and left
+// again. Tear that transient hover decoration down as soon as the map starts
+// moving, then re-apply the resting styles.
+map.on("movestart", function () {
+  geoLayer.eachLayer(function (layer) {
+    if (layer.getTooltip && layer.getTooltip()) layer.unbindTooltip();
+  });
+  hideEpiFloat();
+  setTrendsProvinceHover(null);
+  restyleZonesForActiveView();
 });
 
 map.on("click", function() {
