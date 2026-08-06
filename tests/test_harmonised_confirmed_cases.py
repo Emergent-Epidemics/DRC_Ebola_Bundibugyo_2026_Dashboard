@@ -51,7 +51,7 @@ def test_write_effective_defaults_zero_and_takes_max():
 def test_markers_use_effective_and_keep_sitrep_suspected():
     zone_data = {
         "Rethy": {"confirmed_cases": None, "suspected_cases": 0,
-                  "confirmed_deaths": 0, "effective_confirmed_cases": 5},
+                  "confirmed_deaths": 2, "effective_confirmed_cases": 5},
         "Empty": {"confirmed_cases": None, "suspected_cases": 0,
                   "confirmed_deaths": 0, "effective_confirmed_cases": 0},
     }
@@ -61,6 +61,7 @@ def test_markers_use_effective_and_keep_sitrep_suspected():
     assert "Rethy" in by_nom              # harmonised-only zone now gets a marker
     assert by_nom["Rethy"]["confirmed"] == 5
     assert by_nom["Rethy"]["suspected"] == 0   # sitrep field still emitted
+    assert by_nom["Rethy"]["confirmed_deaths"] == 2
     assert "Empty" not in by_nom          # effective 0 -> no marker
 
 
@@ -78,6 +79,13 @@ def test_coverage_assertion_flags_active_zone_without_count():
            "Aba":   {"effective_confirmed_cases": 0}}
     with pytest.raises(ValueError, match="Rethy"):
         ds.assert_harmonised_coverage(invasion_risk, bad, harmonised)
+
+
+def test_coverage_assertion_normalises_zone_name_before_lookup():
+    # invasion zones keyed by raw health_zone; effective lives on the nom key.
+    invasion_risk = {"zones": {"Nsona-Pangu": {"was_active_before": True}}}
+    zone_data = {"Nsona Mpangu": {"effective_confirmed_cases": 7}}  # nom key, covered
+    ds.assert_harmonised_coverage(invasion_risk, zone_data, {"Nsona Mpangu": 7})  # must NOT raise
 
 
 def test_coverage_assertion_warns_not_raises_when_artifact_absent(capsys):

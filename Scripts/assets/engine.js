@@ -1321,7 +1321,7 @@ function epiTrendsStyleFn(feature) {
     if (v != null && !Number.isNaN(Number(v))) {
       has = true;
       const num = Number(v);
-      if (num <= 0) fill = ZERO_FILL;
+      if (num <= 0) fill = NODATA_FILL;
       else {
         let t = (Math.log(num) - Math.log(epiCasesDomain.min)) /
           (Math.log(epiCasesDomain.max) - Math.log(epiCasesDomain.min) || 1);

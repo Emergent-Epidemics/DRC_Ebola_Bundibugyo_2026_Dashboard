@@ -1750,7 +1750,7 @@ def load_invasion_risk_estimates(effective_active_noms: set[str] | None = None) 
         _norm = df["health_zone"].astype(str).str.strip().map(
             lambda n: _NAME_TO_NOM.get(n, n))
         mask = _norm.isin(effective_active_noms)
-        for col in _INVASION_AFFECTED_MASK_FIELDS:
+        for col in (*_INVASION_AFFECTED_MASK_FIELDS, "p_case_high"):
             if col in df.columns:
                 df.loc[mask, col] = None
 
@@ -2154,9 +2154,10 @@ def assert_harmonised_coverage(invasion_risk: dict | None,
     if not invasion_risk:
         return
     broken = [
-        nom for nom, row in (invasion_risk.get("zones") or {}).items()
+        raw for raw, row in (invasion_risk.get("zones") or {}).items()
         if row.get("was_active_before")
-        and int((zone_data.get(nom) or {}).get("effective_confirmed_cases") or 0) <= 0
+        and int((zone_data.get(_NAME_TO_NOM.get(raw, raw)) or {})
+                .get("effective_confirmed_cases") or 0) <= 0
     ]
     if not broken:
         return
