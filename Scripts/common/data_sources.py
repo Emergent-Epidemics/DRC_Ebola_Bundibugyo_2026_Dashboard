@@ -2144,11 +2144,13 @@ def reconcile_invasion_active_cases(invasion_risk: dict | None,
 
 
 def assert_harmonised_coverage(invasion_risk: dict | None,
-                               zone_data: dict) -> None:
-    """Build-time guard for the §5 invariant: every ``was_active_before`` zone
-    must carry effective_confirmed_cases > 0. A silent gap here re-creates the
-    white-zone bug, so fail the build loudly. Runs AFTER load_invasion_risk_estimates
-    (that's when was_active_before is known)."""
+                               zone_data: dict,
+                               harmonised: dict) -> None:
+    """Guard for the §5 invariant: every ``was_active_before`` zone must carry
+    effective_confirmed_cases > 0. Enforced (raise) only when the harmonised
+    artifact is present; when it is absent (pre-upstream-artifact interim) the
+    same gap is expected, so warn instead of breaking the build — the engine's
+    defensive no-data fill keeps those zones visible."""
     if not invasion_risk:
         return
     broken = [
@@ -2156,10 +2158,14 @@ def assert_harmonised_coverage(invasion_risk: dict | None,
         if row.get("was_active_before")
         and int((zone_data.get(nom) or {}).get("effective_confirmed_cases") or 0) <= 0
     ]
-    if broken:
+    if not broken:
+        return
+    if harmonised:
         raise ValueError(
             "Active-before zones with no harmonised/effective count "
             f"(invariant broken, would render white): {sorted(broken)}")
+    print("  WARNING: harmonised artifact absent; active zones with no count "
+          f"render via the defensive no-data fill until it ships: {sorted(broken)}")
 
 
 # ---------------------------------------------------------------------------

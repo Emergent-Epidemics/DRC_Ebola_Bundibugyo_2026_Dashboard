@@ -69,14 +69,24 @@ def test_coverage_assertion_flags_active_zone_without_count():
         "Rethy": {"was_active_before": True},
         "Aba":   {"was_active_before": False},
     }}
+    harmonised = {"Rethy": 5}   # artifact present
     ok = {"Rethy": {"effective_confirmed_cases": 5},
           "Aba":   {"effective_confirmed_cases": 0}}
-    ds.assert_harmonised_coverage(invasion_risk, ok)     # no raise
+    ds.assert_harmonised_coverage(invasion_risk, ok, harmonised)     # no raise
 
     bad = {"Rethy": {"effective_confirmed_cases": 0},     # active but 0 -> invariant broken
            "Aba":   {"effective_confirmed_cases": 0}}
     with pytest.raises(ValueError, match="Rethy"):
-        ds.assert_harmonised_coverage(invasion_risk, bad)
+        ds.assert_harmonised_coverage(invasion_risk, bad, harmonised)
+
+
+def test_coverage_assertion_warns_not_raises_when_artifact_absent(capsys):
+    # Pre-Part-C interim: no harmonised artifact -> warn, do not break the build.
+    invasion_risk = {"zones": {"Rethy": {"was_active_before": True}}}
+    bad = {"Rethy": {"effective_confirmed_cases": 0}}
+    ds.assert_harmonised_coverage(invasion_risk, bad, {})   # must NOT raise
+    out = capsys.readouterr().out
+    assert "Rethy" in out
 
 
 def test_download_csv_masked_for_effective_active(tmp_path, monkeypatch):
