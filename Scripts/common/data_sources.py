@@ -179,6 +179,7 @@ __all__ = [
     'load_flowminder_latest_sparse',
     'load_metadata',
     'compute_global_sitrep_totals',
+    'write_effective_confirmed_cases',
     'build_active_case_markers',
     'build_genome_sequence_markers',
     '_EMAIL_RE',
@@ -3089,6 +3090,19 @@ def compute_global_sitrep_totals() -> dict | None:
     if geo_nat is not None:
         out["global_recovered_cases"] = geo_nat.get("global_recovered_cases", 0)
     return out
+
+
+def write_effective_confirmed_cases(zone_data: dict[str, dict],
+                                    harmonised: dict[str, int]) -> None:
+    """Write ``effective_confirmed_cases = max(harmonised, sitrep)`` into EVERY
+    zone rec, defaulting to 0. Must run before build_active_case_markers so the
+    markers (and later the engine) read it. A zone left undefined re-triggers the
+    white-zone bug in the engine, so the default-0 write for all zones is required.
+    """
+    for nom, rec in zone_data.items():
+        h = harmonised.get(nom, 0) or 0
+        s = rec.get("confirmed_cases") or 0
+        rec["effective_confirmed_cases"] = max(int(h), int(s))
 
 
 def build_active_case_markers(zone_data: dict[str, dict],

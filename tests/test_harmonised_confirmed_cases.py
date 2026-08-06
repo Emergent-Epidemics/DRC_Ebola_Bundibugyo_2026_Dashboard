@@ -31,3 +31,16 @@ def test_loader_returns_empty_when_absent(tmp_path, monkeypatch):
     out = _make_key_outputs(tmp_path, None)
     monkeypatch.setattr(ds, "DASHBOARD_PLOTS_DIR", out)
     assert ds.load_harmonised_confirmed_cases({"Rethy"}) == {}
+
+
+def test_write_effective_defaults_zero_and_takes_max():
+    zone_data = {
+        "Rethy": {"confirmed_cases": None},        # sitrep null
+        "Bunia": {"confirmed_cases": 900},         # sitrep present
+        "Ghost": {"confirmed_cases": None},        # in neither
+    }
+    harmonised = {"Rethy": 5, "Bunia": 10}         # Bunia harmonised < sitrep
+    ds.write_effective_confirmed_cases(zone_data, harmonised)
+    assert zone_data["Rethy"]["effective_confirmed_cases"] == 5   # harmonised wins
+    assert zone_data["Bunia"]["effective_confirmed_cases"] == 900  # sitrep (fresher) wins
+    assert zone_data["Ghost"]["effective_confirmed_cases"] == 0    # default 0, no crash

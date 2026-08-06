@@ -34,6 +34,11 @@ def build_shared_payload() -> dict:
     zone_data, case_totals = load_metadata(centroids_by_nom, field_paths)
     print(f"  assembled metadata for {len(zone_data)} zones")
 
+    # Harmonised (line-list ∪ sitrep) confirmed counts from the model, topped up
+    # with the dashboard's (fresher) live sitrep. MUST precede build_active_case_markers.
+    harmonised_confirmed = load_harmonised_confirmed_cases(set(zone_data))
+    write_effective_confirmed_cases(zone_data, harmonised_confirmed)
+
     initial_view = None
     if "Bunia" in centroids_by_nom:
         lon, lat = centroids_by_nom["Bunia"]
