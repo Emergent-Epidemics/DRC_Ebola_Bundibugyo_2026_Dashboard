@@ -505,15 +505,26 @@ const PLASMA = [
 const REDS = [
   [255,245,235],[254,217,181],[253,173,118],[252,127,73],[239,77,55],
   [205,32,32],[140,17,17]];
+// Spatial-risk confirmed-cases ramp: same orange->red identity as REDS, but
+// with the near-white low stop lifted so a low-count zone reads as clearly
+// orange (not near-white, which was indistinguishable from a near-zero
+// invasion-probability zone). Kept separate from the shared REDS palette so
+// this only affects the spatial-risk (invasion) map.
+const RISK_ORANGES = [
+  [253,216,172],[253,173,118],[252,127,73],[239,77,55],
+  [205,32,32],[140,17,17]];
 // Brand sequential ramp: #f6e3df → #e8b3a6 → #d08163 → #aa4a32 → #7c1d1d
 const OUTBREAK = [
   [246,227,223],[232,179,166],[208,129,99],[170,74,50],[124,29,29]];
 const VIRIDIS = [
   [68,1,84],[72,40,120],[62,73,137],[49,104,142],[38,130,142],[31,158,137],
   [53,183,121],[109,206,89],[180,222,44],[253,231,37]];
-// Darker, subdued purple ramp for invasion probability.
+// Darker, subdued purple ramp for invasion probability. The near-white low
+// stop was lifted so a near-zero-probability zone reads as clearly lavender
+// rather than near-white (which was indistinguishable from a low-count
+// confirmed-cases zone on the spatial-risk map).
 const PURPLES = [
-  [236,230,242],[214,201,224],[184,164,201],[150,124,171],[117,90,140],
+  [211,196,224],[184,164,201],[150,124,171],[117,90,140],
   [91,68,112],[72,52,90],[55,40,72],[42,30,56]];
 const PALETTES = {
   plasma:PLASMA, plasma_r:[...PLASMA].reverse(),
@@ -842,7 +853,7 @@ let epiSortDir = "asc";
 let epiSelectedNom = null;
 let epiFocusNoms = null; // Set of noms to keep vivid when a zone is selected
 let epiInvasionDomain = {min: 0, max: 1, palette: PURPLES};
-let epiCasesDomain = {min: 0, max: 1, isLog: true, palette: REDS};
+let epiCasesDomain = {min: 0, max: 1, isLog: true, palette: RISK_ORANGES};
 
 function clearEpiLinks() {
   epiLinkLayer.clearLayers();
@@ -1272,10 +1283,10 @@ function recomputeEpiTrends() {
       min: lo,
       max: hi === lo ? lo * 10 : hi,
       isLog: true,
-      palette: REDS,
+      palette: RISK_ORANGES,
     };
   } else {
-    epiCasesDomain = {min: 1, max: 10, isLog: true, palette: REDS};
+    epiCasesDomain = {min: 1, max: 10, isLog: true, palette: RISK_ORANGES};
   }
   updateEpiTitle();
   updateEpiMetaNotes();
