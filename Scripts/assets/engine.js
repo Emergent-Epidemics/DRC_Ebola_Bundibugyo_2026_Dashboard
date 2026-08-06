@@ -3285,6 +3285,24 @@ const GENOME_MAX_COUNT = GENOME_SEQUENCES.reduce(function(max, g) {
 const caseIcon = L.divIcon({className:"", html:"<div class='case-icon'></div>", iconSize:[14,14]});
 const caseLayer = L.layerGroup();
 const genomeLayer = L.layerGroup();
+
+// Markers (active-case, genome) and arcs (flow, epi-link) bind their tooltip
+// once and let Leaflet open it on hover / close it on mouseout. Whipping the
+// cursor over a dense cluster fires a burst of mouseovers but the browser drops
+// most of the matching mouseouts, so their tooltips pile up open -- a "bunch"
+// of stranded tooltips -- independent of any map movement. Enforce the natural
+// invariant that only one hover tooltip shows at a time: whenever any overlay
+// tooltip opens, close every other open one. Leaflet fires "tooltipopen" on the
+// map with e.tooltip._source pointing at the layer that just opened.
+map.on("tooltipopen", function (e) {
+  const src = e.tooltip && e.tooltip._source;
+  [caseLayer, genomeLayer, flowArcLayer, epiLinkLayer].forEach(function (grp) {
+    grp.eachLayer(function (l) {
+      if (l !== src && l.isTooltipOpen && l.isTooltipOpen()) l.closeTooltip();
+    });
+  });
+});
+
 const showCasesBox = document.getElementById("show-cases");
 const showGenomesBox = document.getElementById("show-genomes");
 const showGenomesRow = document.getElementById("show-genomes-row");
