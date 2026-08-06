@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-06
 **Status:** Approved (design); implementation plan to follow.
-**Repos touched:** `BDBV2026-Analysis` (model), `BDBV2026-Epidemic_Dashboard` (dashboard). Delivery rides existing `BDBV2026-Processed_Sensitive_Data` automation unchanged.
+**Repos touched:** `BDBV2026-Analysis` (model), `BDBV2026-Epidemic_Dashboard` (dashboard), and one config bump in `BDBV2026-Processed_Sensitive_Data` (`ANALYSIS_REF`).
+**Revised** 2026-08-06 after critical review (`…-review.md`): corrected the delivery path (B1), added name-normalisation + coverage assertion (B2), pinned the invariant to the training cutoff (H1), grounded the no-white guarantee empirically + added a defensive fill (H2), and kept sitrep suspected/deaths on the shared marker (M3).
 
 ---
 
@@ -75,46 +76,88 @@ The model already computes `zone_week` = confirmed cases from line-list ∪ appe
 `affected_zones(zone_week, cutoff)` (`spatiotemporal_conditional/15_workhorse.R`) already means
 `confirmed > 0` up to the training cutoff.
 
-Add an export from the same run (`run_all.R`, alongside `invasion_risk_model_estimates.csv`):
+Add an export from the same run (`run_all.R`) written into the run's
+`spatiotemporal/key_outputs/` directory, **beside `bayes_risk_scores_all_zones.csv`** (the file
+the dashboard already consumes — see §6):
 
 ```
-harmonised_confirmed_cases.csv
-  health_zone, cumulative_confirmed_cases      # harmonised; one row per zone; horizon-agnostic
+key_outputs/harmonised_confirmed_cases.csv
+  health_zone, cumulative_confirmed_cases      # one row per zone (not per forecast horizon)
 ```
 
-- The value is the per-zone cumulative confirmed count from `zone_week` up to the cutoff.
-- **Invariant (by construction):** `cumulative_confirmed_cases > 0 ⟺ was_active_before = TRUE`,
-  because both derive from the same `zone_week` at the same cutoff. This invariant is what makes
-  the "no white" guarantee (§7) hold.
+- The value is the per-zone **cumulative confirmed count from `zone_week`, evaluated at the same
+  `training_window_end` that drives `was_active_before`** (i.e. `affected_zones(zone_week, cutoff)`
+  and this count use one cutoff). It is *not* cumulated over all weeks — a first case landing
+  after the cutoff must not appear here, or the invariant below breaks.
+- **Invariant (by construction, at that cutoff):**
+  `cumulative_confirmed_cases > 0 ⟺ was_active_before = TRUE`, because both derive from the same
+  `zone_week` at the same `training_window_end`. This invariant underpins the "no white"
+  guarantee (§9); the §10 model test asserts it *at the cutoff*, not over arbitrary horizons.
+- `health_zone` is emitted in the **same spelling** as `bayes_risk_scores_all_zones.csv` (so it
+  joins to the dashboard exactly as the invasion table does); the loader normalises regardless
+  (§7, B2).
 
-## 6. Delivery path (no new infra)
+## 6. Delivery path (minimal infra — one `ANALYSIS_REF` bump)
+
+Correcting the earlier draft (B1): the dashboard's **live** invasion data does *not* come from
+`DATA_ROOT`. `load_invasion_risk_estimates()` resolves the newest
+`<outputs>/<date>/spatiotemporal/key_outputs/bayes_risk_scores_all_zones.csv` under
+`DASHBOARD_PLOTS_DIR` (via `_latest_spatiotemporal_key_outputs_dir()`,
+`data_sources.py:1645`); the committed `Data/invasion_risk_model_estimates.csv` is only a legacy
+fallback. So the new artifact must land in that dated `key_outputs/` dir, and the new loader must
+resolve it from there too.
 
 ```
-model run → published to BDBV2026-Processed_Sensitive_Data/main   (run-spatiotemporal.yml)
-          → trigger-dashboard-rebuild.yml
-          → dashboard build reads harmonised_confirmed_cases.csv from DATA_ROOT
-            (same route as invasion_risk_model_estimates.csv)
+model run writes key_outputs/harmonised_confirmed_cases.csv
+  → run-spatiotemporal.yml: analysis/ci/collect_outputs.sh does `cp -R "$KEY/."`
+    (copies the WHOLE key_outputs/ bundle wholesale — no allowlist edit needed for key_outputs;
+     the strict allowlist only governs the separate reports/ copy)
+  → published to BDBV2026-Processed_Sensitive_Data/main
+  → trigger-dashboard-rebuild.yml
+  → dashboard reads it from the same dated key_outputs/ dir as bayes_risk_scores_all_zones.csv
 ```
+
+**Required infra step:** bump the pinned `ANALYSIS_REF` in `run-spatiotemporal.yml` to the
+`BDBV2026-Analysis` commit that emits the new artifact (inherent to shipping any model change).
+No `collect_outputs.sh` change is needed *provided the file is written into `key_outputs/`*; if it
+were instead placed under `reports/`, it would need adding to that script's strict allowlist.
 
 ## 7. Dashboard build (Python)
 
 - **Loader:** new function in `Scripts/common/data_sources.py` beside
-  `load_invasion_risk_estimates()` that reads `harmonised_confirmed_cases.csv` →
-  `{nom: harmonised_confirmed}`.
+  `load_invasion_risk_estimates()` that reads `harmonised_confirmed_cases.csv` from the dated
+  `key_outputs/` dir (via `_latest_spatiotemporal_key_outputs_dir()`, **not** `DATA_ROOT`) →
+  `{nom: harmonised_confirmed}`. It **must** (B2):
+  - apply `_NAME_TO_NOM` normalisation (`data_sources.py:277`) to the `health_zone` key — unlike
+    `load_invasion_risk_estimates()` today, which keys by the raw string (`data_sources.py:1806`)
+    and is the odd loader out; `load_confirmed_cases_timeseries` and others already normalise
+    (`data_sources.py:2152`). (Worth fixing the invasion loader the same way while here.)
+  - **assert coverage:** warn on any `health_zone` not in the GeoJSON `nom` set, and — given the
+    §5 invariant — treat any `was_active_before` zone left without a matched harmonised count as a
+    **build error**, not a silent drop (a silent drop reproduces the white-zone bug).
 - **Effective count:** in `payload.py`, per zone compute
-  **`effective = max(harmonised, sitrep_confirmed)`**, where `sitrep_confirmed` is the current
-  `zone_data.confirmed_cases` (the live-fetched INSP sitrep value, WHO epi fallback — often
-  *fresher* than the model's snapshot). `max()` preserves both the union semantics and the
-  dashboard's freshness.
+  **`effective = max(harmonised, sitrep_confirmed)`** with explicit defaults —
+  `harmonised.get(nom, 0)` and sitrep `None → 0` (never call `max(None, …)`). `sitrep_confirmed`
+  is the current `zone_data.confirmed_cases` (live-fetched INSP sitrep, WHO epi fallback — often
+  *fresher* than the model's snapshot).
+  - **Honest framing (M1):** `max()` is a pragmatic **freshness top-up**, a *lower bound* on the
+    true current union — not a merge. If the line list contributed cases the fresher sitrep never
+    had *and* the sitrep has since grown on other cases, `max` undercounts the true union. This
+    never breaks "no white" (`effective ≥ harmonised`), but the displayed count can be lower than
+    reality. The §11 follow-up (model always fresh) is what yields the exact union.
 - **Reconcile:** generalise `reconcile_invasion_active_cases()` (`data_sources.py`, called from
   `payload.py`) to gate on `effective` instead of sitrep-only. Net result:
   `was_active_before ⟺ effective > 0`; invasion outputs masked for exactly those zones;
   `rr_nat` / `rr_nat_rank` / `priority_rank` renormalised over the truly-at-risk set. Its
-  one-directional (promote-only) behaviour is unchanged; only its input count widens.
+  one-directional (promote-only) behaviour is unchanged; only its input count widens. **Note:**
+  renormalisation divides by the mean of the *old* `rr_nat` over the cleaned set
+  (`data_sources.py:2071-2075`), so widening the promoted set shifts *every* at-risk zone's
+  `rr_nat` (~6% in the prior analysis) and rank — not only the promoted zones. Expected, not a bug.
 - **Payload:** expose `effective_confirmed_cases` per zone.
 - **Marker builder:** `build_active_case_markers` (`Scripts/build_dashboard_public.py`) gates on
   `effective > 0` (instead of `confirmed_cases > 0`) and emits `effective` as the marker's
-  confirmed count, so `PAYLOAD.active_case_markers` covers harmonised-only zones.
+  confirmed count, while **still emitting the existing sitrep-sourced `suspected` and
+  `confirmed_deaths` fields** (`build_dashboard_public.py:2241-2251`) — see §8/M3.
 
 ### Freshness safeguard rationale
 
@@ -122,23 +165,32 @@ The `max()` is **not** the dashboard re-deriving the union. It is an extension o
 dashboard already ships: `reconcile_invasion_active_cases()` already tops up the active *flag*
 from the dashboard's live sitrep. This widens that same top-up to the *count*, covering the
 window between the model's sitrep snapshot and the dashboard's live fetch. It is the interim
-until the §9 follow-up lands, after which it can retire.
+until the §11 follow-up lands, after which it can retire.
 
 ## 8. Dashboard engine (`Scripts/assets/engine.js`)
 
 - **Active-case marker tooltip (all views: map / context / epi-trends).** The shared `caseLayer`
-  is built once from `PAYLOAD.active_case_markers` (already gated/populated on `effective` by the
-  build, §7). `caseMarkerTooltip` shows **only** the harmonised confirmed number; the suspected
-  and confirmed-deaths rows are removed.
+  is built once from `PAYLOAD.active_case_markers` (gated/populated on `effective` by the build,
+  §7). `caseMarkerTooltip` (`engine.js:3322`) shows the **harmonised confirmed** number for the
+  Confirmed row, and **keeps the existing sitrep-sourced Suspected and Confirmed-deaths rows**
+  (M3 decision). This avoids stripping suspected/death counts from the Snapshot and Context
+  marker tooltips, which show them today, since the marker is a shared component.
 - **Spatial-risk polygons (`epiTrendsStyleFn`).** The confirmed-case (orange) path colours by
   `effective` instead of `ZONE_DATA[nom].confirmed_cases`. The branch remains keyed on
   `was_active_before`, which now `⟺ effective > 0`.
 - **Spatial-risk in-tab readouts.** The zone hover tooltip and the ranked epi-trends table show
   `effective`, so the number agrees with the polygon colour within the tab.
+- **Defensive no-data fill (H2).** Replace the `epiTrendsStyleFn` `{fillOpacity: 0}` fall-through
+  (`engine.js:1341`) with a visible "no-data" fill, so that if the invariant is ever violated the
+  map fails **loud** (a clearly flagged no-data zone) rather than **silent** (transparent/white).
+  This makes the §9 guarantee structural rather than only empirical; it should never trigger in
+  practice.
 - **Unchanged:** the Snapshot Total / Confirmed / Suspected / deaths choropleths, the Snapshot
   info box, and every other tab remain sitrep-sourced. On the Snapshot and Context views a
-  marker (harmonised) may therefore show a different confirmed number than the sitrep-sourced
-  info box for the same zone — an accepted, intentional consequence.
+  marker (harmonised confirmed) may therefore show a different confirmed number than the
+  sitrep-sourced info box for the same zone — an accepted, intentional consequence. **Document
+  this** in a support note (and consider a one-line tooltip caveat) so it reads as a conscious
+  two-source design, not a bug, to dashboard users and INSP (M4).
 
 ## 9. Edge cases — the "no white" guarantee
 
@@ -149,21 +201,49 @@ until the §9 follow-up lands, after which it can retire.
 | 0 | 0 | 0 | FALSE | purple, coloured by `p_case_invasion` (present, unmasked) |
 
 A zone can never reach the orange path without a count, nor the purple path without an invasion
-probability. The transparent/`fillOpacity: 0` state is therefore unreachable. This relies on the
-§5 invariant (`harmonised > 0 ⟺ was_active_before`) plus reconcile masking `p_case_invasion`
-exactly when `effective > 0`.
+probability. This relies on:
+
+1. the §5 invariant (`harmonised > 0 ⟺ was_active_before`, at the cutoff) — so no active zone
+   lacks a count;
+2. reconcile masking `p_case_invasion` exactly when `effective > 0`;
+3. **the purple branch never hitting a null `p_case_invasion`.** Verified empirically on the live
+   build (`origin/main@5648ee5`): **all 466 non-active zones have a non-null `p_case_invasion`**
+   (zero exceptions). GeoJSON zones the model does not score at all have no invasion row, so they
+   hit the separate `!row` branch (`engine.js:1307`, dark grey `fillOpacity 0.04`), not the
+   transparent path — they are not on the purple branch.
+
+Because that third condition is *empirical* (a future run could in principle score a zone with a
+null probability), the **defensive no-data fill** in §8 replaces the `fillOpacity: 0` fall-through
+so any violation surfaces as a visible flagged zone, never silent white. The guarantee is then
+structural, not merely observed.
 
 ## 10. Testing
 
+Note: the current tree has **no** tests for `reconcile_invasion_active_cases`,
+`load_invasion_risk_estimates`, or `_compact_ranks`, so this is net-new scaffolding, not an
+extension.
+
 - **Model:** the artifact is emitted; assert `cumulative_confirmed_cases > 0 ⟺ was_active_before`
-  over the run's zones.
-- **Build (pytest):** loader parses the CSV; `effective = max(harmonised, sitrep)` per zone;
-  reconcile driven by `effective` — a harmonised-only zone (Rethy-like) ends active with masked
-  invasion; a fresh-sitrep-only zone ends active; a both-zero zone stays at-risk with
-  `p_case_invasion` present.
-- **Engine:** a harmonised-only fixture zone renders orange with the harmonised count and a
-  marker; a both-zero zone renders purple; Snapshot layers are unaffected; marker tooltip shows
-  only the confirmed row.
+  **evaluated at the run's `training_window_end`** (H1), not over arbitrary horizons.
+- **Build (pytest):**
+  - loader parses the CSV and resolves it from the dated `key_outputs/` dir;
+  - `effective = max(harmonised, sitrep)` per zone, with defaults for missing zones (M2): a zone
+    absent from the CSV → `harmonised = 0`; a sitrep `None → 0`; **no crash**;
+  - **name-join integrity (B2):** a `health_zone` needing `_NAME_TO_NOM` normalisation still
+    joins; an unmatched *active* zone raises a build error;
+  - reconcile driven by `effective` — a harmonised-only zone (Rethy-like) ends active with masked
+    invasion; a fresh-sitrep-only zone ends active; a both-zero zone stays at-risk with
+    `p_case_invasion` present.
+- **Engine:**
+  - a harmonised-only fixture zone renders orange with the harmonised count and a marker;
+  - a both-zero zone renders purple;
+  - **null-`p_case_invasion` non-active zone** renders the defensive no-data fill, **not**
+    transparent (H2);
+  - marker tooltip shows harmonised confirmed **plus** the sitrep suspected/deaths rows (M3);
+  - Snapshot layers are unaffected.
+- **End-to-end regression:** pin the build **SHA** (`origin/main@5648ee5`) — not the zone names,
+  which drift per sitrep run — and assert Rethy and Bafwasende render as active-case zones with a
+  count in that payload.
 
 ## 11. Follow-up (documented, not built)
 
