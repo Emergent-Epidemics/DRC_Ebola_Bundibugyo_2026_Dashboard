@@ -635,7 +635,7 @@ function flowArcWeightNormalized(frac) {
 function zoneConfirmedCases(nom) {
   const z = ZONE_DATA[nom];
   if (!z) return 0;
-  const c = Number(z.confirmed_cases);
+  const c = Number(z.effective_confirmed_cases);
   return (isFinite(c) && c > 0) ? c : 0;
 }
 
@@ -1264,7 +1264,7 @@ function recomputeEpiTrends() {
     if (!epiZoneVisible(row)) return;
     if (row.was_active_before) {
       const z = ZONE_DATA[nom] || {};
-      const c = z.confirmed_cases;
+      const c = z.effective_confirmed_cases;
       if (c != null && !Number.isNaN(Number(c)) && Number(c) > 0) caseVals.push(Number(c));
     } else if (row.p_case_invasion != null && !Number.isNaN(row.p_case_invasion)) {
       invasionVals.push(row.p_case_invasion);
@@ -1317,7 +1317,7 @@ function epiTrendsStyleFn(feature) {
   let has = false;
   if (row.was_active_before) {
     const z = ZONE_DATA[ref] || {};
-    const v = z.confirmed_cases;
+    const v = z.effective_confirmed_cases;
     if (v != null && !Number.isNaN(Number(v))) {
       has = true;
       const num = Number(v);
@@ -1339,7 +1339,7 @@ function epiTrendsStyleFn(feature) {
     fill = rgb(lerpColor(epiInvasionDomain.palette, t));
   }
   if (!has) {
-    return {color: "#111", weight: zoomWeight(0.35), fillOpacity: 0};
+    return {color: "#111", weight: zoomWeight(0.35), fillColor: NODATA_FILL, fillOpacity: 0.55};
   }
   let opacity = 0.82;
   let weight = zoomWeight(0.35);
@@ -1393,6 +1393,7 @@ function leaveEpiTrendsView() {
 }
 
 const ZERO_FILL    = "#c4bfb6";
+const NODATA_FILL = "#7d7d7d";   // fail-loud: an active zone with no count (should never happen)
 let currentValues = new Map();
 let currentDomain = {min:0, max:1, isLog:true, palette:OUTBREAK};
 
