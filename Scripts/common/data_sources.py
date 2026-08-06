@@ -1669,7 +1669,7 @@ def _latest_spatiotemporal_key_outputs_dir() -> Path | None:
     return candidates[-1][1]
 
 
-def load_invasion_risk_estimates() -> dict | None:
+def load_invasion_risk_estimates(effective_active_noms: set[str] | None = None) -> dict | None:
     """Load Bayesian invasion-risk scores for the Epidemiological trends tab.
 
     Prefers ``horizon == 1`` (next forecast window). Zone names are expected to
@@ -1742,6 +1742,17 @@ def load_invasion_risk_estimates() -> dict | None:
 
     if "cutoff_date" not in df.columns and cutoff_override:
         df["cutoff_date"] = cutoff_override
+
+    # S5: mask the downloadable CSV to match the map — null the invasion fields
+    # for zones the dashboard renders as active (effective>0), across ALL horizon
+    # rows. Reverses the old "download_csv left untouched" behaviour, by decision.
+    if effective_active_noms:
+        _norm = df["health_zone"].astype(str).str.strip().map(
+            lambda n: _NAME_TO_NOM.get(n, n))
+        mask = _norm.isin(effective_active_noms)
+        for col in _INVASION_AFFECTED_MASK_FIELDS:
+            if col in df.columns:
+                df.loc[mask, col] = None
 
     # Keep a full-file snapshot for CSV download (all horizons / columns).
     download_csv = df.to_csv(index=False)
@@ -2080,7 +2091,8 @@ def reconcile_invasion_active_cases(invasion_risk: dict | None,
     the model's "affected once a case appears" definition), mask its invasion
     outputs like the model does, then renormalise rr_nat and re-rank
     rr_nat_rank / priority_rank over the cleaned set. The raw ``download_csv`` is
-    left untouched. See
+    masked in load_invasion_risk_estimates (S5) so the downloaded CSV matches
+    the reconciled map. See
     docs/superpowers/specs/2026-08-04-invasion-active-case-reconciliation-design.md.
 
     Mutates and returns ``invasion_risk`` (returns it unchanged when there is

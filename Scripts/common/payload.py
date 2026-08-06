@@ -118,7 +118,9 @@ def build_shared_payload() -> dict:
         zone_noms=zone_noms,
         provinces=province_names,
     )
-    invasion_risk = load_invasion_risk_estimates()
+    _eff_active = {n for n, r in zone_data.items()
+                   if int(r.get("effective_confirmed_cases") or 0) > 0}
+    invasion_risk = load_invasion_risk_estimates(effective_active_noms=_eff_active)
     # Reconcile the model's at-risk set against the freshest per-zone case counts:
     # a zone whose first confirmed case reached the sitrep after the model ran can
     # otherwise linger in the ranked at-risk table (and skew every other zone's
