@@ -129,6 +129,7 @@ __all__ = [
     '_latest_spatiotemporal_key_outputs_dir',
     'load_invasion_risk_estimates',
     'load_bayes_import_force_pairwise',
+    'load_harmonised_confirmed_cases',
     '_latest_spatiotemporal_pairwise_csv',
     'reconcile_invasion_active_cases',
     '_CONFIRMED_TS_LONG',
@@ -1977,6 +1978,50 @@ def load_bayes_import_force_pairwise() -> dict | None:
         "yyyymmdd": yyyymmdd,
         "source": csv_path.name,
     }
+
+
+def load_harmonised_confirmed_cases(valid_noms: set[str]) -> dict[str, int]:
+    """Per-zone harmonised (line-list ∪ sitrep) cumulative confirmed cases.
+
+    Read from the newest dated
+    ``spatiotemporal/key_outputs/harmonised_confirmed_cases.csv`` (same dir as
+    ``bayes_risk_scores_all_zones.csv``). Keys are GeoJSON ``nom`` after
+    ``_NAME_TO_NOM`` normalisation. Returns {} when the file is absent (the
+    dashboard then falls back to sitrep-only ``effective``). Warns on any
+    ``health_zone`` that does not match a GeoJSON ``nom``.
+    """
+    ko = _latest_spatiotemporal_key_outputs_dir()
+    if ko is None:
+        print("  NOTE: no spatiotemporal key_outputs dir; "
+              "harmonised confirmed cases unavailable")
+        return {}
+    csv_path = ko / "harmonised_confirmed_cases.csv"
+    if not csv_path.exists():
+        print(f"  NOTE: {csv_path.name} not found; "
+              "harmonised confirmed cases unavailable")
+        return {}
+    df = pd.read_csv(csv_path)
+    df.columns = [str(c).strip() for c in df.columns]
+    required = {"health_zone", "cumulative_confirmed_cases"}
+    missing = required - set(df.columns)
+    if missing:
+        print(f"  WARNING: {csv_path.name} missing columns: {sorted(missing)}")
+        return {}
+    out: dict[str, int] = {}
+    for _, row in df.iterrows():
+        raw = str(row.get("health_zone") or "").strip()
+        if not raw:
+            continue
+        nom = _NAME_TO_NOM.get(raw, raw)
+        val = pd.to_numeric(row.get("cumulative_confirmed_cases"), errors="coerce")
+        if pd.isna(val):
+            continue
+        out[nom] = int(val)
+        if nom not in valid_noms:
+            print(f"  WARNING: harmonised zone '{raw}'->'{nom}' "
+                  "not in GeoJSON nom set (dropped from map)")
+    print(f"  harmonised confirmed cases: {len(out)} zones")
+    return out
 
 
 # National + provincial invasion outputs the model masks to NA for an
