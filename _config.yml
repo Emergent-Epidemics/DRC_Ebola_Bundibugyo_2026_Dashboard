@@ -1,0 +1,11 @@
+# GitHub Pages (Jekyll) config.
+#
+# Pages serves this site from the repo root. `output/` holds the build
+# artefacts that build-dashboard.yml commits for versioning, but the files it
+# serves are the repo-root copies (see build-dashboard.yml) -- `output/` is
+# never reached by a visitor. It is ~129 MB, and publishing it pushed the
+# deployed site past the point where the upload fits inside the Pages deploy
+# timeout. Excluding it here drops it from the published site while keeping it
+# tracked in git as the versioned artefact.
+exclude:
+  - output
