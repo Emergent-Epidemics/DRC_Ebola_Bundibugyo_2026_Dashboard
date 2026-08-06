@@ -3,7 +3,7 @@
 **Date:** 2026-08-06
 **Status:** Approved (design); implementation plan to follow.
 **Repos touched:** `BDBV2026-Analysis` (model), `BDBV2026-Epidemic_Dashboard` (dashboard), and one config bump in `BDBV2026-Processed_Sensitive_Data` (`ANALYSIS_REF`).
-**Revised** 2026-08-06 after critical review (`…-review.md`): corrected the delivery path (B1), added name-normalisation + coverage assertion (B2), pinned the invariant to the training cutoff (H1), grounded the no-white guarantee empirically + added a defensive fill (H2), and kept sitrep suspected/deaths on the shared marker (M3).
+**Revised** 2026-08-06 after two critical-review passes (`…-review.md`). Pass 1 (provenance/delivery): corrected the delivery path (B1), added name-normalisation + coverage assertion (B2), pinned the invariant to the training cutoff (H1), grounded the no-white guarantee empirically + added a defensive fill (H2), kept sitrep suspected/deaths on the shared marker (M3). Pass 2 (engine render pipeline): added the colour **domain** (`recomputeEpiTrends`) to the engine sites (S1) and its global re-shade consequence (S2); corrected the readout claims — the marker is the *only* spatial-risk confirmed readout, so no ranked-table/hover change (S3/S4); and masked the downloadable CSV to match the map (S5).
 
 ---
 
@@ -154,6 +154,11 @@ were instead placed under `reports/`, it would need adding to that script's stri
   (`data_sources.py:2071-2075`), so widening the promoted set shifts *every* at-risk zone's
   `rr_nat` (~6% in the prior analysis) and rank — not only the promoted zones. Expected, not a bug.
 - **Payload:** expose `effective_confirmed_cases` per zone.
+- **Downloadable CSV (S5):** `load_invasion_risk_estimates` captures `download_csv` as an
+  unfiltered pre-reconcile snapshot (`data_sources.py:1744`), so it already shows `p_case_invasion`
+  for zones the map masks — and this change *widens* that masked set. Per decision, **mask the
+  download to match the map**: null `p_case_invasion` (and the other `_INVASION_AFFECTED_MASK_FIELDS`)
+  in `download_csv` for zones with `effective > 0`, so the downloaded CSV and the rendered map agree.
 - **Marker builder:** `build_active_case_markers` (`Scripts/build_dashboard_public.py`) gates on
   `effective > 0` (instead of `confirmed_cases > 0`) and emits `effective` as the marker's
   confirmed count, while **still emitting the existing sitrep-sourced `suspected` and
@@ -169,17 +174,42 @@ until the §11 follow-up lands, after which it can retire.
 
 ## 8. Dashboard engine (`Scripts/assets/engine.js`)
 
-- **Active-case marker tooltip (all views: map / context / epi-trends).** The shared `caseLayer`
-  is built once from `PAYLOAD.active_case_markers` (gated/populated on `effective` by the build,
-  §7). `caseMarkerTooltip` (`engine.js:3322`) shows the **harmonised confirmed** number for the
-  Confirmed row, and **keeps the existing sitrep-sourced Suspected and Confirmed-deaths rows**
-  (M3 decision). This avoids stripping suspected/death counts from the Snapshot and Context
-  marker tooltips, which show them today, since the marker is a shared component.
-- **Spatial-risk polygons (`epiTrendsStyleFn`).** The confirmed-case (orange) path colours by
-  `effective` instead of `ZONE_DATA[nom].confirmed_cases`. The branch remains keyed on
+The spatial-risk confirmed-case surface is **three** functions that must all read the **same**
+`effective` field, so the colour domain, the fill, and the marker can never disagree. (The second
+review confirmed the earlier draft named the fill but not the domain, and mislabelled two readouts
+that don't exist — corrected below.)
+
+- **Colour domain — `recomputeEpiTrends` (`engine.js:1259-1268`) [S1, was missing].** The orange
+  scale `epiCasesDomain` is built by pushing active zones' **`ZONE_DATA[nom].confirmed_cases`**
+  into `caseVals` (gated `> 0`). This **must switch to `effective`** in lockstep with the style
+  fn — otherwise a harmonised-only zone (null `confirmed_cases`, `effective > 0`) is excluded from
+  the domain, and the style fn then scales its `effective` against a range that doesn't contain it
+  → clamps to darkest/lightest, mis-colouring the very zones this change adds.
+- **Fill — `epiTrendsStyleFn` (`engine.js:1310`).** The confirmed-case (orange) path colours by
+  `effective` instead of `ZONE_DATA[nom].confirmed_cases`. The branch stays keyed on
   `was_active_before`, which now `⟺ effective > 0`.
-- **Spatial-risk in-tab readouts.** The zone hover tooltip and the ranked epi-trends table show
-  `effective`, so the number agrees with the polygon colour within the tab.
+- **Marker tooltip — `caseMarkerTooltip` (`engine.js:3322`), all views.** The shared `caseLayer`
+  is built once from `PAYLOAD.active_case_markers` (gated/populated on `effective` by the build,
+  §7). Shows the **harmonised confirmed** number for the Confirmed row, and **keeps the existing
+  sitrep-sourced Suspected and Confirmed-deaths rows** (M3). This is the **only** per-zone
+  confirmed readout in the spatial-risk view — so `effective` on the marker already makes colour
+  and number agree, with nothing else to change.
+
+**No other spatial-risk readout shows a confirmed count (verified — corrects the earlier draft,
+S3/S4):** the ranked table (`renderEpiTrendsTable:1223`) has **no confirmed column** (province /
+zone / p_inv / CI / rr / rr-rank / priority / priority-rank; active zones show "—" for the masked
+invasion metrics); the epi hover float (`updateEpiFloat:1086`) shows only surveillance / access /
+social-vulnerability gaps; and the `confirmed_cases` info panel (`infoHTML:1635`) is wired **only**
+to the Snapshot `#info-body` (`renderMapInfoBox`, `mapSelectedNom`), **not** epi-trends. Per the
+decision, **no confirmed column is added to the ranked table** — the marker suffices. `infoHTML`
+is left untouched (editing it would change the out-of-scope Snapshot panel).
+
+- **Global re-shade is expected, not per-zone-local [S2].** Because `epiCasesDomain.max` is
+  `max(caseVals)` (`engine.js:1287`), admitting harmonised-only zones can **raise the domain max
+  and re-shade every orange zone** (the log scale compresses the previously-known zones lighter).
+  This is a correct consequence of a correct fix, but it is a *visible* change to zones §9's table
+  otherwise reads as untouched — call it out in review so the rebuilt map isn't mistaken for a
+  regression.
 - **Defensive no-data fill (H2).** Replace the `epiTrendsStyleFn` `{fillOpacity: 0}` fall-through
   (`engine.js:1341`) with a visible "no-data" fill, so that if the invariant is ever violated the
   map fails **loud** (a clearly flagged no-data zone) rather than **silent** (transparent/white).
@@ -199,6 +229,10 @@ until the §11 follow-up lands, after which it can retire.
 | > 0 | any | > 0 | TRUE (model) | orange, coloured by `effective` |
 | 0 | > 0 | > 0 | TRUE (reconcile) | orange, coloured by `effective` |
 | 0 | 0 | 0 | FALSE | purple, coloured by `p_case_invasion` (present, unmasked) |
+
+This table describes each zone's *path* (which ramp), which is per-zone-local. The orange *shade*
+is **not** — it depends on the shared `epiCasesDomain`, so admitting new counts re-shades all
+orange zones (§8, S2).
 
 A zone can never reach the orange path without a count, nor the purple path without an invasion
 probability. This relies on:
@@ -233,14 +267,18 @@ extension.
     joins; an unmatched *active* zone raises a build error;
   - reconcile driven by `effective` — a harmonised-only zone (Rethy-like) ends active with masked
     invasion; a fresh-sitrep-only zone ends active; a both-zero zone stays at-risk with
-    `p_case_invasion` present.
+    `p_case_invasion` present;
+  - **download masking (S5):** a zone with `effective > 0` has `p_case_invasion` nulled in
+    `download_csv`, matching the map.
 - **Engine:**
-  - a harmonised-only fixture zone renders orange with the harmonised count and a marker;
+  - a harmonised-only fixture zone is **included in `epiCasesDomain` `caseVals`** (S1) and renders
+    orange with the harmonised count and a marker — not clamped to darkest/lightest;
   - a both-zero zone renders purple;
   - **null-`p_case_invasion` non-active zone** renders the defensive no-data fill, **not**
     transparent (H2);
   - marker tooltip shows harmonised confirmed **plus** the sitrep suspected/deaths rows (M3);
-  - Snapshot layers are unaffected.
+  - Snapshot layers, the ranked table, the epi hover float, and `infoHTML` are unaffected
+    (S3/S4 — none carries a spatial-risk confirmed number).
 - **End-to-end regression:** pin the build **SHA** (`origin/main@5648ee5`) — not the zone names,
   which drift per sitrep run — and assert Rethy and Bafwasende render as active-case zones with a
   count in that payload.
