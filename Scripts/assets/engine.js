@@ -1834,27 +1834,39 @@ map.on("zoomend", restyleZonesForActiveView);
 // highlight would otherwise stay stranded until the zone is hovered and left
 // again. Tear that transient hover decoration down as soon as the map starts
 // moving, then re-apply the resting styles.
-map.on("movestart", function () {
-  mapMoving = true;
+function tearDownHoverDecoration() {
+  // Zone hover tooltips are bound per-hover (see the geoLayer mouseover
+  // handler), so unbind them.
   geoLayer.eachLayer(function (layer) {
     if (layer.getTooltip && layer.getTooltip()) layer.unbindTooltip();
   });
+  // Active-case / genome markers and flow / epi-link arcs bind their tooltip
+  // once at creation and let Leaflet open it on hover; a fast drag misses the
+  // mouseout and strands it open, exactly like the zone tooltips did. Close
+  // (do NOT unbind -- the binding must survive for later hovers) any that are
+  // open on those layers.
+  [caseLayer, genomeLayer, flowArcLayer, epiLinkLayer].forEach(function (grp) {
+    grp.eachLayer(function (l) {
+      if (l.isTooltipOpen && l.isTooltipOpen()) l.closeTooltip();
+    });
+  });
   hideEpiFloat();
   setTrendsProvinceHover(null);
+}
+
+map.on("movestart", function () {
+  mapMoving = true;
+  tearDownHoverDecoration();
   restyleZonesForActiveView();
 });
 
 // Clear the moving flag once the map settles so hover decoration works again.
 // The mapMoving guard on mouseover means nothing should have accumulated during
 // the move, but tear down once more as a safety net (e.g. a mouseover that
-// raced the movestart).
+// raced the movestart, or a marker/arc tooltip Leaflet opened mid-drag).
 map.on("moveend", function () {
   mapMoving = false;
-  geoLayer.eachLayer(function (layer) {
-    if (layer.getTooltip && layer.getTooltip()) layer.unbindTooltip();
-  });
-  hideEpiFloat();
-  setTrendsProvinceHover(null);
+  tearDownHoverDecoration();
 });
 
 map.on("click", function() {
