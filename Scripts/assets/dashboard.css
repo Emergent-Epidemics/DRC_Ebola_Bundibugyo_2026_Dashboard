@@ -616,6 +616,16 @@
     max-width:min(420px, calc(100vw - 48px));
     line-height:1.4;
   }
+  /* Flow-layer hints sit lower on the map (not dead-centre, which read as an
+     obtrusive modal) and use smaller, less prominent text than the shared
+     hint base above. Scoped to the flow hints only; the context/travel
+     hints keep their centred placement. */
+  #flow-hint,
+  #flow-empty-hint {
+    top:auto; bottom:10%; transform:translateX(-50%);
+    font-size:clamp(11px, 1.6vw, 13px);
+    padding:9px 15px;
+  }
   body.view-map.matrix-layer-active #travel-hint { display:flex; }
   body.view-map.flow-layer-active #flow-hint { display:flex; }
   body.view-map.flow-layer-active.flow-hub-selected #flow-hint { display:none; }
