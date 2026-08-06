@@ -3002,6 +3002,14 @@ function setActiveView(view) {
 // <a href="..."> links (see common/chrome.py) and navigation is handled by
 // the browser. setActiveView() is instead invoked once on load, below, to
 // initialise whichever view this page represents (see "page bootstrap").
+//
+// Clicking the tab for the view you're already on would otherwise reload the
+// same page needlessly; cancel that navigation so the current tab stays put.
+document.querySelectorAll(".view-tab").forEach(function(tab) {
+  tab.addEventListener("click", function(ev) {
+    if (tab.classList.contains("active")) ev.preventDefault();
+  });
+});
 
 (function wireTrendsDateSlider() {
   const slider = document.getElementById("trends-date-slider");
