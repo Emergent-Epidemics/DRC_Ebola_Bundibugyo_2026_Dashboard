@@ -616,10 +616,10 @@
     max-width:min(420px, calc(100vw - 48px));
     line-height:1.4;
   }
-  /* Flow-layer hints sit lower on the map (not dead-centre, which read as an
+  /* These map hints sit lower on the map (not dead-centre, which read as an
      obtrusive modal) and use smaller, less prominent text than the shared
-     hint base above. Scoped to the flow hints only; the context/travel
-     hints keep their centred placement. */
+     hint base above. The travel-origin hint keeps its centred placement. */
+  #context-hint,
   #flow-hint,
   #flow-empty-hint {
     top:auto; bottom:10%; transform:translateX(-50%);
