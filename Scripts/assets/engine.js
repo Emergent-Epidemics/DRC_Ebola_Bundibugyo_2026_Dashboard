@@ -22,6 +22,12 @@ let flowHubUserSelected = false;
 let mapSelectedNom = null;          // the single "focused zone" for the snapshot view
 let flowArcStats = null;
 let activeView = "map";
+// True while the map is panning/zooming. Hover decoration (zone tooltip, epi
+// float, trends province hover) is suppressed while this is set: during a move
+// the browser keeps firing mouseover as zones slide under the cursor, and any
+// decoration opened then would be stranded after the move (see the movestart/
+// moveend handlers by geoLayer).
+let mapMoving = false;
 const MATRIX_ORIGIN_FILL = "#5b9bd5";
 const FLOW_OUT_COLOR = "#b23b2e";
 const FLOW_IN_COLOR = "#5b86b3";
@@ -1683,6 +1689,12 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
   onEachFeature: function (feature, layer) {
     layer.on({
       mouseover: function(e) {
+        // While the map is moving, zones slide under the cursor and fire
+        // mouseover; opening hover decoration then strands it after the move
+        // ends (movestart only clears what already existed when the move began,
+        // not what a mid-move mouseover creates). Suppress it entirely while
+        // moving -- a real hover after the map settles re-fires mouseover.
+        if (mapMoving) return;
         if (activeView === "trends") {
           if (trendsScope === "national") return;
           if (trendsScope === "province") {
@@ -1823,12 +1835,26 @@ map.on("zoomend", restyleZonesForActiveView);
 // again. Tear that transient hover decoration down as soon as the map starts
 // moving, then re-apply the resting styles.
 map.on("movestart", function () {
+  mapMoving = true;
   geoLayer.eachLayer(function (layer) {
     if (layer.getTooltip && layer.getTooltip()) layer.unbindTooltip();
   });
   hideEpiFloat();
   setTrendsProvinceHover(null);
   restyleZonesForActiveView();
+});
+
+// Clear the moving flag once the map settles so hover decoration works again.
+// The mapMoving guard on mouseover means nothing should have accumulated during
+// the move, but tear down once more as a safety net (e.g. a mouseover that
+// raced the movestart).
+map.on("moveend", function () {
+  mapMoving = false;
+  geoLayer.eachLayer(function (layer) {
+    if (layer.getTooltip && layer.getTooltip()) layer.unbindTooltip();
+  });
+  hideEpiFloat();
+  setTrendsProvinceHover(null);
 });
 
 map.on("click", function() {
