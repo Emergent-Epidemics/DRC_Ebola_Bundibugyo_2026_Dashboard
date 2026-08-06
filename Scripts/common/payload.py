@@ -124,6 +124,7 @@ def build_shared_payload() -> dict:
     # otherwise linger in the ranked at-risk table (and skew every other zone's
     # relative risk / rank). See reconcile_invasion_active_cases().
     invasion_risk = reconcile_invasion_active_cases(invasion_risk, zone_data)
+    assert_harmonised_coverage(invasion_risk, zone_data)
     confirmed_timeseries = load_confirmed_cases_timeseries(set(zone_data.keys()))
 
     asof = detect_asof()

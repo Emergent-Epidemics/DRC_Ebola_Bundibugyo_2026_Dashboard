@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
+import pytest
+
 ds = importlib.import_module("common.data_sources")
 
 
@@ -60,3 +62,18 @@ def test_markers_use_effective_and_keep_sitrep_suspected():
     assert by_nom["Rethy"]["confirmed"] == 5
     assert by_nom["Rethy"]["suspected"] == 0   # sitrep field still emitted
     assert "Empty" not in by_nom          # effective 0 -> no marker
+
+
+def test_coverage_assertion_flags_active_zone_without_count():
+    invasion_risk = {"zones": {
+        "Rethy": {"was_active_before": True},
+        "Aba":   {"was_active_before": False},
+    }}
+    ok = {"Rethy": {"effective_confirmed_cases": 5},
+          "Aba":   {"effective_confirmed_cases": 0}}
+    ds.assert_harmonised_coverage(invasion_risk, ok)     # no raise
+
+    bad = {"Rethy": {"effective_confirmed_cases": 0},     # active but 0 -> invariant broken
+           "Aba":   {"effective_confirmed_cases": 0}}
+    with pytest.raises(ValueError, match="Rethy"):
+        ds.assert_harmonised_coverage(invasion_risk, bad)

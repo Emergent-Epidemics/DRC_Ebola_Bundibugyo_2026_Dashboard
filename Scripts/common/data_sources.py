@@ -132,6 +132,7 @@ __all__ = [
     'load_harmonised_confirmed_cases',
     '_latest_spatiotemporal_pairwise_csv',
     'reconcile_invasion_active_cases',
+    'assert_harmonised_coverage',
     '_CONFIRMED_TS_LONG',
     '_CONFIRMED_TS_PROCESSED',
     '_CONFIRMED_TS_SKIP_NOMS',
@@ -2128,6 +2129,25 @@ def reconcile_invasion_active_cases(invasion_risk: dict | None,
     print(f"  reconciled {len(reconciled)} zone(s) at-risk->affected from latest "
           f"confirmed cases: {', '.join(sorted(reconciled))}")
     return invasion_risk
+
+
+def assert_harmonised_coverage(invasion_risk: dict | None,
+                               zone_data: dict) -> None:
+    """Build-time guard for the §5 invariant: every ``was_active_before`` zone
+    must carry effective_confirmed_cases > 0. A silent gap here re-creates the
+    white-zone bug, so fail the build loudly. Runs AFTER load_invasion_risk_estimates
+    (that's when was_active_before is known)."""
+    if not invasion_risk:
+        return
+    broken = [
+        nom for nom, row in (invasion_risk.get("zones") or {}).items()
+        if row.get("was_active_before")
+        and int((zone_data.get(nom) or {}).get("effective_confirmed_cases") or 0) <= 0
+    ]
+    if broken:
+        raise ValueError(
+            "Active-before zones with no harmonised/effective count "
+            f"(invariant broken, would render white): {sorted(broken)}")
 
 
 # ---------------------------------------------------------------------------
