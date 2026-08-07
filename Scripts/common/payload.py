@@ -34,6 +34,11 @@ def build_shared_payload() -> dict:
     zone_data, case_totals = load_metadata(centroids_by_nom, field_paths)
     print(f"  assembled metadata for {len(zone_data)} zones")
 
+    # Harmonised (line-list ∪ sitrep) confirmed counts from the model, topped up
+    # with the dashboard's (fresher) live sitrep. MUST precede build_active_case_markers.
+    harmonised_confirmed = load_harmonised_confirmed_cases(set(zone_data))
+    write_effective_confirmed_cases(zone_data, harmonised_confirmed)
+
     initial_view = None
     if "Bunia" in centroids_by_nom:
         lon, lat = centroids_by_nom["Bunia"]
@@ -113,12 +118,15 @@ def build_shared_payload() -> dict:
         zone_noms=zone_noms,
         provinces=province_names,
     )
-    invasion_risk = load_invasion_risk_estimates()
+    _eff_active = {n for n, r in zone_data.items()
+                   if int(r.get("effective_confirmed_cases") or 0) > 0}
+    invasion_risk = load_invasion_risk_estimates(effective_active_noms=_eff_active)
     # Reconcile the model's at-risk set against the freshest per-zone case counts:
     # a zone whose first confirmed case reached the sitrep after the model ran can
     # otherwise linger in the ranked at-risk table (and skew every other zone's
     # relative risk / rank). See reconcile_invasion_active_cases().
     invasion_risk = reconcile_invasion_active_cases(invasion_risk, zone_data)
+    assert_harmonised_coverage(invasion_risk, zone_data, harmonised_confirmed)
     confirmed_timeseries = load_confirmed_cases_timeseries(set(zone_data.keys()))
 
     asof = detect_asof()

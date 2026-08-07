@@ -129,8 +129,10 @@ __all__ = [
     '_latest_spatiotemporal_key_outputs_dir',
     'load_invasion_risk_estimates',
     'load_bayes_import_force_pairwise',
+    'load_harmonised_confirmed_cases',
     '_latest_spatiotemporal_pairwise_csv',
     'reconcile_invasion_active_cases',
+    'assert_harmonised_coverage',
     '_CONFIRMED_TS_LONG',
     '_CONFIRMED_TS_PROCESSED',
     '_CONFIRMED_TS_SKIP_NOMS',
@@ -178,6 +180,7 @@ __all__ = [
     'load_flowminder_latest_sparse',
     'load_metadata',
     'compute_global_sitrep_totals',
+    'write_effective_confirmed_cases',
     'build_active_case_markers',
     'build_genome_sequence_markers',
     '_EMAIL_RE',
@@ -1666,7 +1669,7 @@ def _latest_spatiotemporal_key_outputs_dir() -> Path | None:
     return candidates[-1][1]
 
 
-def load_invasion_risk_estimates() -> dict | None:
+def load_invasion_risk_estimates(effective_active_noms: set[str] | None = None) -> dict | None:
     """Load Bayesian invasion-risk scores for the Epidemiological trends tab.
 
     Prefers ``horizon == 1`` (next forecast window). Zone names are expected to
@@ -1739,6 +1742,17 @@ def load_invasion_risk_estimates() -> dict | None:
 
     if "cutoff_date" not in df.columns and cutoff_override:
         df["cutoff_date"] = cutoff_override
+
+    # S5: mask the downloadable CSV to match the map — null the invasion fields
+    # for zones the dashboard renders as active (effective>0), across ALL horizon
+    # rows. Reverses the old "download_csv left untouched" behaviour, by decision.
+    if effective_active_noms:
+        _norm = df["health_zone"].astype(str).str.strip().map(
+            lambda n: _NAME_TO_NOM.get(n, n))
+        mask = _norm.isin(effective_active_noms)
+        for col in (*_INVASION_AFFECTED_MASK_FIELDS, "p_case_high"):
+            if col in df.columns:
+                df.loc[mask, col] = None
 
     # Keep a full-file snapshot for CSV download (all horizons / columns).
     download_csv = df.to_csv(index=False)
@@ -1979,6 +1993,50 @@ def load_bayes_import_force_pairwise() -> dict | None:
     }
 
 
+def load_harmonised_confirmed_cases(valid_noms: set[str]) -> dict[str, int]:
+    """Per-zone harmonised (line-list ∪ sitrep) cumulative confirmed cases.
+
+    Read from the newest dated
+    ``spatiotemporal/key_outputs/harmonised_confirmed_cases.csv`` (same dir as
+    ``bayes_risk_scores_all_zones.csv``). Keys are GeoJSON ``nom`` after
+    ``_NAME_TO_NOM`` normalisation. Returns {} when the file is absent (the
+    dashboard then falls back to sitrep-only ``effective``). Warns on any
+    ``health_zone`` that does not match a GeoJSON ``nom``.
+    """
+    ko = _latest_spatiotemporal_key_outputs_dir()
+    if ko is None:
+        print("  NOTE: no spatiotemporal key_outputs dir; "
+              "harmonised confirmed cases unavailable")
+        return {}
+    csv_path = ko / "harmonised_confirmed_cases.csv"
+    if not csv_path.exists():
+        print(f"  NOTE: {csv_path.name} not found; "
+              "harmonised confirmed cases unavailable")
+        return {}
+    df = pd.read_csv(csv_path)
+    df.columns = [str(c).strip() for c in df.columns]
+    required = {"health_zone", "cumulative_confirmed_cases"}
+    missing = required - set(df.columns)
+    if missing:
+        print(f"  WARNING: {csv_path.name} missing columns: {sorted(missing)}")
+        return {}
+    out: dict[str, int] = {}
+    for _, row in df.iterrows():
+        raw = str(row.get("health_zone") or "").strip()
+        if not raw:
+            continue
+        nom = _NAME_TO_NOM.get(raw, raw)
+        val = pd.to_numeric(row.get("cumulative_confirmed_cases"), errors="coerce")
+        if pd.isna(val):
+            continue
+        out[nom] = int(val)
+        if nom not in valid_noms:
+            print(f"  WARNING: harmonised zone '{raw}'->'{nom}' "
+                  "not in GeoJSON nom set (dropped from map)")
+    print(f"  harmonised confirmed cases: {len(out)} zones")
+    return out
+
+
 # National + provincial invasion outputs the model masks to NA for an
 # already-affected zone -- we clear the same set when reconciling one in.
 _INVASION_AFFECTED_MASK_FIELDS = (
@@ -2033,7 +2091,8 @@ def reconcile_invasion_active_cases(invasion_risk: dict | None,
     the model's "affected once a case appears" definition), mask its invasion
     outputs like the model does, then renormalise rr_nat and re-rank
     rr_nat_rank / priority_rank over the cleaned set. The raw ``download_csv`` is
-    left untouched. See
+    masked in load_invasion_risk_estimates (S5) so the downloaded CSV matches
+    the reconciled map. See
     docs/superpowers/specs/2026-08-04-invasion-active-case-reconciliation-design.md.
 
     Mutates and returns ``invasion_risk`` (returns it unchanged when there is
@@ -2082,6 +2141,32 @@ def reconcile_invasion_active_cases(invasion_risk: dict | None,
     print(f"  reconciled {len(reconciled)} zone(s) at-risk->affected from latest "
           f"confirmed cases: {', '.join(sorted(reconciled))}")
     return invasion_risk
+
+
+def assert_harmonised_coverage(invasion_risk: dict | None,
+                               zone_data: dict,
+                               harmonised: dict) -> None:
+    """Guard for the §5 invariant: every ``was_active_before`` zone must carry
+    effective_confirmed_cases > 0. Enforced (raise) only when the harmonised
+    artifact is present; when it is absent (pre-upstream-artifact interim) the
+    same gap is expected, so warn instead of breaking the build — the engine's
+    defensive no-data fill keeps those zones visible."""
+    if not invasion_risk:
+        return
+    broken = [
+        raw for raw, row in (invasion_risk.get("zones") or {}).items()
+        if row.get("was_active_before")
+        and int((zone_data.get(_NAME_TO_NOM.get(raw, raw)) or {})
+                .get("effective_confirmed_cases") or 0) <= 0
+    ]
+    if not broken:
+        return
+    if harmonised:
+        raise ValueError(
+            "Active-before zones with no harmonised/effective count "
+            f"(invariant broken, would render white): {sorted(broken)}")
+    print("  WARNING: harmonised artifact absent; active zones with no count "
+          f"render via the defensive no-data fill until it ships: {sorted(broken)}")
 
 
 # ---------------------------------------------------------------------------
@@ -3046,6 +3131,19 @@ def compute_global_sitrep_totals() -> dict | None:
     return out
 
 
+def write_effective_confirmed_cases(zone_data: dict[str, dict],
+                                    harmonised: dict[str, int]) -> None:
+    """Write ``effective_confirmed_cases = max(harmonised, sitrep)`` into EVERY
+    zone rec, defaulting to 0. Must run before build_active_case_markers so the
+    markers (and later the engine) read it. A zone left undefined re-triggers the
+    white-zone bug in the engine, so the default-0 write for all zones is required.
+    """
+    for nom, rec in zone_data.items():
+        h = harmonised.get(nom, 0) or 0
+        s = rec.get("confirmed_cases") or 0
+        rec["effective_confirmed_cases"] = max(int(h), int(s))
+
+
 def build_active_case_markers(zone_data: dict[str, dict],
                               centroids: dict[str, tuple[float, float]]
                               ) -> list[dict]:
@@ -3057,7 +3155,7 @@ def build_active_case_markers(zone_data: dict[str, dict],
     for nom, rec in zone_data.items():
         if nom not in centroids:
             continue
-        conf = int(rec.get("confirmed_cases") or 0)
+        conf = int(rec.get("effective_confirmed_cases") or 0)
         if conf <= 0:
             continue
         susp = int(rec.get("suspected_cases") or 0)
