@@ -3346,7 +3346,12 @@ function caseMarkerTooltip(c) {
     "<strong>" + (c.name || t("ui.case_tooltip.unnamed")) + "</strong>" +
     row(t("ui.case_tooltip.suspected_cases"), c.suspected) +
     row(t("ui.case_tooltip.confirmed_cases"), c.confirmed) +
-    row(t("ui.case_tooltip.confirmed_deaths"), c.confirmed_deaths)
+    row(t("ui.case_tooltip.confirmed_deaths"), c.confirmed_deaths) +
+    // Confirmed count is harmonised (line list ∪ sitrep); suspected/deaths are
+    // sitrep only — label the mixed provenance so the numbers aren't misread.
+    "<div class='case-tt-source' style='margin-top:5px;padding-top:4px;" +
+    "border-top:1px solid rgba(128,128,128,0.35);color:#9aa0a6;font-size:10px'>" +
+    t("ui.case_tooltip.source_note") + "</div>"
   );
 }
 
