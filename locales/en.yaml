@@ -221,6 +221,7 @@ ui:
     suspected_cases: "Suspected cases"
     confirmed_cases: "Confirmed cases"
     confirmed_deaths: "Confirmed deaths"
+    source_note: "Confirmed: line list + sitrep · Suspected/deaths: sitrep"
     unnamed: "(unnamed)"
   genome_tooltip: "{n} sequences"
   info:
