@@ -221,6 +221,7 @@ ui:
     suspected_cases: "Cas suspectés"
     confirmed_cases: "Cas confirmés"
     confirmed_deaths: "Décès confirmés"
+    source_note: "Confirmés : liste linéaire + sitrep · Suspectés/décès : sitrep"
     unnamed: "(sans nom)"
   genome_tooltip: "{n} séquences"
   info:
