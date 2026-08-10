@@ -160,10 +160,6 @@
   }
   body.view-trends #trends-panel { display:flex; flex-direction:column; gap:10px; }
   body.view-trends #map { right: var(--trends-panel-width); }
-  /* Removed on this page only (for now) -- on narrow screens the top-left
-     corner it used to occupy is given to the location search bar instead
-     (see #trends-search-slot). */
-  body.view-trends .leaflet-control-zoom { display:none; }
   /* Sibling of #map (see chrome.py) -- engine.js relocates #trends-search-wrap
      in here on narrow screens (see @media max-width:700px below), out of
      #trends-controls, so search stays reachable next to the map instead of
@@ -273,9 +269,6 @@
   body.epi-splitting #map,
   body.epi-splitting #epi-trends-panel { pointer-events:none; }
   body.view-epi-trends #epi-trends-panel { display:flex; flex-direction:column; gap:8px; }
-  /* No search bar to relocate into this spot on Spatial Risk (unlike Trends),
-     so just hide it outright -- touch users pinch-zoom instead. */
-  body.view-epi-trends .leaflet-control-zoom { display:none; }
   body.view-trends #epi-trends-panel,
   body.view-trends #epi-split-handle,
   body.view-trends #epi-trends-legend,
@@ -912,10 +905,6 @@
        (tapping the toggle) restores the full width so the controls inside
        still have room. */
     #controls.collapsed { width:auto; max-width:min(160px, calc(60vw - 18px)); }
-    /* No location search to relocate into this corner on this tab (unlike
-       Trends), so just hide the zoom control outright -- touch users
-       pinch-zoom instead. */
-    body.view-map .leaflet-control-zoom { display:none; }
   }
   @media (max-height: 500px) {
     .panel          { font-size:11px; padding:5px 7px; }
