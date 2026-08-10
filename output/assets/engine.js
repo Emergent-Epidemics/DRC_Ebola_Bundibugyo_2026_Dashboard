@@ -3312,7 +3312,14 @@ map.on("tooltipopen", function (e) {
   const src = e.tooltip && e.tooltip._source;
   [caseLayer, genomeLayer, flowArcLayer, epiLinkLayer].forEach(function (grp) {
     grp.eachLayer(function (l) {
-      if (l !== src && l.isTooltipOpen && l.isTooltipOpen()) l.closeTooltip();
+      // Guard on a tooltip actually being bound before isTooltipOpen():
+      // flow-arc wing markers have none, and Leaflet's isTooltipOpen()
+      // dereferences this._tooltip unconditionally, so calling it on a
+      // tooltip-less layer throws. An uncaught throw here aborts Leaflet's
+      // click-event dispatch, which swallows the case-marker click that would
+      // otherwise select the zone (see handleCaseMarkerClick). Mirror the same
+      // guard used in tearDownHoverDecoration().
+      if (l !== src && l.getTooltip && l.getTooltip() && l.isTooltipOpen()) l.closeTooltip();
     });
   });
 });
