@@ -1854,7 +1854,11 @@ function tearDownHoverDecoration() {
   // open on those layers.
   [caseLayer, genomeLayer, flowArcLayer, epiLinkLayer].forEach(function (grp) {
     grp.eachLayer(function (l) {
-      if (l.isTooltipOpen && l.isTooltipOpen()) l.closeTooltip();
+      // Guard on a tooltip actually being bound: some members (e.g. the flow-arc
+      // wing markers) have none, and Leaflet's isTooltipOpen() dereferences
+      // this._tooltip unconditionally -- calling it on a tooltip-less layer
+      // throws, which (via the movestart handler) would abort the whole pan/zoom.
+      if (l.getTooltip && l.getTooltip() && l.isTooltipOpen()) l.closeTooltip();
     });
   });
   hideEpiFloat();
