@@ -1622,7 +1622,13 @@ function infoHTML(feature) {
   const name = feature.properties.name || t("ui.case_tooltip.unnamed");
   const info = t("ui.info");
   let h = "<div><strong>" + name + "</strong></div>";
-  h += "<div style='color:#aaa;font-size:11px;margin-bottom:6px'>" + (ref || "—") + "</div>";
+  // The nom is the underlying geometry key; surface it as a secondary line only
+  // when it actually differs from the display name. For almost every zone the
+  // geometry uses the place name as its nom, so name === ref and this line would
+  // just repeat the name. When omitted, the first <h4>'s top margin keeps the gap.
+  if (ref && ref !== name) {
+    h += "<div style='color:#aaa;font-size:11px;margin-bottom:6px'>" + ref + "</div>";
+  }
 
   // Trimmed to the fields Ciara asked to keep visible in the hover/click
   // panel: confirmed cases, confirmed deaths, population, health facilities,
