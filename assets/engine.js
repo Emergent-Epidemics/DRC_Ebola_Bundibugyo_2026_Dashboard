@@ -564,7 +564,10 @@ function valueForZone(ref, zone, layer) {
 
 // --- map setup ---
 const INITIAL_VIEW = PAYLOAD.initial_view || {lat: -2.5, lon: 22.5, zoom: 5};
-const map = L.map("map").setView([INITIAL_VIEW.lat, INITIAL_VIEW.lon], INITIAL_VIEW.zoom);
+// No on-map zoom control: the top-left corner it occupied collided with the
+// LAYER panel, and every view either relocates a search box into that corner
+// or expects touch users to pinch-zoom. Zoom via wheel/pinch/double-click.
+const map = L.map("map", {zoomControl: false}).setView([INITIAL_VIEW.lat, INITIAL_VIEW.lon], INITIAL_VIEW.zoom);
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>',
   subdomains: "abcd", maxZoom: 19
@@ -3156,8 +3159,8 @@ document.querySelectorAll(".view-tab").forEach(function(tab) {
 // --- Trends tab: on narrow screens, relocate the location search bar out of
 // #trends-controls (now buried in the stacked bottom panel, see
 // body.view-trends #trends-panel in dashboard.css) into #trends-search-slot,
-// a sibling of #map, positioned top-left where the Leaflet zoom control used
-// to sit on this page (see body.view-trends .leaflet-control-zoom). Moves it
+// a sibling of #map, positioned top-left in the corner the Leaflet zoom control
+// used to occupy before it was removed map-wide. Moves it
 // back to its original spot -- right after .trends-scope-row inside
 // #trends-controls -- on wider screens. ---
 (function wireTrendsSearchSlot() {
