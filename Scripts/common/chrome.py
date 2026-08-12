@@ -46,6 +46,7 @@ HEAD_TEMPLATE = r"""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="stylesheet" href="__ASSETS_PREFIX__dashboard.css" />
+__EXTRA_HEAD__
 <script>
 // Applies a saved Trends map/plots split *before* first paint, so a stored
 // preference doesn't flash the CSS default (60:40) for a frame before
@@ -450,7 +451,8 @@ _PAGE_SCOPED_PAYLOAD_KEYS = {
 
 
 def render_page(view_id: str, payload: dict, assets_prefix: str = "assets/",
-                *, page_body: str = "", extra_scripts: str = "") -> str:
+                *, page_body: str = "", extra_scripts: str = "",
+                extra_head: str = "") -> str:
     """Assemble one full page. ``view_id`` is one of the ids in NAV_ITEMS
     (map | trends | epi-trends | context | clinical-symptoms |
     surveillance-testing | genomic-epidemiology); the last three are
@@ -473,6 +475,7 @@ def render_page(view_id: str, payload: dict, assets_prefix: str = "assets/",
                                allow_nan=False)
 
     head = HEAD_TEMPLATE.replace("__PAGE_TITLE__", PAGE_TITLES[view_id])
+    head = head.replace("__EXTRA_HEAD__", extra_head)
     head = head.replace("__ASSETS_PREFIX__", assets_prefix)
 
     body = BODY_TEMPLATE.replace("__INITIAL_VIEW__", view_id)

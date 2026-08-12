@@ -31,6 +31,164 @@
     try { return (JSON.parse(el.textContent) || {}).genomic || null; } catch (e) { return null; }
   }
 
+  // Terracotta accent for the tree's own toolbar toggles (Legend / Node Bars /
+  // Tip Labels), matching the rail's warm accent.
+  var TREE_ACCENT = "#9b7d4e", TREE_ACCENT_BAND = "rgba(155,125,78,0.16)";
+
+  // --- Phylogeny (PearTree) --------------------------------------------------
+  // A defined categorical zone palette (Phase 0: passed at embed init via
+  // settings.annotationPalettes, the only per-zone colour hook the bundle exposes).
+  // Kelly-style maximally-distinct hues, all legible on the light tree canvas; the
+  // same map drives the legend, so tips and legend can never disagree. Cycled if a
+  // future tree carries >COLOURS zones (16 here covers the current 16).
+  var ZONE_COLOURS = [
+    "#BE0032", "#0067A5", "#008856", "#F38400", "#875692", "#F6A600",
+    "#E68FAC", "#654522", "#848482", "#604E97", "#B3446C", "#882D17",
+    "#8DB600", "#E25822", "#2B3D26", "#C2B280"
+  ];
+
+  function realZone(z) { return (z && z !== "null") ? z : null; }
+
+  // {map: {zone->hex}, order: [zone…] by descending tip count, counts: {zone->n}}.
+  // Ordering by count gives the most-sampled zones the leading (most separable) hues.
+  function buildZonePalette(tips) {
+    var counts = {};
+    (tips || []).forEach(function (t) {
+      var z = realZone(t.health_zone);
+      if (z) counts[z] = (counts[z] || 0) + 1;
+    });
+    var order = Object.keys(counts).sort(function (a, b) {
+      return counts[b] - counts[a] || (a < b ? -1 : 1);
+    });
+    var map = {};
+    order.forEach(function (z, i) { map[z] = ZONE_COLOURS[i % ZONE_COLOURS.length]; });
+    return { map: map, order: order, counts: counts };
+  }
+
+  function renderZoneLegend(pal) {
+    var box = document.getElementById("gen-tree-legend-box");
+    if (!box) return;
+    box.replaceChildren();
+    pal.order.forEach(function (z) {
+      var row = document.createElement("div"); row.className = "gen-legend-row";
+      var sw = document.createElement("span"); sw.className = "gen-legend-sw";
+      sw.style.background = pal.map[z];
+      var lb = document.createElement("span"); lb.className = "gen-legend-lb";
+      lb.textContent = z + " (" + pal.counts[z] + ")";
+      row.appendChild(sw); row.appendChild(lb); box.appendChild(row);
+    });
+  }
+
+  var TREE_PAD_LEFT = 20, TREE_PAD_RIGHT = 20;
+
+  // Embeds the phylogeny via the global PearTree bundle. Returns the tree instance
+  // (async, via a Promise) or null if the bundle/data is missing. The coordinator
+  // (Phase 5b) consumes the returned instance for tip selection + view-lock.
+  function createTreePanel(containerId, genomic) {
+    var host = document.getElementById(containerId);
+    if (!host) return Promise.resolve(null);
+    if (!window.PearTreeEmbed) { host.textContent = "Phylogeny renderer failed to load."; return Promise.resolve(null); }
+    if (!genomic || !genomic.tree) { host.textContent = "No phylogeny data."; return Promise.resolve(null); }
+
+    var meta = genomic.meta || {};
+    var pal = buildZonePalette(genomic.tips || []);
+    renderZoneLegend(pal);
+    host.textContent = "";   // drop the "Loading…" placeholder before embedding
+
+    return window.PearTreeEmbed.embed({
+      container: containerId,
+      tree: genomic.tree,           // inline NEXUS text (Phase 0: the `tree` key; no fetch)
+      filename: "Ituri.ptree",
+      height: "100%",               // fill the card's tree area (which is sized in CSS)
+      ui: {
+        theme: "light",
+        // Keep-list of toolbar sections; the omitted editing groups (annotations,
+        // colour, order, rotate, reroot, hideShow, navigation) stay hidden.
+        toolbarSections: ["fileOps", "nodeInfo", "zoom", "filter", "panels"]
+      },
+      settings: {
+        theme: "O'Toole",                    // light built-in palette (branch/tip/axis/bg)
+        tipLabelShow: "health_zone",         // annotation-keyed → init-only setting
+        tipColourBy: "health_zone",          // colour tips by zone…
+        annotationPalettes: { health_zone: pal.map },   // …with OUR defined palette
+        axisShow: "time",
+        axisDateAnnotation: "date",
+        axisDateFormat: "dd MMM yyyy",
+        axisMajorInterval: "auto",
+        axisMinorInterval: "auto",
+        axisMajorLabelFormat: "component",
+        axisMinorLabelFormat: "component",
+        nodeBarsEnabled: "on",               // 95% HPD internal-node age bars, on by default
+        nodeBarsWidth: "3",
+        // Yellow selection highlight (matches the map's selected marker); init-only keys.
+        selectedTipFillColor: "#f2c84b", selectedTipStrokeColor: "#9a7a16",
+        selectedTipStrokeWidth: "2", selectedTipStrokeOpacity: "1",
+        selectedTipFillOpacity: "0.65", selectedTipGrowthFactor: "1.9", selectedTipMinSize: "6",
+        selectedNodeFillColor: "#f2c84b", selectedNodeStrokeColor: "#9a7a16",
+        selectedNodeStrokeWidth: "2", selectedNodeStrokeOpacity: "1",
+        selectedNodeFillOpacity: "0.65", selectedNodeGrowthFactor: "1.9", selectedNodeMinSize: "6",
+        tipHoverFillColor: "#5b86b3", tipHoverStrokeColor: "#33567a",
+        // Alignment-critical geometry (kept regardless of theme).
+        paddingLeft: String(TREE_PAD_LEFT), paddingRight: String(TREE_PAD_RIGHT),
+        rootStubLength: "0", rootStemPct: "0"
+      }
+    }).then(function (tree) {
+      // Marker/label sizes: applyTheme drives these, so push them AFTER the theme.
+      // (applySettings key for the tip-label font is `fontSize`, not tipLabelFontSize.)
+      var SHAPE_SIZES = { nodeSize: "3", tipSize: "4", fontSize: "10" };
+      tree.applySettings(SHAPE_SIZES);
+      tree.onTreeLoad(function () { tree.fitToWindow(); tree.applySettings(SHAPE_SIZES); });
+
+      // Swallow PearTree's double-click "drill into subtree" gesture (no embed opt for
+      // it) on the canvas, in the capture phase before its own handler runs.
+      host.addEventListener("dblclick", function (e) {
+        if (e.target && e.target.id === "tree-canvas") { e.stopPropagation(); e.preventDefault(); }
+      }, true);
+
+      wireTreeToggles(tree, pal);
+      return tree;
+    }).catch(function (err) {
+      host.textContent = "Phylogeny failed to render.";
+      if (window.console) console.warn("[genomic] tree embed failed:", err);
+      return null;
+    });
+  }
+
+  // The three header toggles. Legend drives OUR legend box; Node Bars / Tip Labels
+  // drive PearTree's internal selects (applySettings can't push those to the renderer
+  // at runtime), dispatching the change each re-renders on.
+  function wireTreeToggles(tree, pal) {
+    var legendOn = false;
+    var legendBtn = document.getElementById("gen-tree-legend");
+    var legendBox = document.getElementById("gen-tree-legend-box");
+    function setLegend(on) {
+      legendOn = on;
+      if (legendBox) legendBox.hidden = !on;
+      applyToggleStyle(legendBtn, on, TREE_ACCENT, TREE_ACCENT_BAND);
+    }
+    applyToggleStyle(legendBtn, false, TREE_ACCENT, TREE_ACCENT_BAND);
+    if (legendBtn) legendBtn.addEventListener("click", function (e) { e.preventDefault(); setLegend(!legendOn); });
+
+    function driveSelect(id, value) {
+      var sel = document.getElementById(id);
+      if (!sel) return;
+      sel.value = value;
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    var nodeBarsOn = true;
+    var nodeBarsBtn = document.getElementById("gen-tree-nodebars");
+    function setNodeBars(on) { nodeBarsOn = on; driveSelect("node-bars-show", on ? "on" : "off"); applyToggleStyle(nodeBarsBtn, on, TREE_ACCENT, TREE_ACCENT_BAND); }
+    applyToggleStyle(nodeBarsBtn, true, TREE_ACCENT, TREE_ACCENT_BAND);
+    if (nodeBarsBtn) nodeBarsBtn.addEventListener("click", function (e) { e.preventDefault(); setNodeBars(!nodeBarsOn); });
+
+    var tipLabelsOn = true;
+    var tipLabelsBtn = document.getElementById("gen-tree-tiplabels");
+    function setTipLabels(on) { tipLabelsOn = on; driveSelect("tip-label-show", on ? "health_zone" : "off"); applyToggleStyle(tipLabelsBtn, on, TREE_ACCENT, TREE_ACCENT_BAND); }
+    applyToggleStyle(tipLabelsBtn, true, TREE_ACCENT, TREE_ACCENT_BAND);
+    if (tipLabelsBtn) tipLabelsBtn.addEventListener("click", function (e) { e.preventDefault(); setTipLabels(!tipLabelsOn); });
+  }
+
   // --- log-Y helpers (ported verbatim from the source log-scale.js) ---
   function niceLogRange(lo, hi) {
     if (!(lo > 0) || !(hi > 0)) return [1, 10];
@@ -261,15 +419,18 @@
 
   function createGenomicTab(ctx) {
     var data = (ctx && ctx.data) || {};
+    var treeApi = null;   // resolved PearTree instance (async); consumed by the coordinator
     return {
       mount: function () {
-        var tips = (data.tips || []).length;
-        setText("gen-tree-body", tips ? (tips + " sequences loaded — tree rendering pending") : "No genomic data");
+        this.treePromise = createTreePanel("gen-tree-body", data).then(function (t) {
+          treeApi = t; return t;
+        });
         renderNePanel(data);
         renderDistPanel(data);
       },
+      getTree: function () { return treeApi; },
       unmount: function () {
-        ["gen-tree-body"].forEach(function (id) { setText(id, ""); });
+        setText("gen-tree-body", "");
       }
     };
   }

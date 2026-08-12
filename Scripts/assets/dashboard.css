@@ -1189,6 +1189,47 @@
   }
   #genomic-panel .ne-tip-d { font-weight: 700; margin-bottom: 2px; }
   #genomic-panel .ne-tip-ci { color: #9c968b; }
+
+  /* ── Phylogeny (embedded PearTree) ── */
+  /* The tree needs a definite height for the embed's height:100% to resolve; the
+     rail scrolls, so a fixed area is fine. .gen-tree-wrap is the positioning
+     context for both the embed and the overlay legend. */
+  #genomic-panel .gen-tree-wrap { position: relative; height: 360px; min-height: 220px; }
+  #genomic-panel .gen-tree-body { position: absolute; inset: 0; font-size: 12px; color: #5c574f; }
+  /* Retint PearTree's --pt-* interface vars to the light rail palette (id
+     specificity beats the bundle's [data-bs-theme]); the canvas/background comes
+     from the O'Toole embed theme, not these. */
+  #gen-tree-body,
+  #gen-tree-body [data-bs-theme],
+  #gen-tree-body[data-bs-theme] {
+    --pt-bg: #ffffff; --pt-bg-panel: #f3f1ec; --pt-bg-dark: #ece9e2; --pt-bg-deepest: #ece9e2;
+    --pt-border: rgba(60,48,36,0.12); --pt-border-strong: rgba(60,48,36,0.26); --pt-border-input: rgba(60,48,36,0.18);
+    --pt-divider: rgba(60,48,36,0.10); --pt-divider-section: rgba(60,48,36,0.08); --pt-divider-panel: rgba(60,48,36,0.10);
+    --pt-gold: #9b7d4e; --pt-primary: #9b7d4e; --pt-brand-hover: #7c1d1d; --pt-red: #b23b2e;
+    --pt-selection-bg: rgba(155,125,78,0.16); --pt-selection-focus: rgba(155,125,78,0.12); --pt-resize-hover: rgba(155,125,78,0.30);
+    --pt-btn-default-bg: rgba(155,125,78,0.14); --pt-btn-default-border: rgba(155,125,78,0.50); --pt-btn-default-text: #8a6d3f;
+  }
+  /* Trim the toolbar: hide the Fit-view pair and the filter save/apply buttons. */
+  #gen-tree-body .btn-group:has(#btn-fit),
+  #gen-tree-body .fc-add,
+  #gen-tree-body .pt-named-filter-wrap { display: none !important; }
+  /* Export modal used Bootstrap's (dark-theme) body colour → near-invisible on our
+     light panel; force readable ink and lift it over Leaflet's map controls. */
+  #gen-tree-body .pt-modal { color: #2a2a27; --bs-body-color: #2a2a27; --bs-secondary-color: rgba(42,42,39,0.62); }
+  #gen-tree-body .pt-modal-overlay { z-index: 2000; }
+  /* Zone-colour legend: an overlay in the tree area's top-right, toggled by the
+     Legend button. Built from the same palette map the tips use (genomic.js). */
+  #genomic-panel .gen-tree-legend-box {
+    position: absolute; top: 6px; right: 6px; z-index: 3; max-height: calc(100% - 12px);
+    overflow: auto; background: rgba(255,255,255,0.95); border: 1px solid #e7e3db;
+    border-radius: 4px; padding: 6px 8px; font-size: 10.5px; color: #2a2a27;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12); pointer-events: auto;
+  }
+  #genomic-panel .gen-tree-legend-box[hidden] { display: none; }
+  #genomic-panel .gen-legend-row { display: flex; align-items: center; gap: 6px; line-height: 1.5; }
+  #genomic-panel .gen-legend-sw { width: 10px; height: 10px; border-radius: 2px; flex: none; border: 1px solid rgba(0,0,0,0.15); }
+  #genomic-panel .gen-legend-lb { white-space: nowrap; }
+
   /* Drag handle on the panel's left edge (width persisted to localStorage by
      genomic.js). Sits just outside the border so it doesn't overlap content. */
   #genomic-resize {
