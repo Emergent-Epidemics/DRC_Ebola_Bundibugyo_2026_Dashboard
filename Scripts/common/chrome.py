@@ -447,6 +447,7 @@ def _render_nav(active_view: str, assets_prefix: str) -> str:
 # payload key -> set of view_ids allowed to carry it.
 _PAGE_SCOPED_PAYLOAD_KEYS = {
     "import_force_pairwise": {"epi-trends"},
+    "genomic": {"genomic-epidemiology"},
 }
 
 
