@@ -249,6 +249,8 @@
     });
 
     var xMin = +new Date(meta.rootDate), xMax = +new Date(meta.mostRecentDate);
+    var transform = null;      // tree view transform (x-axis lock); null = static span
+    var markerDates = [];      // selected-tip dates (ms) → dashed vertical lines
     var tip = document.createElement("div"); tip.className = "ne-tip"; tip.style.display = "none";
 
     function yDomain() {
@@ -263,14 +265,25 @@
     function render() {
       var W = host.clientWidth || 320, H = host.clientHeight || 180;
       var yd = yDomain(), yMin = yd[0], yMax = yd[1];
-      var xToPx = function (t) { return NE_PAD.left + ((t - xMin) / (xMax - xMin)) * (W - NE_PAD.left - NE_PAD.right); };
-      var pxToDate = function (px) { return xMin + ((px - NE_PAD.left) / (W - NE_PAD.left - NE_PAD.right)) * (xMax - xMin); };
+      // Date→x anchored to the tree's live transform when present (locks the x-axis
+      // to the phylogeny, so panning/zooming the tree tracks here), else the panel's
+      // own root→mostRecent span. offsetX = root px; +maxX·scaleX = mostRecent px.
+      var x0 = transform ? transform.offsetX : NE_PAD.left;
+      var x1 = transform ? (transform.offsetX + transform.maxX * transform.scaleX) : (W - NE_PAD.right);
+      var span = (xMax - xMin) || 1, dx = (x1 - x0) || 1;
+      var xToPx = function (t) { return x0 + ((t - xMin) / span) * dx; };
+      var pxToDate = function (px) { return xMin + ((px - x0) / dx) * span; };
       var yOf = function (ne) {
         var lo = Math.log10(yMin), hi = Math.log10(yMax), v = Math.log10(Math.max(ne, Number.MIN_VALUE));
         return (H - NE_PAD.bottom) - ((v - lo) / (hi - lo)) * ((H - NE_PAD.bottom) - NE_PAD.top);
       };
       host.replaceChildren();
       var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, preserveAspectRatio: "none" });
+      // Clip drawing to the plot gutter so an x-locked ribbon/marker doesn't spill
+      // past the axes when the tree is panned or zoomed.
+      var clip = svgEl("clipPath", { id: "gen-ne-clip" });
+      clip.appendChild(svgEl("rect", { x: NE_PAD.left, y: NE_PAD.top, width: Math.max(0, W - NE_PAD.left - NE_PAD.right), height: Math.max(0, H - NE_PAD.top - NE_PAD.bottom) }));
+      svg.appendChild(clip);
 
       logTicks(yMin, yMax).forEach(function (tk) {
         var y = yOf(tk);
@@ -281,24 +294,41 @@
 
       var baseY = H - NE_PAD.bottom;
       svg.appendChild(svgEl("line", { x1: NE_PAD.left, y1: baseY, x2: W - NE_PAD.right, y2: baseY, stroke: "#c9c7c2", "stroke-width": 1 }));
+      // x ticks from the visible date range (tracks the lock).
+      var dL = pxToDate(NE_PAD.left), dR = pxToDate(W - NE_PAD.right);
       var nT = Math.max(2, Math.min(6, Math.floor((W - NE_PAD.left) / 80)));
       for (var i = 0; i <= nT; i++) {
-        var t = xMin + ((xMax - xMin) * i) / nT, x = xToPx(t);
+        var t = dL + ((dR - dL) * i) / nT, x = xToPx(t);
+        if (x < NE_PAD.left - 1 || x > W - NE_PAD.right + 1) continue;
         svg.appendChild(svgEl("line", { x1: x, y1: baseY, x2: x, y2: baseY + 3, stroke: "#c9c7c2", "stroke-width": 1 }));
         var xl = svgEl("text", { x: x, y: baseY + 13, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" });
         xl.textContent = fmtDay(t); svg.appendChild(xl);
       }
 
+      var gdata = svgEl("g", { "clip-path": "url(#gen-ne-clip)" });
       datasets.forEach(function (ds) {
         if (!ds.visible) return;
         var d = "";
         ds.pts.forEach(function (p, i) { d += (i ? "L" : "M") + xToPx(p.t) + "," + yOf(p.hi) + " "; });
         for (var j = ds.pts.length - 1; j >= 0; j--) d += "L" + xToPx(ds.pts[j].t) + "," + yOf(ds.pts[j].lo) + " ";
-        svg.appendChild(svgEl("path", { d: d + "Z", fill: ds.band, stroke: "none" }));
+        gdata.appendChild(svgEl("path", { d: d + "Z", fill: ds.band, stroke: "none" }));
         var m = "";
         ds.pts.forEach(function (p, i) { m += (i ? "L" : "M") + xToPx(p.t) + "," + yOf(p.med) + " "; });
-        svg.appendChild(svgEl("path", { d: m, fill: "none", stroke: ds.color, "stroke-width": 1.6 }));
+        gdata.appendChild(svgEl("path", { d: m, fill: "none", stroke: ds.color, "stroke-width": 1.6 }));
       });
+      svg.appendChild(gdata);
+
+      // Selected-tip date markers (dashed vertical lines), clipped to the plot.
+      if (markerDates.length) {
+        var gmk = svgEl("g", { "clip-path": "url(#gen-ne-clip)" });
+        markerDates.forEach(function (md) {
+          var x = xToPx(md);
+          if (x < NE_PAD.left - 1 || x > W - NE_PAD.right + 1) return;
+          gmk.appendChild(svgEl("line", { x1: x, y1: NE_PAD.top, x2: x, y2: baseY, stroke: "#c79a1a", "stroke-width": 1, "stroke-dasharray": "3,2", opacity: 0.85 }));
+        });
+        svg.appendChild(gmk);
+      }
+
       host.appendChild(svg);
       host.appendChild(tip);
 
@@ -335,6 +365,11 @@
 
     if (window.ResizeObserver) { new ResizeObserver(render).observe(host); }
     render();
+    function isUsableTransform(t) { return !!(t && isFinite(t.offsetX) && isFinite(t.scaleX) && isFinite(t.maxX) && t.maxX > 0); }
+    return {
+      setTransform: function (t) { transform = isUsableTransform(t) ? t : null; render(); },
+      setMarkers: function (dates) { markerDates = (dates || []).map(function (d) { return +new Date(d); }).filter(function (v) { return isFinite(v); }); render(); }
+    };
   }
 
   var DIST_PAD = { left: 34, right: 14, top: 12, bottom: 22 };
@@ -359,6 +394,7 @@
     var series = od.national || {};
     var beyondFrom = od.beyond_tree_from ? +new Date(od.beyond_tree_from) : Infinity;
     var showImputed = true, showBeyond = false;
+    var markerDates = [];      // selected-tip dates (ms) → dashed vertical lines
     var days = od.dates.map(function (d) {
       var c = series[d] || { observed: 0, imputed: 0 };
       return { t: +new Date(d), ds: d, obs: c.observed || 0, imp: c.imputed || 0 };
@@ -409,6 +445,13 @@
           svg.appendChild(svgEl("rect", { x: x, y: yTop, width: barW, height: yBase - yTop, fill: DIST_IMP }));
         }
       });
+
+      // Selected-tip date markers (dashed vertical lines), within the plot area.
+      markerDates.forEach(function (md) {
+        var x = xToPx(md);
+        if (x < DIST_PAD.left - 1 || x > W - DIST_PAD.right + 1) return;
+        svg.appendChild(svgEl("line", { x1: x, y1: DIST_PAD.top, x2: x, y2: baseY, stroke: "#c79a1a", "stroke-width": 1, "stroke-dasharray": "3,2", opacity: 0.85 }));
+      });
       host.appendChild(svg); host.appendChild(tip);
 
       svg.addEventListener("mousemove", function (ev) {
@@ -434,6 +477,9 @@
 
     if (window.ResizeObserver) { new ResizeObserver(render).observe(host); }
     render();
+    return {
+      setMarkers: function (dates) { markerDates = (dates || []).map(function (d) { return +new Date(d); }).filter(function (v) { return isFinite(v); }); render(); }
+    };
   }
 
   // --- Genomic-local coordinator ---------------------------------------------
@@ -444,7 +490,7 @@
   // logic lives here; engine.js only exposes generic zone-level hooks.
   function up(s) { return (s || "").toUpperCase().trim(); }
 
-  function startCoordinator(tree, hooks, tips) {
+  function startCoordinator(tree, hooks, tips, nePanel, distPanel) {
     // zone (UPPER) -> tip accessions/ids, for highlighting a zone's tips.
     var zoneToTips = {};
     (tips || []).forEach(function (t) {
@@ -489,10 +535,18 @@
     hooks.onZoneClick(function (nom) { selectZone(nom); });
     hooks.onBackgroundClick(function () { clearAll(); });
 
-    // tree selection → map zone highlight (markers reflect the selected tip set).
+    // tree selection → (1) date markers on Ne/distribution (any selection source),
+    // (2) map zone highlight (except when a marker/zone click already did it).
     tree.onSelect(function (ev) {
       var selected = (ev && ev.selected) || [];
-      if (zoneSelecting) return;                     // marker/zone click already highlighted
+      var seen = {}, dates = [];
+      selected.forEach(function (n) {
+        var ds = n.annotations && n.annotations.date;
+        if (ds && !seen[ds]) { seen[ds] = 1; dates.push(ds); }
+      });
+      if (nePanel) nePanel.setMarkers(dates);
+      if (distPanel) distPanel.setMarkers(dates);
+      if (zoneSelecting) return;                     // marker/zone click already highlighted the map
       if (!programmatic) activeKey = null;           // a direct tree click isn't a toggle target
       var zones = {};
       selected.forEach(function (n) {
@@ -501,6 +555,30 @@
       });
       hooks.highlightZones(Object.keys(zones));
     });
+
+    // x-axis lock: keep the Ne panel's time axis aligned with the tree's live view
+    // transform. Seed with the current transform, then track pan/zoom — coalesced to
+    // one update per frame (onViewChange fires a tweened burst during zoom, Phase 0).
+    var raf = window.requestAnimationFrame || function (f) { return setTimeout(f, 16); };
+    function pushTransform() {
+      var t = tree.getViewTransform && tree.getViewTransform();
+      if (t && nePanel) nePanel.setTransform(t);
+    }
+    if (nePanel) pushTransform();
+    var rafPending = false;
+    tree.onViewChange(function () {
+      if (rafPending) return;
+      rafPending = true;
+      raf(function () { rafPending = false; pushTransform(); });
+    });
+    // PearTree refits (and changes its X transform) when its container resizes but
+    // does NOT emit onViewChange for that, so on the drag-resizable rail the lock
+    // would go stale. Re-read the tree's transform after any tree-host resize
+    // (rAF-deferred so PearTree's own refit lands first).
+    if (window.ResizeObserver && nePanel) {
+      var treeHost = document.getElementById("gen-tree-body");
+      if (treeHost) new ResizeObserver(function () { raf(pushTransform); }).observe(treeHost);
+    }
 
     return { clearSelection: clearAll };
   }
@@ -511,14 +589,14 @@
     var coordinator = null;
     return {
       mount: function () {
+        var nePanel = renderNePanel(data);
+        var distPanel = renderDistPanel(data);
         this.treePromise = createTreePanel("gen-tree-body", data).then(function (t) {
           treeApi = t;
           var hooks = window.__bdbvMapHooks;
-          if (t && hooks) coordinator = startCoordinator(t, hooks, data.tips || []);
+          if (t && hooks) coordinator = startCoordinator(t, hooks, data.tips || [], nePanel, distPanel);
           return t;
         });
-        renderNePanel(data);
-        renderDistPanel(data);
       },
       getTree: function () { return treeApi; },
       getCoordinator: function () { return coordinator; },
