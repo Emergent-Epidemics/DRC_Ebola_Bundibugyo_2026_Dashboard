@@ -1226,8 +1226,12 @@
   #gen-tree-body .pt-modal-overlay { z-index: 2000; }
   /* Zone-colour legend: an overlay in the tree area's top-right, toggled by the
      Legend button. Built from the same palette map the tips use (genomic.js). */
+  /* Overlay in the tree area's top-LEFT, below the PearTree toolbar. `top` and
+     `max-height` are set in genomic.js from the canvas-container's live geometry
+     (the toolbar wraps to more rows on a narrow rail), so the box always clears
+     the toolbar and scrolls when it's taller than the canvas area. */
   #genomic-panel .gen-tree-legend-box {
-    position: absolute; top: 6px; right: 6px; z-index: 3; max-height: calc(100% - 12px);
+    position: absolute; top: 40px; left: 6px; z-index: 3; max-height: calc(100% - 46px);
     overflow: auto; background: rgba(255,255,255,0.95); border: 1px solid #e7e3db;
     border-radius: 4px; padding: 6px 8px; font-size: 10.5px; color: #2a2a27;
     box-shadow: 0 1px 3px rgba(0,0,0,0.12); pointer-events: auto;

@@ -187,13 +187,30 @@
     var legendOn = false;
     var legendBtn = document.getElementById("gen-tree-legend");
     var legendBox = document.getElementById("gen-tree-legend-box");
+    // Pin the legend just below PearTree's toolbar (whose height changes as it
+    // wraps on a narrow rail) and cap its height to the canvas area so it scrolls.
+    function positionLegend() {
+      if (!legendBox || legendBox.hidden) return;
+      var cc = document.getElementById("canvas-container");
+      var wrap = legendBox.parentElement;
+      if (!cc || !wrap) return;
+      var ccr = cc.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
+      legendBox.style.top = Math.round(ccr.top - wr.top + 4) + "px";
+      legendBox.style.maxHeight = Math.max(60, Math.round(ccr.height - 8)) + "px";
+    }
     function setLegend(on) {
       legendOn = on;
       if (legendBox) legendBox.hidden = !on;
       applyToggleStyle(legendBtn, on, TREE_ACCENT, TREE_ACCENT_BAND);
+      if (on) positionLegend();
     }
     applyToggleStyle(legendBtn, false, TREE_ACCENT, TREE_ACCENT_BAND);
     if (legendBtn) legendBtn.addEventListener("click", function (e) { e.preventDefault(); setLegend(!legendOn); });
+    // Reposition when the toolbar re-wraps (rail resize) or the tree relays out.
+    if (window.ResizeObserver) {
+      var tb = document.getElementById("gen-tree-body");
+      if (tb) new ResizeObserver(function () { positionLegend(); }).observe(tb);
+    }
 
     function driveSelect(id, value) {
       var sel = document.getElementById(id);
