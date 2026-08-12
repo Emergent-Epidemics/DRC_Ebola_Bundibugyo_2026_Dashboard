@@ -129,6 +129,19 @@ def build_shared_payload() -> dict:
     assert_harmonised_coverage(invasion_risk, zone_data, harmonised_confirmed)
     confirmed_timeseries = load_confirmed_cases_timeseries(set(zone_data.keys()))
 
+    # Genomic-epi slice (page-scoped to the genomic tab in chrome.py): phylo
+    # products from the BDBV2026-Genomic_Epi sibling + the observed/imputed onset
+    # series aggregated from the canonical linelist. Empty dict when the producer
+    # sibling isn't present, so the build stays green without it.
+    genomic = load_genomic_products()
+    if genomic:
+        genomic["onset_distribution"] = load_onset_imputed_series(
+            known_noms=set(zone_data),
+            tree_most_recent=(genomic.get("meta") or {}).get("mostRecentDate"),
+        )
+        print(f"  genomic: {len(genomic.get('tips', []))} tips, "
+              f"onset {len(genomic.get('onset_distribution', {}).get('dates', []))} dates")
+
     asof = detect_asof()
     print(f"  asof: {asof}")
     data_build = load_data_build_info()
@@ -201,6 +214,7 @@ def build_shared_payload() -> dict:
         "phr_context": phr_context_by_lang.get("en", {"national": [], "by_nom": {}}),
         "phr_context_by_lang": phr_context_by_lang,
         "confirmed_timeseries": confirmed_timeseries,
+        "genomic": genomic,
     }
 
 
