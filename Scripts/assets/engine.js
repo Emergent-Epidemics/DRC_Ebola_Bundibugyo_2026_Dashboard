@@ -1705,6 +1705,13 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         // not what a mid-move mouseover creates). Suppress it entirely while
         // moving -- a real hover after the map settles re-fires mouseover.
         if (mapMoving) return;
+        // The genomic tab uses the map only as a backdrop; it must NOT open the
+        // snapshot's layer-value zone tooltips (the default fall-through below).
+        // Without this guard, hovering zones opens per-hover tooltips that the
+        // "tooltipopen" sweep never closes (it only covers marker/arc layers), so
+        // dropped mouseouts on fast motion strand them. Genomic zone interaction
+        // arrives with the coordinator in a later phase.
+        if (activeView === "genomic-epidemiology") return;
         if (activeView === "trends") {
           if (trendsScope === "national") return;
           if (trendsScope === "province") {
@@ -1734,6 +1741,7 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         e.target.bindTooltip(layerHoverTooltipHTML(feature), {sticky: true, direction: "top"}).openTooltip(e.latlng);
       },
       mouseout: function(e) {
+        if (activeView === "genomic-epidemiology") return;   // no zone hover decoration on the genomic tab
         if (activeView === "trends") {
           if (trendsScope === "province") {
             // Zone was never restyled on hover in province scope; just clear the
