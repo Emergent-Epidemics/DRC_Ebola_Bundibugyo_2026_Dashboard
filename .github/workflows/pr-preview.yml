@@ -100,6 +100,14 @@ jobs:
           path: BDBV2026-Processed_Sensitive_Data
           token: ${{ secrets.EXTERNAL_REPO_TOKEN }}
 
+      # Genomic-epi producer (public) — supplies the genomic tab's payload slice.
+      - name: Checkout genomic-epi producer repo
+        if: github.event.action != 'closed'
+        uses: actions/checkout@v4
+        with:
+          repository: INRB-UMIE/BDBV2026-Genomic_Epi
+          path: BDBV2026-Genomic_Epi
+
       - name: Set up Python
         if: github.event.action != 'closed'
         uses: actions/setup-python@v5
@@ -118,6 +126,7 @@ jobs:
           BUILD_DIR: ${{ github.workspace }}/BDBV2026-Data/build
           DATA_ROOT: ${{ github.workspace }}/Data
           DASHBOARD_PLOTS_DIR: ${{ github.workspace }}/BDBV2026-Processed_Sensitive_Data/outputs
+          GENOMIC_DIR: ${{ github.workspace }}/BDBV2026-Genomic_Epi/public/data
         run: |
           set -euo pipefail
           python Scripts/build_dashboard.py
