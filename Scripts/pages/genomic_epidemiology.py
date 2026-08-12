@@ -18,7 +18,16 @@ VIEW_ID = "genomic-epidemiology"
 _BODY = r"""<div id="genomic-panel">
   <div id="genomic-resize" role="separator" aria-orientation="vertical" title="Drag to resize" tabindex="0"></div>
   <section class="gen-card"><h2>Phylogeny</h2><div class="gen-body" id="gen-tree-body">Loading…</div></section>
-  <section class="gen-card"><h2>Effective population size</h2><div class="gen-body" id="gen-ne-body">Loading…</div></section>
+  <section class="gen-card" id="gen-ne-card">
+    <div class="gen-card-head">
+      <h2>Effective population size</h2>
+      <span class="gen-toggles">
+        <button type="button" id="gen-ne-skygrid" class="gen-toggle" aria-pressed="true">SkyGrid</button>
+        <button type="button" id="gen-ne-exp" class="gen-toggle" aria-pressed="true">Exp</button>
+      </span>
+    </div>
+    <div class="gen-body gen-chart" id="gen-ne-body"></div>
+  </section>
   <section class="gen-card"><h2>Sample distribution</h2><div class="gen-body" id="gen-dist-body">Loading…</div></section>
 </div>"""
 

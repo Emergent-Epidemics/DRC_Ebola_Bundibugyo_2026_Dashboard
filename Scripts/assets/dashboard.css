@@ -1170,6 +1170,23 @@
   }
   #genomic-panel .gen-card h2 { margin: 0 0 6px; font-size: 13px; color: #2a2a27; }
   #genomic-panel .gen-body { font-size: 12px; color: #5c574f; }
+  #genomic-panel .gen-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  #genomic-panel .gen-card-head h2 { margin: 0; }
+  #genomic-panel .gen-toggles { display: flex; gap: 4px; }
+  #genomic-panel .gen-toggle {
+    font-size: 11px; padding: 2px 7px; border: 1px solid #e7e3db; border-radius: 4px;
+    background: #fff; color: #9c968b; cursor: pointer;
+  }
+  #genomic-panel .gen-toggle.active { font-weight: 600; }
+  #genomic-panel .gen-chart { position: relative; height: 180px; min-height: 180px; }
+  #genomic-panel .gen-chart svg { display: block; width: 100%; height: 100%; }
+  #genomic-panel .ne-tip {
+    position: absolute; pointer-events: none; background: rgba(255,255,255,0.97);
+    border: 1px solid #e7e3db; border-radius: 6px; padding: 4px 7px; font-size: 10.5px;
+    color: #2a2a27; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  }
+  #genomic-panel .ne-tip-d { font-weight: 700; margin-bottom: 2px; }
+  #genomic-panel .ne-tip-ci { color: #9c968b; }
   /* Drag handle on the panel's left edge (width persisted to localStorage by
      genomic.js). Sits just outside the border so it doesn't overlap content. */
   #genomic-resize {
