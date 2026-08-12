@@ -40,5 +40,6 @@ def test_genomic_module_contributes_rail_and_script():
     assert 'id="gen-tree-body"' in html and 'id="gen-dist-body"' in html
     assert 'id="genomic-resize"' in html                      # drag handle present
     assert 'id="gen-ne-skygrid"' in html and 'id="gen-ne-exp"' in html   # Ne toggles present
+    assert 'id="gen-dist-imputed"' in html and 'id="gen-dist-csv"' in html   # distribution controls
     assert 'src="assets/genomic.js"' in html
     assert "stub-genomic-epidemiology" not in html

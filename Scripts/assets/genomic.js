@@ -8,6 +8,23 @@
 
   function setText(id, t) { var e = document.getElementById(id); if (e) e.textContent = t; }
 
+  // Active toggle = accent colour + light band shade, set inline `!important` so it
+  // beats the brand theme layer's `!important` button rules. Cleared when off.
+  function applyToggleStyle(btn, on, color, band) {
+    if (!btn) return;
+    btn.classList.toggle("active", on);
+    if (on) {
+      btn.style.setProperty("color", color, "important");
+      btn.style.setProperty("border-color", color, "important");
+      btn.style.setProperty("background", band, "important");
+    } else {
+      btn.style.removeProperty("color");
+      btn.style.removeProperty("border-color");
+      btn.style.removeProperty("background");
+    }
+    btn.setAttribute("aria-pressed", String(on));
+  }
+
   function readGenomic() {
     var el = document.getElementById("payload");
     if (!el) return null;
@@ -127,22 +144,7 @@
     datasets.forEach(function (ds) {
       var btn = document.getElementById(ds.btnId);
       if (!btn) return;
-      function reflect() {
-        btn.classList.toggle("active", ds.visible);
-        // Active = dataset colour + a light band shade (no bold, so no reflow).
-        // The brand theme layer styles buttons with `!important`, so these must be
-        // inline `!important` to win the cascade; cleared when inactive.
-        if (ds.visible) {
-          btn.style.setProperty("color", ds.color, "important");
-          btn.style.setProperty("border-color", ds.color, "important");
-          btn.style.setProperty("background", ds.band, "important");
-        } else {
-          btn.style.removeProperty("color");
-          btn.style.removeProperty("border-color");
-          btn.style.removeProperty("background");
-        }
-        btn.setAttribute("aria-pressed", String(ds.visible));
-      }
+      function reflect() { applyToggleStyle(btn, ds.visible, ds.color, ds.band); }
       reflect();
       btn.addEventListener("click", function (e) {
         e.preventDefault();

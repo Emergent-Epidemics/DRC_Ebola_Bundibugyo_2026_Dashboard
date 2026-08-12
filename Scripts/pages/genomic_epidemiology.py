@@ -28,7 +28,17 @@ _BODY = r"""<div id="genomic-panel">
     </div>
     <div class="gen-body gen-chart" id="gen-ne-body"></div>
   </section>
-  <section class="gen-card"><h2>Sample distribution</h2><div class="gen-body" id="gen-dist-body">Loading…</div></section>
+  <section class="gen-card" id="gen-dist-card">
+    <div class="gen-card-head">
+      <h2>Sample distribution</h2>
+      <span class="gen-toggles">
+        <button type="button" id="gen-dist-imputed" class="gen-toggle" aria-pressed="true" title="Show cases with imputed onset dates">Imputed</button>
+        <button type="button" id="gen-dist-beyond" class="gen-toggle" aria-pressed="false" title="Include onset dates after the tree's latest tip">Beyond</button>
+        <button type="button" id="gen-dist-csv" class="gen-toggle" title="Download daily counts (CSV)">⤓ CSV</button>
+      </span>
+    </div>
+    <div class="gen-body gen-chart" id="gen-dist-body"></div>
+  </section>
 </div>"""
 
 _SCRIPTS = '<script src="__ASSETS_PREFIX__genomic.js"></script>'
