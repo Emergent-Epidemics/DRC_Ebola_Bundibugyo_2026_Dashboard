@@ -23,19 +23,30 @@ The two codebases are architecturally opposite:
 - **Dashboard (target):** a Python static-site generator. One shared hand-written
   `Scripts/assets/engine.js` (~3,900 lines) + `dashboard.css` (~1,150 lines); a
   single inline JSON payload per page parsed synchronously; **no JS build step**;
-  dark chrome; Leaflet; en/fr i18n via `data-i18n` + `locales/{en,fr}.yaml`.
+  a **dark shell** (header, nav tabs, and the floating map-control panels are
+  `#111`/`#222`) over a **light** CARTO `light_all` basemap, with **light content
+  rails** — the Trends (`#f6f5f2`) and Spatial-Risk (`#ffffff`) side panels use a
+  warm off-white palette with dark ink `#2a2a27` and terracotta/maroon accents
+  (`#9b7d4e`/`#7c1d1d`); Leaflet; en/fr i18n via `data-i18n` + `locales/{en,fr}.yaml`.
 - **Source app:** a Vite/ESM app of small modules (`tree-panel.js`, `ne-panel.js`,
   `timeseries-panel.js`, `coordinator.js`, `map-panel.js`, + helpers) with vitest
   tests (pure helpers + build libs only — the four large UI modules and the
   coordinator have **no tests**); fetches JSON/CSV at runtime; a warm **light**
-  theme; an external `peartree.bundle.min.js` (~1.5 MB) phylogeny renderer.
+  theme **using the identical palette** (`#f6f5f2`/`#2a2a27`/`#e7e3db`/`#9b7d4e`/
+  `#7c1d1d`) as the dashboard's content rails; an external `peartree.bundle.min.js`
+  (~1.5 MB) phylogeny renderer.
 
 ## Goals
 
-- **Fully native** genomic tab: dark chrome, shared header/nav/footer, en/fr i18n,
-  data consistent with the rest of the dashboard.
-- **Style consistency:** the tab reads as the same product as every other tab
-  (dark chrome, shared components). Colour note: the dashboard has **no
+- **Fully native** genomic tab: shared dark-shell header/nav/footer over the light
+  basemap, its **right rail styled like the light Trends/Spatial-Risk rails**, en/fr
+  i18n, data consistent with the rest of the dashboard.
+- **Style consistency:** the tab reads as the same product as every other tab. The
+  genomic panels live in a right rail like Trends/Spatial-Risk, so they are
+  **light** (the warm off-white rail palette) — and since the source app already
+  uses that identical palette, this is *alignment to the rail tokens, not a
+  restyle*. The phylogeny stays in its **light** theme (PearTree default/O'Toole),
+  as it renders today. Colour note: the dashboard has **no
   per-zone identity colour** — its map is a *metric choropleth* (`valueToColor`,
   continuous palette by the selected layer's value). So "one zone = one colour
   everywhere" is not a goal (and the source app doesn't do it either). Instead we
@@ -94,12 +105,24 @@ The two codebases are architecturally opposite:
 
 ## Phase 0 — de-risking spike (gates everything; may amend this spec)
 
-Throwaway code, no new repo, no seam. Each item has an explicit pass bar.
+**RESULTS (spike run, all pass bars green → GO). See the findings doc
+`2026-08-12-genomic-epidemiology-tab-phase0-findings.md`.** Verdicts:
+`recolour = PER_ZONE_MAP_SUPPORTED(settings.annotationPalettes, embed-init)`;
+`tree_delivery = INLINE_TEXT_OK(key: 'tree')` → tree rides inline in the payload;
+`google_fonts = BLOCKED_VIA_CSP(font-src 'self' data:)`; `map_linking = ZONE_LEVEL_OK`;
+`coordinator = REPRODUCIBLE_LOCALLY`; `onset_data = AVAILABLE`. **Theme correction:
+the genomic rail is LIGHT (matching Trends/Spatial-Risk), so the tree stays in its
+light theme — the confirmed `dark = ACHIEVABLE_VIA_API(applySettings({theme:'BEAST'}))`
+is a documented capability, not the target.** Real-impl notes: throttle the tweened
+`onViewChange`; the tree has a harmless first-paint squash that self-corrects.
 
-1. **PearTree dark + recolour + delivery (M4/M5) — the critical unknown.**
-   Embed the real NEXUS tree in a dark rail and determine:
-   - Can its Bootstrap-light theme be forced dark via the embed API / `--pt-*`
-     overrides (no bundle fork)?
+Original probe design (throwaway code, no new repo, no seam; each item an explicit
+pass bar):
+
+1. **PearTree theme + recolour + delivery (M4/M5) — the critical unknown.**
+   Embed the real NEXUS tree in the (light) rail and determine:
+   - Can its theme be controlled via the embed API / `--pt-*` overrides without a
+     bundle fork? (Answer: yes — `applySettings({theme:...})`; light is the target.)
    - Does the embed API accept a **per-`health_zone` colour map** so tips use the
      defined categorical zone palette?
    - Does `PearTree.embed` accept **inline tree text**, or only a `treeUrl`
@@ -107,11 +130,11 @@ Throwaway code, no new repo, no seam. Each item has an explicit pass bar.
      **NEXUS text, not JSON**)?
    - Its head `@import`s Google Fonts — can that request be eliminated (vendor/
      disable)?
-   **Pass bar / acceptance artifact:** one dark screenshot of the tree rendered in
-   the defined categorical zone palette with **no external font request** in the
-   network panel. **Pre-committed fallback** (owner: maintainer): if no per-zone
-   palette hook exists, we do **not** fork — the tree keeps its own consistent
-   categorical palette + a visible zone-colour legend, and only dark-theming +
+   **Pass bar / acceptance artifact:** one screenshot of the tree in the light rail
+   rendered in the defined categorical zone palette with **no external font request**
+   in the network panel. **Pre-committed fallback** (owner: maintainer): if no
+   per-zone palette hook exists, we do **not** fork — the tree keeps its own
+   consistent categorical palette + a visible zone-colour legend, and only theming +
    killing the font request remain required. *(Phase 0 result: the hook exists —
    `settings.annotationPalettes` at embed init — so the tree takes the defined
    palette directly; the legend is added regardless.)*
@@ -245,10 +268,11 @@ named shared-code change beyond the generic hooks; verified in Phase 0 item 2.
 
 ### 5. Ported vs reused
 
-- **Reused:** the shared Leaflet map surface and its **existing per-zone genome
-  layer**; rail + drag-splitter; `wirePanelToggles()`; i18n; zone colour scale;
-  chrome; per-browser `localStorage` rail sizing.
-- **Ported (into `engine.js`'s idiom, dark theme):** clickable-marker → tip-set
+- **Reused:** the shared Leaflet map surface (light basemap) and its **existing
+  per-zone genome layer**; the light rail + drag-splitter; `wirePanelToggles()`;
+  i18n; chrome; per-browser `localStorage` rail sizing.
+- **Ported (into `engine.js`'s idiom, keeping the source app's light styling):**
+  clickable-marker → tip-set
   selection + tip highlighting (small; reuses the genome layer, **not** a
   per-sample rebuild); the Ne/SkyGrid + exponential chart; the sample-distribution
   chart (`timeseries-panel.js`, incl. imputed/observed split, beyond-tree, and a
@@ -268,11 +292,15 @@ full-extent; distribution: Imputed / beyond-tree / CSV-export) and collapse via
 `wirePanelToggles()`. Narrow screens (≤700px): rail stacks under the map, panels
 auto-collapse.
 
-**Styling (light→dark).** Re-express panels with the dashboard's dark tokens. The
-genomic panels that colour by zone (tree tips + any zone-split Ne/distribution
-series) use the **defined categorical zone palette** with a **legend**; the map
-stays a metric choropleth (no cross-panel colour match). **PearTree** (Phase 0,
-resolved): dark via `applySettings({theme:'BEAST'})`; the zone palette via
+**Styling (align to the light rails).** The panels keep the source app's warm
+light styling, aligned to the dashboard's rail tokens (`#f6f5f2`/`#2a2a27`/
+`#e7e3db`/`#9b7d4e`/`#7c1d1d`) — which are the *same* values, so this is token
+alignment, not a restyle. Panels that colour by zone (tree tips + any zone-split
+Ne/distribution series) use the **defined categorical zone palette** with a
+**legend**; the map stays a metric choropleth (no cross-panel colour match).
+**PearTree** (Phase 0, resolved): stays in its **light** theme (default/O'Toole,
+matching the rail — the confirmed dark `applySettings({theme:'BEAST'})` is a
+documented capability we do **not** use here); the zone palette via
 `settings.annotationPalettes` at embed init; the Google-Fonts `@import` blocked
 via a `font-src 'self' data:` CSP.
 
@@ -293,7 +321,8 @@ French is reviewed — never unreviewed machine French.**
   coordinator; the clickable-marker selection) get **characterisation tests and/or
   a scripted manual-QA checklist**; the screenshot gate is necessary-but-
   insufficient.
-- **Review checkpoints:** (a) dark-theme screenshots incl. PearTree; (b) the
+- **Review checkpoints:** (a) light-rail screenshots incl. PearTree (panels match
+  the Trends/Spatial-Risk rail tokens); (b) the
   defined categorical zone palette applied consistently across the zone-coloured
   genomic panels (tree tips + zone-split series), with the legend present — the map
   is a metric choropleth and is not expected to match; (c) tab numbers match
@@ -316,15 +345,16 @@ French is reviewed — never unreviewed machine French.**
    the `activeView` branch of the zone-click handler.
 5. **Panels + coordinator:** `genomic.js` — phylogeny → Ne → distribution + the
    genomic-local coordinator + clickable-marker selection.
-6. **Style + i18n:** dark port (PearTree per Phase 0 outcome); en/fr keys; ship
-   en-only until French reviewed.
+6. **Style + i18n:** align panels to the light rail tokens (PearTree light theme +
+   zone palette + legend, per Phase 0); en/fr keys; ship en-only until French reviewed.
 7. **Polish + review:** narrow-screen; the four checkpoints + characterisation
    tests/QA checklist.
 
 ## Open items / risks
 
-- **PearTree (M4/M5/S4):** dark-theming, per-zone recolour (else the pre-committed
-  fallback), inline-vs-URL loading, and the Google-Fonts request resolve in Phase 0.
+- **PearTree (M4/M5/S4):** theming (light target), per-zone recolour, inline-vs-URL
+  loading, and the Google-Fonts request all **resolved in Phase 0** (light theme +
+  `annotationPalettes` + inline `tree` key + CSS font-src CSP).
   Provenance/licence is **unestablished** (no LICENSE/version; bundles `marked`) —
   pin a versioned, licence-clear build before vendoring 1.5 MB.
 - **Onset/beyond-tree data (S2/R3):** the numeric series isn't in `payload.py`
