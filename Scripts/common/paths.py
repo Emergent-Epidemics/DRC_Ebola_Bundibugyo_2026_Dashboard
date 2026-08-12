@@ -54,6 +54,14 @@ DASHBOARD_PLOTS_DIR = Path(
     os.environ.get("DASHBOARD_PLOTS_DIR") or
     (SCRIPT_DIR.parent.parent / "BDBV2026-Processed_Sensitive_Data" / "outputs")
 ).resolve()
+# Genomic-epi phylo products (tree/tips/meta/skygrid/exponential), produced by the
+# sibling repo INRB-UMIE/BDBV2026-Genomic_Epi. Default assumes it is cloned as a
+# sibling of this repo (same convention as BUILD_DIR/DASHBOARD_PLOTS_DIR above);
+# override with the GENOMIC_DIR env var.
+GENOMIC_DIR = Path(
+    os.environ.get("GENOMIC_DIR") or
+    (SCRIPT_DIR.parent.parent / "BDBV2026-Genomic_Epi" / "public" / "data")
+).resolve()
 SIT_REPS_DIR     = DATA_ROOT / "Epidemiological Data"
 METHODS_DOCX     = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website.docx"
 METHODS_DOCX_FR  = DATA_ROOT / "Methods" / "Contributors_Methods_Data_website_fr.docx"

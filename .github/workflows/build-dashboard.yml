@@ -153,6 +153,15 @@ jobs:
           path: BDBV2026-Processed_Sensitive_Data
           token: ${{ secrets.EXTERNAL_REPO_TOKEN }}
 
+      # Genomic-epi producer (public) — supplies the tree/tips/meta/skygrid/
+      # exponential products the genomic tab's payload slice ingests. No token
+      # needed (public repo); GENOMIC_DIR below points at its public/data/.
+      - name: Checkout genomic-epi producer repo
+        uses: actions/checkout@v4
+        with:
+          repository: INRB-UMIE/BDBV2026-Genomic_Epi
+          path: BDBV2026-Genomic_Epi
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -177,6 +186,7 @@ jobs:
           # manifest with no "date" field (trends plots are simply hidden
           # with a warning, same as before).
           DASHBOARD_PLOTS_DIR: ${{ github.workspace }}/BDBV2026-Processed_Sensitive_Data/outputs
+          GENOMIC_DIR: ${{ github.workspace }}/BDBV2026-Genomic_Epi/public/data
         run: |
           set -euo pipefail
           python Scripts/build_dashboard.py

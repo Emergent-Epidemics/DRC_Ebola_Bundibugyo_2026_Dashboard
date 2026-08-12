@@ -1103,7 +1103,12 @@
   .case-icon { width:14px; height:14px; border-radius:50%; background:rgba(91,134,179,0.85); border:1.5px solid #fff; box-shadow:0 0 6px rgba(91,134,179,0.45); }
   .case-tt-row { display:flex; justify-content:space-between; gap:12px; }
   .case-tt-row span:last-child { font-variant-numeric: tabular-nums; }
-  .genome-icon { border-radius:50%; background:rgba(91,134,179,0.42); border:1.5px solid rgba(255,255,255,0.75); box-shadow:0 0 4px rgba(91,134,179,0.25); box-sizing:border-box; }
+  .genome-icon { border-radius:50%; background:rgba(91,134,179,0.75); border:1.5px solid rgba(255,255,255,0.85); box-shadow:0 0 4px rgba(91,134,179,0.35); box-sizing:border-box; }
+  /* Genomic tab: a genome marker whose zone is the current coordinator selection
+     (class toggled on the marker's icon element by engine.js highlightZones). */
+  .leaflet-marker-icon.genome-marker-sel .genome-icon {
+    background:rgba(242,200,75,0.7); border-color:#9a7a16; box-shadow:0 0 6px rgba(242,200,75,0.7);
+  }
   /* Trends / Context: marker dots must not steal pointer events from the map. */
   body.view-trends .leaflet-marker-pane .leaflet-marker-icon,
   body.view-context .leaflet-marker-pane .leaflet-marker-icon { pointer-events: none !important; }
@@ -1148,3 +1153,104 @@
   }
   .modal .methods-table th { background:#262626; color:#ffd28a; font-weight:600; }
   .modal .methods-table tr:nth-child(even) td { background:#1f1f1f; }
+
+  /* Genomic Epidemiology tab (Phase 3 seam skeleton). Light rail matching the
+     Trends/Spatial-Risk side panels (#f6f5f2/#2a2a27/#e7e3db); real panels +
+     collapse arrive in later phases. */
+
+  /* Hide the snapshot-map chrome on this content-rail tab, same as Trends /
+     Spatial-Risk / Context do (zone-details #info, layer #controls, #legend). */
+  body.view-genomic-epidemiology #controls,
+  body.view-genomic-epidemiology #legend,
+  body.view-genomic-epidemiology #info { display: none !important; }
+
+  #genomic-panel {
+    /* bottom clears the fixed footer (#view-switcher, z-index 1100) like the
+       Trends / Spatial-Risk rails do -- otherwise the last card scrolls under it. */
+    position: absolute; top: 0; right: 0; bottom: var(--view-chrome-height); width: 440px;
+    display: flex; flex-direction: column; gap: 10px;
+    background: #f6f5f2; color: #2a2a27; border-left: 1px solid #e7e3db;
+    padding: 10px; overflow: auto; z-index: 500;
+  }
+  #genomic-panel .gen-card {
+    background: #fff; border: 1px solid #e7e3db; border-radius: 4px; padding: 8px 10px;
+  }
+  #genomic-panel .gen-card h2 { margin: 0 0 6px; font-size: 13px; color: #2a2a27; }
+  #genomic-panel .gen-body { font-size: 12px; color: #5c574f; }
+  #genomic-panel .gen-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  #genomic-panel .gen-card-head h2 { margin: 0; }
+  #genomic-panel .gen-toggles { display: flex; gap: 4px; }
+  #genomic-panel .gen-toggle {
+    font-size: 11px; padding: 2px 7px; border: 1px solid #e7e3db; border-radius: 4px;
+    background: #fff; color: #9c968b; cursor: pointer;
+  }
+  /* Active state = coloured border + text + a light shade of the dataset's band
+     (set per-dataset in genomic.js). Deliberately NOT bold: bold changes the text
+     width and reflows the button. */
+  #genomic-panel .gen-chart { position: relative; height: 180px; min-height: 180px; }
+  #genomic-panel .gen-chart svg { display: block; width: 100%; height: 100%; }
+  #genomic-panel .ne-tip {
+    position: absolute; pointer-events: none; background: rgba(255,255,255,0.97);
+    border: 1px solid #e7e3db; border-radius: 6px; padding: 4px 7px; font-size: 10.5px;
+    color: #2a2a27; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  }
+  #genomic-panel .ne-tip-d { font-weight: 700; margin-bottom: 2px; }
+  #genomic-panel .ne-tip-ci { color: #9c968b; }
+
+  /* ── Phylogeny (embedded PearTree) ── */
+  /* The tree needs a definite height for the embed's height:100% to resolve; the
+     rail scrolls, so a fixed area is fine. .gen-tree-wrap is the positioning
+     context for both the embed and the overlay legend. */
+  #genomic-panel .gen-tree-wrap { position: relative; height: 360px; min-height: 220px; }
+  #genomic-panel .gen-tree-body { position: absolute; inset: 0; font-size: 12px; color: #5c574f; }
+  /* Retint PearTree's --pt-* interface vars to the light rail palette (id
+     specificity beats the bundle's [data-bs-theme]); the canvas/background comes
+     from the O'Toole embed theme, not these. */
+  #gen-tree-body,
+  #gen-tree-body [data-bs-theme],
+  #gen-tree-body[data-bs-theme] {
+    --pt-bg: #ffffff; --pt-bg-panel: #f3f1ec; --pt-bg-dark: #ece9e2; --pt-bg-deepest: #ece9e2;
+    --pt-border: rgba(60,48,36,0.12); --pt-border-strong: rgba(60,48,36,0.26); --pt-border-input: rgba(60,48,36,0.18);
+    --pt-divider: rgba(60,48,36,0.10); --pt-divider-section: rgba(60,48,36,0.08); --pt-divider-panel: rgba(60,48,36,0.10);
+    --pt-gold: #9b7d4e; --pt-primary: #9b7d4e; --pt-brand-hover: #7c1d1d; --pt-red: #b23b2e;
+    --pt-selection-bg: rgba(155,125,78,0.16); --pt-selection-focus: rgba(155,125,78,0.12); --pt-resize-hover: rgba(155,125,78,0.30);
+    --pt-btn-default-bg: rgba(155,125,78,0.14); --pt-btn-default-border: rgba(155,125,78,0.50); --pt-btn-default-text: #8a6d3f;
+  }
+  /* Trim the toolbar: hide the Fit-view pair and the filter save/apply buttons. */
+  #gen-tree-body .btn-group:has(#btn-fit),
+  #gen-tree-body .fc-add,
+  #gen-tree-body .pt-named-filter-wrap { display: none !important; }
+  /* Export modal used Bootstrap's (dark-theme) body colour → near-invisible on our
+     light panel; force readable ink and lift it over Leaflet's map controls. */
+  #gen-tree-body .pt-modal { color: #2a2a27; --bs-body-color: #2a2a27; --bs-secondary-color: rgba(42,42,39,0.62); }
+  #gen-tree-body .pt-modal-overlay { z-index: 2000; }
+  /* Zone-colour legend: an overlay in the tree area's top-right, toggled by the
+     Legend button. Built from the same palette map the tips use (genomic.js). */
+  /* Overlay in the tree area's top-LEFT, below the PearTree toolbar. `top` and
+     `max-height` are set in genomic.js from the canvas-container's live geometry
+     (the toolbar wraps to more rows on a narrow rail), so the box always clears
+     the toolbar and scrolls when it's taller than the canvas area. */
+  #genomic-panel .gen-tree-legend-box {
+    position: absolute; top: 40px; left: 6px; z-index: 3; max-height: calc(100% - 46px);
+    overflow: auto; background: rgba(255,255,255,0.95); border: 1px solid #e7e3db;
+    border-radius: 4px; padding: 6px 8px; font-size: 10.5px; color: #2a2a27;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12); pointer-events: auto;
+  }
+  #genomic-panel .gen-tree-legend-box[hidden] { display: none; }
+  #genomic-panel .gen-legend-row { display: flex; align-items: center; gap: 6px; line-height: 1.5; }
+  #genomic-panel .gen-legend-sw { width: 10px; height: 10px; border-radius: 2px; flex: none; border: 1px solid rgba(0,0,0,0.15); }
+  #genomic-panel .gen-legend-lb { white-space: nowrap; }
+
+  /* Drag handle on the panel's left edge (width persisted to localStorage by
+     genomic.js). Sits just outside the border so it doesn't overlap content. */
+  #genomic-resize {
+    position: absolute; top: 0; bottom: 0; left: -3px; width: 8px;
+    cursor: col-resize; z-index: 501;
+  }
+  #genomic-resize::before {
+    content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px;
+    background: transparent;
+  }
+  #genomic-resize:hover::before,
+  body.genomic-resizing #genomic-resize::before { background: #9b7d4e; width: 3px; left: 2px; }
+  body.genomic-resizing { cursor: col-resize; user-select: none; }
