@@ -145,6 +145,13 @@
         if (e.target && e.target.id === "tree-canvas") { e.stopPropagation(); e.preventDefault(); }
       }, true);
 
+      // Let the mouse wheel scroll the rail when the cursor is over the tree. PearTree
+      // binds its own wheel-zoom on the canvas and preventDefaults it, trapping the
+      // scroll; intercept in the capture phase (before its handler) and stop
+      // propagation so the browser's native scroll of the rail proceeds. (Tree zoom
+      // stays available via the toolbar +/- buttons.)
+      host.addEventListener("wheel", function (e) { e.stopPropagation(); }, true);
+
       wireTreeToggles(tree, pal);
       return makeTreeApi(tree, meta);
     }).catch(function (err) {
@@ -248,7 +255,12 @@
       ds.visible = true;
     });
 
-    var xMin = +new Date(meta.rootDate), xMax = +new Date(meta.mostRecentDate);
+    // Anchor the x-axis to the TREE's root/mostRecent (meta.json), NOT the SkyGrid
+    // product's own rootDate — the tree transform maps the tree's root→offsetX, and
+    // SkyGrid/exponential rootDate can differ by days, which would offset the lock
+    // (and misalign the markers vs. the distribution panel, which uses the tree meta).
+    var tmeta = genomic.meta || {};
+    var xMin = +new Date(tmeta.rootDate || meta.rootDate), xMax = +new Date(tmeta.mostRecentDate || meta.mostRecentDate);
     var transform = null;      // tree view transform (x-axis lock); null = static span
     var markerDates = [];      // selected-tip dates (ms) → dashed vertical lines
     var tip = document.createElement("div"); tip.className = "ne-tip"; tip.style.display = "none";
@@ -365,7 +377,12 @@
 
     if (window.ResizeObserver) { new ResizeObserver(render).observe(host); }
     render();
-    function isUsableTransform(t) { return !!(t && isFinite(t.offsetX) && isFinite(t.scaleX) && isFinite(t.maxX) && t.maxX > 0); }
+    // Reject the pre-layout/degenerate transform PearTree reports before its first
+    // fitToWindow (root≈mostRecent, ~1px wide) — it would squash the whole date axis
+    // to one pixel. Require a meaningful root→mostRecent pixel span.
+    function isUsableTransform(t) {
+      return !!(t && isFinite(t.offsetX) && isFinite(t.scaleX) && isFinite(t.maxX) && t.maxX > 0 && (t.maxX * t.scaleX) > 30);
+    }
     return {
       setTransform: function (t) { transform = isUsableTransform(t) ? t : null; render(); },
       setMarkers: function (dates) { markerDates = (dates || []).map(function (d) { return +new Date(d); }).filter(function (v) { return isFinite(v); }); render(); }
@@ -393,7 +410,10 @@
     if (!od || !od.dates || !od.dates.length) { host.textContent = "No sample-distribution data"; return; }
     var series = od.national || {};
     var beyondFrom = od.beyond_tree_from ? +new Date(od.beyond_tree_from) : Infinity;
+    var meta = genomic.meta || {};
+    var treeMin = +new Date(meta.rootDate), treeMax = +new Date(meta.mostRecentDate);
     var showImputed = true, showBeyond = false;
+    var transform = null;      // tree view transform (x-axis lock); null = own span
     var markerDates = [];      // selected-tip dates (ms) → dashed vertical lines
     var days = od.dates.map(function (d) {
       var c = series[d] || { observed: 0, imputed: 0 };
@@ -401,26 +421,42 @@
     });
     var tip = document.createElement("div"); tip.className = "ne-tip"; tip.style.display = "none";
 
+    var locked = function () { return !!(transform && isFinite(treeMin) && isFinite(treeMax)); };
+
     function render() {
       var W = host.clientWidth || 320, H = host.clientHeight || 180;
       var vis = days.filter(function (d) { return showBeyond || d.t <= beyondFrom; });
       if (!vis.length) vis = days;
-      var t0 = Math.min.apply(null, vis.map(function (d) { return d.t; }));
-      var t1 = Math.max.apply(null, vis.map(function (d) { return d.t; }));
-      var xToPx = function (t) { return DIST_PAD.left + ((t - t0) / ((t1 - t0) || 1)) * (W - DIST_PAD.left - DIST_PAD.right); };
+      // Date→x: locked to the tree's transform (root→offsetX, mostRecent→+maxX·scaleX)
+      // so bars/markers align with the phylogeny + Ne panel; else the panel's own span.
+      var lk = locked();
+      var aMin = lk ? treeMin : Math.min.apply(null, vis.map(function (d) { return d.t; }));
+      var aMax = lk ? treeMax : Math.max.apply(null, vis.map(function (d) { return d.t; }));
+      var x0 = lk ? transform.offsetX : DIST_PAD.left;
+      var x1 = lk ? (transform.offsetX + transform.maxX * transform.scaleX) : (W - DIST_PAD.right);
+      var span = (aMax - aMin) || 1, dxp = (x1 - x0) || 1;
+      var xToPx = function (t) { return x0 + ((t - aMin) / span) * dxp; };
+      var pxToDate = function (px) { return aMin + ((px - x0) / dxp) * span; };
       var yMax = Math.max(1, Math.max.apply(null, vis.map(function (d) { return d.obs + (showImputed ? d.imp : 0); })));
       var baseY = H - DIST_PAD.bottom;
       var yToPx = function (v) { return baseY - (v / yMax) * (baseY - DIST_PAD.top); };
-      var spanDays = Math.max(1, (t1 - t0) / 86400000);
-      var barW = Math.max(1, (W - DIST_PAD.left - DIST_PAD.right) / (spanDays + 1) - 1);
+      var pxPerDay = Math.abs(xToPx(aMin + 86400000) - xToPx(aMin));
+      var barW = Math.max(1, pxPerDay - 1);
 
       host.replaceChildren();
       var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, preserveAspectRatio: "none" });
+      // Clip drawing to the plot gutter (an x-locked panel can push bars/beyond-region
+      // past the axes when the tree is panned/zoomed/resized).
+      var clip = svgEl("clipPath", { id: "gen-dist-clip" });
+      clip.appendChild(svgEl("rect", { x: DIST_PAD.left, y: DIST_PAD.top, width: Math.max(0, W - DIST_PAD.left - DIST_PAD.right), height: Math.max(0, H - DIST_PAD.top - DIST_PAD.bottom) }));
+      svg.appendChild(clip);
 
-      if (showBeyond && isFinite(beyondFrom) && beyondFrom > t0 && beyondFrom < t1) {
-        var bx = xToPx(beyondFrom);
-        svg.appendChild(svgEl("rect", { x: bx, y: DIST_PAD.top, width: Math.max(0, (W - DIST_PAD.right) - bx), height: baseY - DIST_PAD.top, fill: "rgba(0,0,0,0.04)" }));
-        var blab = svgEl("text", { x: bx + 3, y: DIST_PAD.top + 9, "font-size": 8, fill: "#9c968b" }); blab.textContent = "beyond tree"; svg.appendChild(blab);
+      if (showBeyond && isFinite(beyondFrom)) {
+        var bx = Math.max(DIST_PAD.left, Math.min(W - DIST_PAD.right, xToPx(beyondFrom)));
+        if (bx < W - DIST_PAD.right) {
+          svg.appendChild(svgEl("rect", { x: bx, y: DIST_PAD.top, width: Math.max(0, (W - DIST_PAD.right) - bx), height: baseY - DIST_PAD.top, fill: "rgba(0,0,0,0.04)" }));
+          var blab = svgEl("text", { x: bx + 3, y: DIST_PAD.top + 9, "font-size": 8, fill: "#9c968b" }); blab.textContent = "beyond tree"; svg.appendChild(blab);
+        }
       }
 
       niceLinearTicks(yMax).forEach(function (v) {
@@ -430,21 +466,26 @@
       });
 
       svg.appendChild(svgEl("line", { x1: DIST_PAD.left, y1: baseY, x2: W - DIST_PAD.right, y2: baseY, stroke: "#c9c7c2", "stroke-width": 1 }));
+      // x ticks from the visible date range (tracks the lock).
+      var dL = pxToDate(DIST_PAD.left), dR = pxToDate(W - DIST_PAD.right);
       var nT = Math.max(2, Math.min(6, Math.floor((W - DIST_PAD.left) / 80)));
       for (var i = 0; i <= nT; i++) {
-        var t = t0 + ((t1 - t0) * i) / nT, x = xToPx(t);
+        var t = dL + ((dR - dL) * i) / nT, x = xToPx(t);
+        if (x < DIST_PAD.left - 1 || x > W - DIST_PAD.right + 1) continue;
         svg.appendChild(svgEl("line", { x1: x, y1: baseY, x2: x, y2: baseY + 3, stroke: "#c9c7c2", "stroke-width": 1 }));
         var xl = svgEl("text", { x: x, y: baseY + 13, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" }); xl.textContent = fmtDay(t); svg.appendChild(xl);
       }
 
+      var gbars = svgEl("g", { "clip-path": "url(#gen-dist-clip)" });
       vis.forEach(function (d) {
         var x = xToPx(d.t) - barW / 2;
-        if (d.obs > 0) svg.appendChild(svgEl("rect", { x: x, y: yToPx(d.obs), width: barW, height: baseY - yToPx(d.obs), fill: DIST_OBS }));
+        if (d.obs > 0) gbars.appendChild(svgEl("rect", { x: x, y: yToPx(d.obs), width: barW, height: baseY - yToPx(d.obs), fill: DIST_OBS }));
         if (showImputed && d.imp > 0) {
           var yTop = yToPx(d.obs + d.imp), yBase = yToPx(d.obs);
-          svg.appendChild(svgEl("rect", { x: x, y: yTop, width: barW, height: yBase - yTop, fill: DIST_IMP }));
+          gbars.appendChild(svgEl("rect", { x: x, y: yTop, width: barW, height: yBase - yTop, fill: DIST_IMP }));
         }
       });
+      svg.appendChild(gbars);
 
       // Selected-tip date markers (dashed vertical lines), within the plot area.
       markerDates.forEach(function (md) {
@@ -477,7 +518,14 @@
 
     if (window.ResizeObserver) { new ResizeObserver(render).observe(host); }
     render();
+    // Reject the pre-layout/degenerate transform PearTree reports before its first
+    // fitToWindow (root≈mostRecent, ~1px wide) — it would squash the whole date axis
+    // to one pixel. Require a meaningful root→mostRecent pixel span.
+    function isUsableTransform(t) {
+      return !!(t && isFinite(t.offsetX) && isFinite(t.scaleX) && isFinite(t.maxX) && t.maxX > 0 && (t.maxX * t.scaleX) > 30);
+    }
     return {
+      setTransform: function (t) { transform = isUsableTransform(t) ? t : null; render(); },
       setMarkers: function (dates) { markerDates = (dates || []).map(function (d) { return +new Date(d); }).filter(function (v) { return isFinite(v); }); render(); }
     };
   }
@@ -562,9 +610,16 @@
     var raf = window.requestAnimationFrame || function (f) { return setTimeout(f, 16); };
     function pushTransform() {
       var t = tree.getViewTransform && tree.getViewTransform();
-      if (t && nePanel) nePanel.setTransform(t);
+      if (!t) return;
+      if (nePanel) nePanel.setTransform(t);
+      if (distPanel && distPanel.setTransform) distPanel.setTransform(t);
     }
-    if (nePanel) pushTransform();
+    if (nePanel || distPanel) pushTransform();
+    // PearTree's first fitToWindow lands slightly AFTER embed resolves, and it emits
+    // neither onViewChange nor a host resize for it, so the seed above can catch the
+    // pre-layout (degenerate) transform. Re-read a few times over ~1s so the settled
+    // transform reaches the panels (they ignore the degenerate one until then).
+    [60, 200, 500, 1000].forEach(function (ms) { setTimeout(pushTransform, ms); });
     var rafPending = false;
     tree.onViewChange(function () {
       if (rafPending) return;
@@ -575,7 +630,7 @@
     // does NOT emit onViewChange for that, so on the drag-resizable rail the lock
     // would go stale. Re-read the tree's transform after any tree-host resize
     // (rAF-deferred so PearTree's own refit lands first).
-    if (window.ResizeObserver && nePanel) {
+    if (window.ResizeObserver && (nePanel || distPanel)) {
       var treeHost = document.getElementById("gen-tree-body");
       if (treeHost) new ResizeObserver(function () { raf(pushTransform); }).observe(treeHost);
     }

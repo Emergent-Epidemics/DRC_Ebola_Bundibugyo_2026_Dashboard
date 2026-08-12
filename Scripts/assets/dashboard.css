@@ -1165,7 +1165,9 @@
   body.view-genomic-epidemiology #info { display: none !important; }
 
   #genomic-panel {
-    position: absolute; top: 0; right: 0; bottom: 0; width: 440px;
+    /* bottom clears the fixed footer (#view-switcher, z-index 1100) like the
+       Trends / Spatial-Risk rails do -- otherwise the last card scrolls under it. */
+    position: absolute; top: 0; right: 0; bottom: var(--view-chrome-height); width: 440px;
     display: flex; flex-direction: column; gap: 10px;
     background: #f6f5f2; color: #2a2a27; border-left: 1px solid #e7e3db;
     padding: 10px; overflow: auto; z-index: 500;
