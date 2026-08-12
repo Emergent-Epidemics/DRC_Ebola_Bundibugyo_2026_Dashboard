@@ -5,3 +5,4 @@
 daily_counts_by_onset*.csv
 
 .venv/*
+.superpowers/
