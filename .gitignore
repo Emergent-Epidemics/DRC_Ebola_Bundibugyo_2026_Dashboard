@@ -6,3 +6,5 @@ daily_counts_by_onset*.csv
 
 .venv/*
 .superpowers/
+# Throwaway Phase-0 spike
+spike/
