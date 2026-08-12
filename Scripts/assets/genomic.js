@@ -160,21 +160,129 @@
     render();
   }
 
+  var DIST_PAD = { left: 34, right: 14, top: 12, bottom: 22 };
+  var DIST_OBS = "#9e2b2b", DIST_IMP = "#587e72";
+
+  function niceLinearTicks(max) {
+    max = Math.max(1, max);
+    var raw = max / 4, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    var step = mag; if (raw / mag >= 5) step = 5 * mag; else if (raw / mag >= 2) step = 2 * mag;
+    step = Math.max(1, Math.round(step));
+    var ticks = []; for (var v = 0; v <= max + step * 0.001; v += step) ticks.push(v);
+    return ticks;
+  }
+
+  function downloadDistCsv(days, source) {
+    var rows = ["date,observed,imputed"];
+    days.forEach(function (d) { rows.push(d.ds + "," + d.obs + "," + d.imp); });
+    var blob = new Blob([rows.join("\n") + "\n"], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "sample-distribution_" + (source || "national") + ".csv";
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }
+
+  // Renders the sample-distribution panel into #gen-dist-body. Static calendar-X;
+  // per-zone scope, tree-lock, sequence track, brush, and markers are Phase 5b.
+  function renderDistPanel(genomic) {
+    var host = document.getElementById("gen-dist-body");
+    if (!host) return;
+    var od = genomic.onset_distribution;
+    if (!od || !od.dates || !od.dates.length) { host.textContent = "No sample-distribution data"; return; }
+    var series = od.national || {};
+    var beyondFrom = od.beyond_tree_from ? +new Date(od.beyond_tree_from) : Infinity;
+    var showImputed = true, showBeyond = false;
+    var days = od.dates.map(function (d) {
+      var c = series[d] || { observed: 0, imputed: 0 };
+      return { t: +new Date(d), ds: d, obs: c.observed || 0, imp: c.imputed || 0 };
+    });
+    var tip = document.createElement("div"); tip.className = "ne-tip"; tip.style.display = "none";
+
+    function render() {
+      var W = host.clientWidth || 320, H = host.clientHeight || 180;
+      var vis = days.filter(function (d) { return showBeyond || d.t <= beyondFrom; });
+      if (!vis.length) vis = days;
+      var t0 = Math.min.apply(null, vis.map(function (d) { return d.t; }));
+      var t1 = Math.max.apply(null, vis.map(function (d) { return d.t; }));
+      var xToPx = function (t) { return DIST_PAD.left + ((t - t0) / ((t1 - t0) || 1)) * (W - DIST_PAD.left - DIST_PAD.right); };
+      var yMax = Math.max(1, Math.max.apply(null, vis.map(function (d) { return d.obs + (showImputed ? d.imp : 0); })));
+      var baseY = H - DIST_PAD.bottom;
+      var yToPx = function (v) { return baseY - (v / yMax) * (baseY - DIST_PAD.top); };
+      var spanDays = Math.max(1, (t1 - t0) / 86400000);
+      var barW = Math.max(1, (W - DIST_PAD.left - DIST_PAD.right) / (spanDays + 1) - 1);
+
+      host.replaceChildren();
+      var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, preserveAspectRatio: "none" });
+
+      if (showBeyond && isFinite(beyondFrom) && beyondFrom > t0 && beyondFrom < t1) {
+        var bx = xToPx(beyondFrom);
+        svg.appendChild(svgEl("rect", { x: bx, y: DIST_PAD.top, width: Math.max(0, (W - DIST_PAD.right) - bx), height: baseY - DIST_PAD.top, fill: "rgba(0,0,0,0.04)" }));
+        var blab = svgEl("text", { x: bx + 3, y: DIST_PAD.top + 9, "font-size": 8, fill: "#9c968b" }); blab.textContent = "beyond tree"; svg.appendChild(blab);
+      }
+
+      niceLinearTicks(yMax).forEach(function (v) {
+        var y = yToPx(v);
+        svg.appendChild(svgEl("line", { x1: DIST_PAD.left, y1: y, x2: W - DIST_PAD.right, y2: y, stroke: "#eee", "stroke-width": 1 }));
+        var lbl = svgEl("text", { x: DIST_PAD.left - 4, y: y + 3, "font-size": 9, fill: "#9c968b", "text-anchor": "end" }); lbl.textContent = String(v); svg.appendChild(lbl);
+      });
+
+      svg.appendChild(svgEl("line", { x1: DIST_PAD.left, y1: baseY, x2: W - DIST_PAD.right, y2: baseY, stroke: "#c9c7c2", "stroke-width": 1 }));
+      var nT = Math.max(2, Math.min(6, Math.floor((W - DIST_PAD.left) / 80)));
+      for (var i = 0; i <= nT; i++) {
+        var t = t0 + ((t1 - t0) * i) / nT, x = xToPx(t);
+        svg.appendChild(svgEl("line", { x1: x, y1: baseY, x2: x, y2: baseY + 3, stroke: "#c9c7c2", "stroke-width": 1 }));
+        var xl = svgEl("text", { x: x, y: baseY + 13, "font-size": 9, fill: "#9c968b", "text-anchor": "middle" }); xl.textContent = fmtDay(t); svg.appendChild(xl);
+      }
+
+      vis.forEach(function (d) {
+        var x = xToPx(d.t) - barW / 2;
+        if (d.obs > 0) svg.appendChild(svgEl("rect", { x: x, y: yToPx(d.obs), width: barW, height: baseY - yToPx(d.obs), fill: DIST_OBS }));
+        if (showImputed && d.imp > 0) {
+          var yTop = yToPx(d.obs + d.imp), yBase = yToPx(d.obs);
+          svg.appendChild(svgEl("rect", { x: x, y: yTop, width: barW, height: yBase - yTop, fill: DIST_IMP }));
+        }
+      });
+      host.appendChild(svg); host.appendChild(tip);
+
+      svg.addEventListener("mousemove", function (ev) {
+        var mx = ev.clientX - host.getBoundingClientRect().left;
+        var best = null, bd = Infinity;
+        vis.forEach(function (d) { var dd = Math.abs(xToPx(d.t) - mx); if (dd < bd) { bd = dd; best = d; } });
+        if (!best || bd > Math.max(barW, 8)) { tip.style.display = "none"; return; }
+        var html = '<div class="ne-tip-d">' + fmtDay(best.t) + "</div>" +
+          '<div><span style="color:' + DIST_OBS + '">observed</span> <b>' + best.obs + "</b></div>";
+        if (showImputed) html += '<div><span style="color:' + DIST_IMP + '">imputed</span> <b>' + best.imp + "</b></div>";
+        tip.innerHTML = html; tip.style.display = ""; tip.style.left = Math.min(mx + 8, W - 120) + "px"; tip.style.top = (DIST_PAD.top + 4) + "px";
+      });
+      svg.addEventListener("mouseleave", function () { tip.style.display = "none"; });
+    }
+
+    var impBtn = document.getElementById("gen-dist-imputed");
+    applyToggleStyle(impBtn, showImputed, DIST_IMP, "rgba(88,126,114,0.15)");
+    if (impBtn) impBtn.addEventListener("click", function (e) { e.preventDefault(); showImputed = !showImputed; applyToggleStyle(impBtn, showImputed, DIST_IMP, "rgba(88,126,114,0.15)"); render(); });
+
+    var beyBtn = document.getElementById("gen-dist-beyond");
+    applyToggleStyle(beyBtn, showBeyond, "#9b7d4e", "rgba(155,125,78,0.12)");
+    if (beyBtn) beyBtn.addEventListener("click", function (e) { e.preventDefault(); showBeyond = !showBeyond; applyToggleStyle(beyBtn, showBeyond, "#9b7d4e", "rgba(155,125,78,0.12)"); render(); });
+
+    var csvBtn = document.getElementById("gen-dist-csv");
+    if (csvBtn) csvBtn.addEventListener("click", function (e) { e.preventDefault(); downloadDistCsv(days, od.source); });
+
+    if (window.ResizeObserver) { new ResizeObserver(render).observe(host); }
+    render();
+  }
+
   function createGenomicTab(ctx) {
     var data = (ctx && ctx.data) || {};
     return {
       mount: function () {
         var tips = (data.tips || []).length;
-        var od = data.onset_distribution || {};
-        var dates = (od.dates || []).length;
         setText("gen-tree-body", tips ? (tips + " sequences loaded — tree rendering pending") : "No genomic data");
         renderNePanel(data);
-        setText("gen-dist-body", dates
-          ? (dates + " onset dates (source " + (od.source || "?") + "); data build " + (data.data_build_date || "?"))
-          : "No sample-distribution data");
+        renderDistPanel(data);
       },
       unmount: function () {
-        ["gen-tree-body", "gen-dist-body"].forEach(function (id) { setText(id, ""); });
+        ["gen-tree-body"].forEach(function (id) { setText(id, ""); });
       }
     };
   }
