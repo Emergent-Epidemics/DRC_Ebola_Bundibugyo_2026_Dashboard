@@ -172,17 +172,7 @@
     return ticks;
   }
 
-  function downloadDistCsv(days, source) {
-    var rows = ["date,observed,imputed"];
-    days.forEach(function (d) { rows.push(d.ds + "," + d.obs + "," + d.imp); });
-    var blob = new Blob([rows.join("\n") + "\n"], { type: "text/csv" });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url; a.download = "sample-distribution_" + (source || "national") + ".csv";
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-  }
-
-  // Renders the sample-distribution panel into #gen-dist-body. Static calendar-X;
+  // Renders the confirmed-positive-cases panel into #gen-dist-body. Static calendar-X;
   // per-zone scope, tree-lock, sequence track, brush, and markers are Phase 5b.
   function renderDistPanel(genomic) {
     var host = document.getElementById("gen-dist-body");
@@ -264,9 +254,6 @@
     var beyBtn = document.getElementById("gen-dist-beyond");
     applyToggleStyle(beyBtn, showBeyond, "#9b7d4e", "rgba(155,125,78,0.12)");
     if (beyBtn) beyBtn.addEventListener("click", function (e) { e.preventDefault(); showBeyond = !showBeyond; applyToggleStyle(beyBtn, showBeyond, "#9b7d4e", "rgba(155,125,78,0.12)"); render(); });
-
-    var csvBtn = document.getElementById("gen-dist-csv");
-    if (csvBtn) csvBtn.addEventListener("click", function (e) { e.preventDefault(); downloadDistCsv(days, od.source); });
 
     if (window.ResizeObserver) { new ResizeObserver(render).observe(host); }
     render();
