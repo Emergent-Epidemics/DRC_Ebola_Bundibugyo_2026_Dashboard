@@ -38,5 +38,6 @@ def test_genomic_module_contributes_rail_and_script():
     html = page.build_page(MINIMAL)
     assert 'id="genomic-panel"' in html
     assert 'id="gen-tree-body"' in html and 'id="gen-dist-body"' in html
+    assert 'id="genomic-resize"' in html                      # drag handle present
     assert 'src="assets/genomic.js"' in html
     assert "stub-genomic-epidemiology" not in html

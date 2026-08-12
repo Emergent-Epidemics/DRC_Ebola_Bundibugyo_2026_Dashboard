@@ -16,6 +16,7 @@ VIEW_ID = "genomic-epidemiology"
 # Right-rail skeleton. Plain text (no data-i18n yet -- i18n is a later phase).
 # genomic.js fills the .gen-body divs from PAYLOAD.genomic.
 _BODY = r"""<div id="genomic-panel">
+  <div id="genomic-resize" role="separator" aria-orientation="vertical" title="Drag to resize" tabindex="0"></div>
   <section class="gen-card"><h2>Phylogeny</h2><div class="gen-body" id="gen-tree-body">Loading…</div></section>
   <section class="gen-card"><h2>Effective population size</h2><div class="gen-body" id="gen-ne-body">Loading…</div></section>
   <section class="gen-card"><h2>Sample distribution</h2><div class="gen-body" id="gen-dist-body">Loading…</div></section>

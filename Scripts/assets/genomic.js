@@ -33,10 +33,60 @@
     };
   }
 
+  // Drag-to-resize the right rail; width persisted per browser (like the
+  // Trends/Spatial-Risk rails). Clamped to a sensible range.
+  var WIDTH_KEY = "bdbv_genomic_rail_width_px";
+  var MIN_W = 320;
+  function maxW() { return Math.round(window.innerWidth * 0.7); }
+  function applyWidth(px) {
+    var panel = document.getElementById("genomic-panel");
+    if (!panel) return;
+    px = Math.max(MIN_W, Math.min(maxW(), px));
+    panel.style.width = px + "px";
+  }
+  function initResize() {
+    var panel = document.getElementById("genomic-panel");
+    var handle = document.getElementById("genomic-resize");
+    if (!panel || !handle) return;
+    var stored = parseFloat(localStorage.getItem(WIDTH_KEY) || "");
+    if (isFinite(stored)) applyWidth(stored);
+
+    var dragging = false;
+    function onMove(e) {
+      if (!dragging) return;
+      applyWidth(window.innerWidth - e.clientX);   // rail hugs the right edge
+      e.preventDefault();
+    }
+    function onUp() {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove("genomic-resizing");
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      try { localStorage.setItem(WIDTH_KEY, String(parseInt(panel.style.width, 10) || MIN_W)); } catch (e) {}
+    }
+    handle.addEventListener("mousedown", function (e) {
+      dragging = true;
+      document.body.classList.add("genomic-resizing");
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      e.preventDefault();
+    });
+    // Keyboard resize for accessibility (± 20px on arrow keys).
+    handle.addEventListener("keydown", function (e) {
+      var cur = parseInt(panel.style.width, 10) || panel.getBoundingClientRect().width;
+      if (e.key === "ArrowLeft") { applyWidth(cur + 20); e.preventDefault(); }
+      else if (e.key === "ArrowRight") { applyWidth(cur - 20); e.preventDefault(); }
+      else return;
+      try { localStorage.setItem(WIDTH_KEY, String(parseInt(panel.style.width, 10))); } catch (err) {}
+    });
+  }
+
   function boot() {
     if (document.body.getAttribute("data-initial-view") !== "genomic-epidemiology") return;
     var tab = createGenomicTab({ data: readGenomic() });
     tab.mount();
+    initResize();
     window.__genomicTab = tab;   // exposed for later engine/coordinator integration
   }
 

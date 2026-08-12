@@ -1150,8 +1150,15 @@
   .modal .methods-table tr:nth-child(even) td { background:#1f1f1f; }
 
   /* Genomic Epidemiology tab (Phase 3 seam skeleton). Light rail matching the
-     Trends/Spatial-Risk side panels (#f6f5f2/#2a2a27/#e7e3db); full layout
-     (drag splitter, collapse, real panels) arrives in later phases. */
+     Trends/Spatial-Risk side panels (#f6f5f2/#2a2a27/#e7e3db); real panels +
+     collapse arrive in later phases. */
+
+  /* Hide the snapshot-map chrome on this content-rail tab, same as Trends /
+     Spatial-Risk / Context do (zone-details #info, layer #controls, #legend). */
+  body.view-genomic-epidemiology #controls,
+  body.view-genomic-epidemiology #legend,
+  body.view-genomic-epidemiology #info { display: none !important; }
+
   #genomic-panel {
     position: absolute; top: 0; right: 0; bottom: 0; width: 440px;
     display: flex; flex-direction: column; gap: 10px;
@@ -1163,3 +1170,16 @@
   }
   #genomic-panel .gen-card h2 { margin: 0 0 6px; font-size: 13px; color: #2a2a27; }
   #genomic-panel .gen-body { font-size: 12px; color: #5c574f; }
+  /* Drag handle on the panel's left edge (width persisted to localStorage by
+     genomic.js). Sits just outside the border so it doesn't overlap content. */
+  #genomic-resize {
+    position: absolute; top: 0; bottom: 0; left: -3px; width: 8px;
+    cursor: col-resize; z-index: 501;
+  }
+  #genomic-resize::before {
+    content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px;
+    background: transparent;
+  }
+  #genomic-resize:hover::before,
+  body.genomic-resizing #genomic-resize::before { background: #9b7d4e; width: 3px; left: 2px; }
+  body.genomic-resizing { cursor: col-resize; user-select: none; }
