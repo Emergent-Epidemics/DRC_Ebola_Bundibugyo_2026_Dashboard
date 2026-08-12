@@ -31,3 +31,12 @@ def test_genomic_page_has_no_stub_markup():
     # The genomic stub is gone (the other two tabs' stubs still live in the shared
     # template, so a bare "Coming soon" check would false-positive on them).
     assert "stub-genomic-epidemiology" not in html
+
+
+def test_genomic_module_contributes_rail_and_script():
+    page = importlib.import_module("pages.genomic_epidemiology")
+    html = page.build_page(MINIMAL)
+    assert 'id="genomic-panel"' in html
+    assert 'id="gen-tree-body"' in html and 'id="gen-dist-body"' in html
+    assert 'src="assets/genomic.js"' in html
+    assert "stub-genomic-epidemiology" not in html
