@@ -146,12 +146,31 @@
       }, true);
 
       wireTreeToggles(tree, pal);
-      return tree;
+      return makeTreeApi(tree, meta);
     }).catch(function (err) {
       host.textContent = "Phylogeny failed to render.";
       if (window.console) console.warn("[genomic] tree embed failed:", err);
       return null;
     });
+  }
+
+  // App-facing wrapper over the raw PearTree instance (mirrors the source
+  // tree-panel's returned interface). PearTree's setSelection keys on internal
+  // node ids, so tips are selected via the `accession` annotation (== leaf name),
+  // additively. The view/band methods seed the Ne/distribution coupling (Phase 5b
+  // increment 2). `_raw` is kept for debugging.
+  function makeTreeApi(tree, meta) {
+    return {
+      _raw: tree,
+      selectByNames: function (names) {
+        (names || []).forEach(function (nm, i) { tree.selectByAnnotation("accession", nm, { additive: i > 0 }); });
+      },
+      clear: function () { tree.setSelection([]); },
+      onSelect: function (cb) { return tree.onNodeSelect(cb); },
+      onViewChange: function (cb) { return tree.onViewChange(cb); },
+      getViewTransform: function () { return tree.getViewTransform ? tree.getViewTransform() : null; },
+      meta: meta
+    };
   }
 
   // The three header toggles. Legend drives OUR legend box; Node Bars / Tip Labels
@@ -417,19 +436,94 @@
     render();
   }
 
+  // --- Genomic-local coordinator ---------------------------------------------
+  // Ports coordinator.js's selection contract into the tab (design §4): the active
+  // selection is a ZONE's tip-set, chosen from a genome marker OR a zone polygon on
+  // the shared map; clicking the same source again deselects (activeKey). A direct
+  // tree click selects a clade and reflects its zones back onto the map. ALL tip
+  // logic lives here; engine.js only exposes generic zone-level hooks.
+  function up(s) { return (s || "").toUpperCase().trim(); }
+
+  function startCoordinator(tree, hooks, tips) {
+    // zone (UPPER) -> tip accessions/ids, for highlighting a zone's tips.
+    var zoneToTips = {};
+    (tips || []).forEach(function (t) {
+      var z = realZone(t.health_zone);
+      if (!z) return;
+      var k = up(z);
+      (zoneToTips[k] = zoneToTips[k] || []).push(t.id);
+    });
+    // Canonical zone spelling (as the map knows it) for highlightZones, keyed
+    // upper-case; falls back to the tip's own spelling if a zone has no marker.
+    var nomByUpper = {};
+    (hooks.genomeMarkers || []).forEach(function (g) { if (g.nom) nomByUpper[up(g.nom)] = g.nom; });
+    function zoneNom(z) { return nomByUpper[up(z)] || z; }
+
+    var zoneSelecting = false;   // true while a marker/zone click drives the selection
+    var programmatic = false;    // true while WE mutate the tree (vs. a direct tree click)
+    var activeKey = null;        // key of the current map-initiated selection (toggle-deselect)
+
+    function clearAll() {
+      activeKey = null;
+      programmatic = true;
+      tree.clear();              // onSelect (normal path) clears the map highlight
+      programmatic = false;
+    }
+
+    // marker OR polygon → select that zone's tips; click the same source again → clear
+    function selectZone(nom) {
+      var key = "zone:" + up(nom);
+      if (key === activeKey) { clearAll(); return; }
+      activeKey = key;
+      var names = zoneToTips[up(nom)] || [];
+      zoneSelecting = true;
+      programmatic = true;
+      tree.clear();                                  // drop any prior tip selection
+      if (names.length) tree.selectByNames(names);   // highlight this zone's tips
+      programmatic = false;
+      zoneSelecting = false;
+      hooks.highlightZones([zoneNom(nom)]);          // outline the zone + its marker
+    }
+
+    hooks.onMarkerClick(function (nom) { selectZone(nom); });
+    hooks.onZoneClick(function (nom) { selectZone(nom); });
+    hooks.onBackgroundClick(function () { clearAll(); });
+
+    // tree selection → map zone highlight (markers reflect the selected tip set).
+    tree.onSelect(function (ev) {
+      var selected = (ev && ev.selected) || [];
+      if (zoneSelecting) return;                     // marker/zone click already highlighted
+      if (!programmatic) activeKey = null;           // a direct tree click isn't a toggle target
+      var zones = {};
+      selected.forEach(function (n) {
+        var z = realZone(n.annotations && n.annotations.health_zone);
+        if (z) zones[zoneNom(z)] = true;
+      });
+      hooks.highlightZones(Object.keys(zones));
+    });
+
+    return { clearSelection: clearAll };
+  }
+
   function createGenomicTab(ctx) {
     var data = (ctx && ctx.data) || {};
     var treeApi = null;   // resolved PearTree instance (async); consumed by the coordinator
+    var coordinator = null;
     return {
       mount: function () {
         this.treePromise = createTreePanel("gen-tree-body", data).then(function (t) {
-          treeApi = t; return t;
+          treeApi = t;
+          var hooks = window.__bdbvMapHooks;
+          if (t && hooks) coordinator = startCoordinator(t, hooks, data.tips || []);
+          return t;
         });
         renderNePanel(data);
         renderDistPanel(data);
       },
       getTree: function () { return treeApi; },
+      getCoordinator: function () { return coordinator; },
       unmount: function () {
+        if (coordinator) coordinator.clearSelection();
         setText("gen-tree-body", "");
       }
     };

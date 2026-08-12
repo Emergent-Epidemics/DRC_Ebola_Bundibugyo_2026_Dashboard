@@ -1104,6 +1104,11 @@
   .case-tt-row { display:flex; justify-content:space-between; gap:12px; }
   .case-tt-row span:last-child { font-variant-numeric: tabular-nums; }
   .genome-icon { border-radius:50%; background:rgba(91,134,179,0.42); border:1.5px solid rgba(255,255,255,0.75); box-shadow:0 0 4px rgba(91,134,179,0.25); box-sizing:border-box; }
+  /* Genomic tab: a genome marker whose zone is the current coordinator selection
+     (class toggled on the marker's icon element by engine.js highlightZones). */
+  .leaflet-marker-icon.genome-marker-sel .genome-icon {
+    background:rgba(242,200,75,0.7); border-color:#9a7a16; box-shadow:0 0 6px rgba(242,200,75,0.7);
+  }
   /* Trends / Context: marker dots must not steal pointer events from the map. */
   body.view-trends .leaflet-marker-pane .leaflet-marker-icon,
   body.view-context .leaflet-marker-pane .leaflet-marker-icon { pointer-events: none !important; }

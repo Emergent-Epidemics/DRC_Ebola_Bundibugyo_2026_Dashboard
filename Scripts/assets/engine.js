@@ -22,6 +22,13 @@ let flowHubUserSelected = false;
 let mapSelectedNom = null;          // the single "focused zone" for the snapshot view
 let flowArcStats = null;
 let activeView = "map";
+// Genomic tab (see genomic.js): the shared engine exposes only GENERIC, tip-
+// agnostic map hooks. `genomicMapHooks` is assigned once the map/layers exist
+// (below) and drives zone-level selection subscribe/emit + zone highlighting;
+// `genomicHighlightNoms` is the zone set the coordinator has asked us to outline
+// (re-applied by styleFn/restyleZonesForActiveView so it survives zoom).
+let genomicMapHooks = null;
+let genomicHighlightNoms = [];
 // True while the map is panning/zooming. Hover decoration (zone tooltip, epi
 // float, trends province hover) is suppressed while this is set: during a move
 // the browser keeps firing mouseover as zones slide under the cursor, and any
@@ -1462,6 +1469,13 @@ function valueToColor(v, ref, layer) {
 
 function styleFn(feature) {
   if (activeView === "epi-trends") return epiTrendsStyleFn(feature);
+  if (activeView === "genomic-epidemiology" &&
+      genomicHighlightNoms.indexOf(feature.properties.nom) !== -1) {
+    // Coordinator-selected zone(s): a heavy warm outline over the backdrop
+    // choropleth (fill still conveys the layer value). Terracotta to match the
+    // rail accent, distinct from the snapshot view's near-black focus border.
+    return { color: "#9a7a16", weight: 2.4, fillOpacity: 0 };
+  }
   const ref = feature.properties.nom;
   const v = currentValues.get(ref);
   const has = v != null && !Number.isNaN(v);
@@ -1803,6 +1817,14 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
           setEpiSelected(nom === epiSelectedNom ? null : nom);
           return;
         }
+        if (activeView === "genomic-epidemiology") {
+          // Ownership rule (R7): on the genomic view the genomic coordinator drives
+          // selection, not setMapSelection. Route the zone click to the generic hook
+          // (genomic.js maps the zone to its tip-set and highlights the tree).
+          L.DomEvent.stop(e);
+          if (genomicMapHooks) genomicMapHooks._emitZoneClick(feature.properties.nom);
+          return;
+        }
         if (activeView === "map") {
           L.DomEvent.stop(e);
           // One "focused zone" for the snapshot view: click to focus, click the
@@ -1841,6 +1863,14 @@ function restyleZonesForActiveView() {
   } else if (activeView === "context" && contextSelectedLayer) {
     contextSelectedLayer.setStyle({weight: 1.6, color: "#ffae42"});
     contextSelectedLayer.bringToFront();
+  } else if (activeView === "genomic-epidemiology" && genomicHighlightNoms.length) {
+    // styleFn already paints the outline, but bring the selected zones to front so
+    // their border isn't hidden under neighbours after a restyle.
+    geoLayer.eachLayer(function (layer) {
+      if (layer.feature && genomicHighlightNoms.indexOf(layer.feature.properties.nom) !== -1) {
+        layer.bringToFront();
+      }
+    });
   }
 }
 
@@ -1897,6 +1927,8 @@ map.on("click", function() {
   // Snapshot: clicking empty map clears the focused zone (info box → placeholder,
   // highlight cleared, arcs cleared, matrix choropleth goes empty).
   if (activeView === "map") setMapSelection(null);
+  // Genomic: clicking empty map clears the coordinator's current selection.
+  if (activeView === "genomic-epidemiology" && genomicMapHooks) genomicMapHooks._emitBackgroundClick();
 });
 
 // --- health-zone search ---
@@ -3070,6 +3102,15 @@ function setActiveView(view) {
   } else if (view === "map") {
     map.invalidateSize();
     recompute();
+  } else if (view === "genomic-epidemiology") {
+    map.invalidateSize();
+    // Show the per-zone genome markers by default: the genomic tab links them to
+    // the tree tips (click a marker → select that zone's tips). Guarded on the
+    // layer/markers existing (built above; absent if no genome data).
+    if (typeof genomeLayer !== "undefined" && GENOME_SEQUENCES.length) {
+      genomeLayer.addTo(map);
+      if (showGenomesBox) showGenomesBox.checked = true;
+    }
   }
 }
 
@@ -3441,6 +3482,14 @@ for (const g of GENOME_SEQUENCES) {
   const m = L.marker([g.lat, g.lon], {icon: genomeIcon(g.count)});
   m._bdbvGenome = g;
   m.bindTooltip(genomeMarkerTooltip(g), {direction:"top", offset:[0,-8]});
+  // On the genomic view a marker click selects that zone's tip-set (routed to the
+  // genomic coordinator via the generic hook; genomic.js owns the tip logic).
+  m.on("click", function(e) {
+    if (activeView === "genomic-epidemiology" && genomicMapHooks) {
+      genomicMapHooks._emitMarkerClick(g.nom);
+      L.DomEvent.stop(e);
+    }
+  });
   genomeLayer.addLayer(m);
 }
 
@@ -3451,6 +3500,43 @@ if (!PAYLOAD.genome_markers_available || !GENOME_SEQUENCES.length) {
     syncMarkerToggles("genomes");
   });
 }
+
+// --- Generic map hooks for per-tab modules (currently the genomic tab) ---
+// Deliberately tip-agnostic (design R6): the shared engine exposes zone-level
+// selection subscribe/emit + zone highlighting + the raw per-zone genome markers.
+// ALL tip logic (which zone maps to which tips, tip highlighting) lives in
+// genomic.js. genomic.js reads window.__bdbvMapHooks after engine.js has run.
+genomicMapHooks = (function () {
+  let onZoneClickCb = null, onMarkerClickCb = null, onBackgroundClickCb = null;
+  return {
+    map: map,
+    // Per-zone genome markers ({nom,name,lat,lon,count}); genomic.js joins these
+    // zones to the tree tips. A defensive copy so callers can't mutate ours.
+    genomeMarkers: GENOME_SEQUENCES.map(function (g) { return { nom: g.nom, name: g.name, count: g.count }; }),
+    onZoneClick: function (cb) { onZoneClickCb = cb; },
+    onMarkerClick: function (cb) { onMarkerClickCb = cb; },
+    onBackgroundClick: function (cb) { onBackgroundClickCb = cb; },
+    _emitZoneClick: function (nom) { if (onZoneClickCb) onZoneClickCb(nom); },
+    _emitMarkerClick: function (nom) { if (onMarkerClickCb) onMarkerClickCb(nom); },
+    _emitBackgroundClick: function () { if (onBackgroundClickCb) onBackgroundClickCb(); },
+    // Outline a set of zones (by canonical nom) on the backdrop map, and emphasise
+    // their genome markers. Pass [] to clear. Survives zoom via styleFn.
+    highlightZones: function (noms) {
+      genomicHighlightNoms = (noms || []).slice();
+      geoLayer.setStyle(styleFn);
+      geoLayer.eachLayer(function (layer) {
+        if (layer.feature && genomicHighlightNoms.indexOf(layer.feature.properties.nom) !== -1) layer.bringToFront();
+      });
+      const sel = {};
+      genomicHighlightNoms.forEach(function (n) { sel[n] = true; });
+      genomeLayer.eachLayer(function (m) {
+        const el = m.getElement && m.getElement();
+        if (el && m._bdbvGenome) el.classList.toggle("genome-marker-sel", !!sel[m._bdbvGenome.nom]);
+      });
+    },
+  };
+})();
+window.__bdbvMapHooks = genomicMapHooks;
 
 showCasesBox.addEventListener("change", function() {
   const epiCases = document.getElementById("epi-show-cases");
