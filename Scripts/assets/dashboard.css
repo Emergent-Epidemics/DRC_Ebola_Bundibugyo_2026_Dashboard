@@ -1183,3 +1183,8 @@
   #genomic-resize:hover::before,
   body.genomic-resizing #genomic-resize::before { background: #9b7d4e; width: 3px; left: 2px; }
   body.genomic-resizing { cursor: col-resize; user-select: none; }
+  /* While dragging the rail, the cursor sweeps over the map underneath and would
+     fire health-zone hover tooltips that pile up. Make the map ignore pointer
+     events for the duration of the drag (the drag listens on window, so resizing
+     is unaffected). */
+  body.genomic-resizing #map { pointer-events: none; }
