@@ -39,7 +39,7 @@ from common.paths import (
     CAVEATS_CSV, INVASION_RISK_CSV, DASHBOARD_PLOTS_DIR, SIT_REPS_DIR,
     METHODS_DOCX, METHODS_DOCX_FR, METHODS_HTML_FR, TERMS_TXT, TERMS_TXT_FR,
     BRANDING_DIR, BRANDING_URLS, THEME_CSS, LOCALES_DIR, SUPPORTED_LANGS,
-    OUTPUT_DIR,
+    OUTPUT_DIR, GENOMIC_DIR,
 )
 
 # `from common.data_sources import *` (used by common/payload.py) only pulls
@@ -222,6 +222,7 @@ __all__ = [
     'localize_layers',
     'build_i18n_payload',
     'load_data_build_info',
+    'load_genomic_products',
 ]
 
 # ---------------------------------------------------------------------------
@@ -3938,6 +3939,29 @@ def load_data_build_info() -> dict | None:
         "url": url,
         "built_at": str(built_at),
         "commit": str(commit),
+    }
+
+
+def load_genomic_products(genomic_dir=None):
+    """Load the BDBV2026-Genomic_Epi products into a payload slice.
+
+    Returns {} when the sibling repo isn't present, so a build without it stays
+    green (the genomic tab is a stub until later phases wire it up). The tree is
+    returned as inline NEXUS text (PearTree's embed accepts it under the `tree`
+    key), so it needs no separate fetched asset.
+    """
+    d = Path(genomic_dir) if genomic_dir is not None else GENOMIC_DIR
+    tree_path = d / "ituri-tree.ptree"
+    if not tree_path.exists():
+        return {}
+    meta = json.loads((d / "ituri-meta.json").read_text(encoding="utf-8"))
+    return {
+        "tree": tree_path.read_text(encoding="utf-8"),
+        "tips": json.loads((d / "ituri-tips.json").read_text(encoding="utf-8")),
+        "meta": meta,
+        "skygrid": json.loads((d / "skygrid.json").read_text(encoding="utf-8")),
+        "exponential": json.loads((d / "exponential.json").read_text(encoding="utf-8")),
+        "data_build_date": meta.get("updated"),
     }
 
 
