@@ -421,7 +421,12 @@
     });
     var tip = document.createElement("div"); tip.className = "ne-tip"; tip.style.display = "none";
 
-    var locked = function () { return !!(transform && isFinite(treeMin) && isFinite(treeMax)); };
+    // Lock the x-axis to the tree ONLY when NOT in "Look beyond" mode: beyond-tree
+    // onset dates extend past the tree's most-recent tip, and with no tree-compression
+    // strip (deferred) they'd clip off the locked axis. In beyond mode the panel uses
+    // its own span so all bars fit (it then intentionally spans a wider range than the
+    // tree/Ne, so pixel-alignment with them no longer applies).
+    var locked = function () { return !!(transform && isFinite(treeMin) && isFinite(treeMax) && !showBeyond); };
 
     function render() {
       var W = host.clientWidth || 320, H = host.clientHeight || 180;

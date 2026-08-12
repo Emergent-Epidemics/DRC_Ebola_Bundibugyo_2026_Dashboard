@@ -1469,17 +1469,20 @@ function valueToColor(v, ref, layer) {
 
 function styleFn(feature) {
   if (activeView === "epi-trends") return epiTrendsStyleFn(feature);
-  if (activeView === "genomic-epidemiology" &&
-      genomicHighlightNoms.indexOf(feature.properties.nom) !== -1) {
-    // Coordinator-selected zone(s): a heavy warm outline over the backdrop
-    // choropleth (fill still conveys the layer value). Terracotta to match the
-    // rail accent, distinct from the snapshot view's near-black focus border.
-    return { color: "#9a7a16", weight: 2.4, fillOpacity: 0 };
-  }
   const ref = feature.properties.nom;
   const v = currentValues.get(ref);
   const has = v != null && !Number.isNaN(v);
   const layer = getLayer(layerSelect.value);
+  if (activeView === "genomic-epidemiology" && genomicHighlightNoms.indexOf(ref) !== -1) {
+    // Coordinator-selected zone(s): KEEP the choropleth fill (so the layer value
+    // stays readable -- do NOT blank it to fillOpacity:0) and add a heavy warm
+    // terracotta outline. Mirrors the snapshot view's focus-highlight fill logic.
+    const base = has ? {
+      fillColor: valueToColor(v, ref, layer),
+      fillOpacity: (currentDomain.isLog ? v <= 0 : v === 0) ? 0.55 : 0.85
+    } : { fillOpacity: 0 };
+    return Object.assign({ color: "#9a7a16", weight: 2.4 }, base);
+  }
   // In Provincial scope, suppress ALL zone-level strokes so the province
   // outlines (drawn in the province-outline pane) are the only line work. Fills
   // are untouched, so the choropleth (incl. zero-case muted fills) still reads;
@@ -2990,6 +2993,13 @@ function recomputeTrendsMap() {
 
 function restoreCaseMarkersForView(view) {
   if (view === "trends") {
+    map.removeLayer(caseLayer);
+    return;
+  }
+  if (view === "genomic-epidemiology") {
+    // The genomic tab shows the per-zone genome-count circles; the active-case
+    // markers sit at the same zone centroids and would overlap them, so keep
+    // them off here regardless of the (hidden) show-cases toggle.
     map.removeLayer(caseLayer);
     return;
   }
