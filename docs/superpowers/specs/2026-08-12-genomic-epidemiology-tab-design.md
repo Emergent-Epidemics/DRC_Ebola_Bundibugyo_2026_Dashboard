@@ -34,12 +34,17 @@ The two codebases are architecturally opposite:
 
 - **Fully native** genomic tab: dark chrome, shared header/nav/footer, en/fr i18n,
   data consistent with the rest of the dashboard.
-- **Style consistency:** the tab reads as the same product as every other tab. A
-  health zone is the same colour across the **map and the SVG panels**. For the
-  **tree**, the same zone scale *if* PearTree's embed API allows recolouring;
-  otherwise the pre-committed fallback (Phase 0 / §6): the tree keeps its own
-  consistent categorical palette plus a visible zone-colour legend. The goal
-  carries its own fallback — it is not left contingent on an open question.
+- **Style consistency:** the tab reads as the same product as every other tab
+  (dark chrome, shared components). Colour note: the dashboard has **no
+  per-zone identity colour** — its map is a *metric choropleth* (`valueToColor`,
+  continuous palette by the selected layer's value). So "one zone = one colour
+  everywhere" is not a goal (and the source app doesn't do it either). Instead we
+  **define a new shared categorical zone palette** used consistently across the
+  genomic panels that colour by zone — the **tree tips** (via PearTree's
+  `annotationPalettes` embed hook, confirmed available in Phase 0) and the Ne/
+  distribution series where they split by zone — always shown **with a zone-colour
+  legend**. Tip colour is a within-panel identity device; it is deliberately **not**
+  matched to the map choropleth, which stays metric-driven.
 - **Data consistency:** case counts, zone geometry/names, and sampling counts
   match the rest of the dashboard, with the tree's **data build date** surfaced so
   stale-vs-fresh is legible.
@@ -96,18 +101,20 @@ Throwaway code, no new repo, no seam. Each item has an explicit pass bar.
    - Can its Bootstrap-light theme be forced dark via the embed API / `--pt-*`
      overrides (no bundle fork)?
    - Does the embed API accept a **per-`health_zone` colour map** so tips use the
-     dashboard's zone scale?
+     defined categorical zone palette?
    - Does `PearTree.embed` accept **inline tree text**, or only a `treeUrl`
      (decides inline-payload-value vs. page-scoped fetched asset; the tree is
      **NEXUS text, not JSON**)?
    - Its head `@import`s Google Fonts — can that request be eliminated (vendor/
      disable)?
    **Pass bar / acceptance artifact:** one dark screenshot of the tree rendered in
-   the dashboard's zone colours with **no external font request** in the network
-   panel. **Pre-committed fallback** (owner: maintainer): if no per-zone palette
-   hook exists, we do **not** fork — the tree keeps its own consistent categorical
-   palette + a visible zone-colour legend (Goal #2 fallback), and only dark-theming
-   + killing the font request remain required.
+   the defined categorical zone palette with **no external font request** in the
+   network panel. **Pre-committed fallback** (owner: maintainer): if no per-zone
+   palette hook exists, we do **not** fork — the tree keeps its own consistent
+   categorical palette + a visible zone-colour legend, and only dark-theming +
+   killing the font request remain required. *(Phase 0 result: the hook exists —
+   `settings.annotationPalettes` at embed init — so the tree takes the defined
+   palette directly; the legend is added regardless.)*
 2. **Zone-level map linking (M1/R1).** On the real dashboard map, make the existing
    genome markers clickable → select that zone's tip-set → highlight tips, and
    round-trip a zone-polygon click. **Pass bar:** click a genome marker, see the
@@ -261,11 +268,13 @@ full-extent; distribution: Imputed / beyond-tree / CSV-export) and collapse via
 `wirePanelToggles()`. Narrow screens (≤700px): rail stacks under the map, panels
 auto-collapse.
 
-**Styling (light→dark).** Re-express panels with the dashboard's dark tokens; SVG
-panels use the exact zone scale. **PearTree** is the risk (Phase 0): dark-theme it,
-recolour to the zone scale **if** the embed API allows, **else the pre-committed
-fallback** (own palette + zone legend); eliminate the Google-Fonts request either
-way.
+**Styling (light→dark).** Re-express panels with the dashboard's dark tokens. The
+genomic panels that colour by zone (tree tips + any zone-split Ne/distribution
+series) use the **defined categorical zone palette** with a **legend**; the map
+stays a metric choropleth (no cross-panel colour match). **PearTree** (Phase 0,
+resolved): dark via `applySettings({theme:'BEAST'})`; the zone palette via
+`settings.annotationPalettes` at embed init; the Google-Fonts `@import` blocked
+via a `font-src 'self' data:` CSP.
 
 **i18n.** en/fr for the bounded panel-chrome strings via `data-i18n`; tree tip
 labels are zone names (already localised). Author en+fr together, flag French
@@ -284,9 +293,11 @@ French is reviewed — never unreviewed machine French.**
   coordinator; the clickable-marker selection) get **characterisation tests and/or
   a scripted manual-QA checklist**; the screenshot gate is necessary-but-
   insufficient.
-- **Review checkpoints:** (a) dark-theme screenshots incl. PearTree (with fallback
-  legend if taken); (b) same-zone-same-colour across map + panels (+ tree, or its
-  legend under the fallback); (c) tab numbers match canonical + data build date
+- **Review checkpoints:** (a) dark-theme screenshots incl. PearTree; (b) the
+  defined categorical zone palette applied consistently across the zone-coloured
+  genomic panels (tree tips + zone-split series), with the legend present — the map
+  is a metric choropleth and is not expected to match; (c) tab numbers match
+  canonical + data build date
   surfaced; (d) narrow-screen stacking.
 
 ## Phased delivery
