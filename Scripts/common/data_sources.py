@@ -13,6 +13,7 @@ without needing to know this module recomputes them.
 from __future__ import annotations
 
 import base64
+import csv
 import json
 import math
 import os
@@ -223,6 +224,7 @@ __all__ = [
     'build_i18n_payload',
     'load_data_build_info',
     'load_genomic_products',
+    'load_onset_imputed_series',
 ]
 
 # ---------------------------------------------------------------------------
@@ -3962,6 +3964,65 @@ def load_genomic_products(genomic_dir=None):
         "skygrid": json.loads((d / "skygrid.json").read_text(encoding="utf-8")),
         "exponential": json.loads((d / "exponential.json").read_text(encoding="utf-8")),
         "data_build_date": meta.get("updated"),
+    }
+
+
+_ONSET_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_ONSET_CSV_NAME = "dhis2_linelist_with_imputed_onset.csv"
+
+
+def _latest_onset_linelist(outputs_dir):
+    """Newest dated ``outputs/<date>/dhis2_linelist_with_imputed_onset.csv``, or None.
+
+    Mirrors _latest_spatiotemporal_key_outputs_dir: pick the newest YYYY-MM-DD dir
+    that actually contains the CSV (not manifest.json's date, whose cadence differs).
+    """
+    base = Path(outputs_dir)
+    if not base.exists():
+        return None
+    dated = sorted(
+        (p for p in base.iterdir()
+         if p.is_dir() and _ONSET_DATE_RE.match(p.name) and (p / _ONSET_CSV_NAME).exists()),
+        key=lambda p: p.name,
+    )
+    return (dated[-1] / _ONSET_CSV_NAME) if dated else None
+
+
+def load_onset_imputed_series(outputs_dir=None, known_noms=None, tree_most_recent=None):
+    """Aggregate the imputed-onset linelist to per-date/zone observed-vs-imputed
+    counts for the genomic tab's sample-distribution panel. Returns {} if absent.
+
+    Zone strings are joined to canonical ``nom`` via _norm against ``known_noms``
+    (the payload's zone_data keys); unmatched names pass through unchanged.
+    ``tree_most_recent`` (meta.mostRecentDate) is echoed so the panel can mark the
+    "beyond-tree" region (onset dates strictly after it).
+    """
+    path = _latest_onset_linelist(outputs_dir if outputs_dir is not None else DASHBOARD_PLOTS_DIR)
+    if path is None:
+        return {}
+    nom_by_norm = {_norm(n): n for n in (known_noms or ())}
+
+    def canon(name):
+        return nom_by_norm.get(_norm(name), name)
+
+    by_zone, national = {}, {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            d = (row.get("date_of_symptom_onset_imputed") or "").strip()
+            z = (row.get("health_zone") or "").strip()
+            if not d or not z:
+                continue
+            bucket = "imputed" if (row.get("onset_date_was_imputed") or "").strip().upper() == "TRUE" else "observed"
+            zc = by_zone.setdefault(canon(z), {}).setdefault(d, {"observed": 0, "imputed": 0})
+            zc[bucket] += 1
+            nc = national.setdefault(d, {"observed": 0, "imputed": 0})
+            nc[bucket] += 1
+    return {
+        "dates": sorted(national),
+        "national": national,
+        "by_zone": by_zone,
+        "beyond_tree_from": tree_most_recent,
+        "source": path.parent.name,
     }
 
 
