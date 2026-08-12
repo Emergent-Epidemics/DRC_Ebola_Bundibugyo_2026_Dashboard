@@ -1177,7 +1177,9 @@
     font-size: 11px; padding: 2px 7px; border: 1px solid #e7e3db; border-radius: 4px;
     background: #fff; color: #9c968b; cursor: pointer;
   }
-  #genomic-panel .gen-toggle.active { font-weight: 600; }
+  /* Active state = coloured border + text + a light shade of the dataset's band
+     (set per-dataset in genomic.js). Deliberately NOT bold: bold changes the text
+     width and reflows the button. */
   #genomic-panel .gen-chart { position: relative; height: 180px; min-height: 180px; }
   #genomic-panel .gen-chart svg { display: block; width: 100%; height: 100%; }
   #genomic-panel .ne-tip {

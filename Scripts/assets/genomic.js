@@ -129,8 +129,18 @@
       if (!btn) return;
       function reflect() {
         btn.classList.toggle("active", ds.visible);
-        btn.style.color = ds.visible ? ds.color : "";
-        btn.style.borderColor = ds.visible ? ds.color : "";
+        // Active = dataset colour + a light band shade (no bold, so no reflow).
+        // The brand theme layer styles buttons with `!important`, so these must be
+        // inline `!important` to win the cascade; cleared when inactive.
+        if (ds.visible) {
+          btn.style.setProperty("color", ds.color, "important");
+          btn.style.setProperty("border-color", ds.color, "important");
+          btn.style.setProperty("background", ds.band, "important");
+        } else {
+          btn.style.removeProperty("color");
+          btn.style.removeProperty("border-color");
+          btn.style.removeProperty("background");
+        }
         btn.setAttribute("aria-pressed", String(ds.visible));
       }
       reflect();
