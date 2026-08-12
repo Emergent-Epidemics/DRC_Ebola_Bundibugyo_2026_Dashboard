@@ -269,3 +269,140 @@ native-speaker review — machine French, or an en-only tab? State the interim e
 6. Does `payload.py` already carry the onset-imputation series the distribution panel needs?
    (S2)
 7. Is there a versioned, licence-clear PearTree build to vendor? (S4)
+
+---
+
+# Second pass — review of the revised spec (2026-08-12)
+
+The spec was revised in direct response to the first pass. This pass reviews the
+revision, re-checks its **new** claims against code/data, and revisits the two soft
+spots called out at the end of round one. New evidence gathered: `tips.json`,
+`meta.json`, the dashboard's onset data path, and the source app's deploy workflow.
+
+## Verdict on the revision
+
+A clear improvement. The Phase-0 gate is the right instinct, and most first-pass
+findings are genuinely closed: M1 acknowledged (map port), M2/M3 (genomic-local
+coordinator, no shared bus), M6 (join+fail-loud stay in producer), S1 (surface the
+tree date), S3 (transfer not greenfield), S4/S5, and all eight factual corrections
+are reflected. What remains is (a) a couple of new claims that the *data* undercuts,
+(b) an internal contradiction in Decision 3, and (c) the two soft spots still soft.
+
+## New findings (introduced or exposed by the revision)
+
+### R1. Decision 2 over-corrected — the data is zone-level, so the map port it now commits to is largely unnecessary
+
+Decision 2 (lines 59–63) swings from "don't port `map-panel.js`" to "**port** the
+marker/grouping/linking logic … tip/area-level linking is preserved because
+`tips.json` carries per-tip `lat`/`lon`/`health_zone`/`health_area`." The data says
+otherwise:
+
+- **`health_area` is populated 0 / 134 tips** (empty field) — the area branch of the
+  source grouping is dead on current data.
+- **Coordinates are zone-centroids**, not per-sample: every `health_zone` has exactly
+  **one** distinct `(lat,lon)` across its tips. So markers are one-per-zone at the
+  zone centroid.
+
+So map linking is **entirely zone-level** in reality. Porting `map-panel.js`'s
+area-else-zone grouping preserves granularity that the data does not contain. This
+also corrects the first pass: my M1 framing ("you must port area-level markers")
+was too strong — the honest conclusion from the data is that the gap is *narrower*
+than either the original spec or my round-one review implied. The dashboard already
+has a per-zone genome layer (`genomeLayer`, `engine.js:3301`) and zone selection;
+the real work is small — make those markers clickable to select that zone's tip-set
+and highlight tips. **Recommend:** reframe Decision 2 as zone-level linking reusing
+the existing genome layer, and keep the area-grouping code only as clearly-labelled
+dormant future-proofing (for if/when `tips` ever carry areas), not as a live
+requirement.
+
+### R2. Decision 3 contradicts itself: "transfer the repo" vs "producer-only" vs a live Pages site
+
+The revision says both "**transfer** `joetsui1994/BDBV2026_genomic_epi` →
+`INRB-UMIE/BDBV2026-Genomic_Epi`" (line 283) and "producer only (no app/Pages site)"
+(line 139), and elsewhere "**extraction** + org move" (line 66). These are different
+operations. The existing repo *is* the full standalone app — `src/`, `index.html`,
+`dist/`, and an **active GitHub Pages deployment** (`.github/workflows/deploy.yml`,
+`actions/deploy-pages`). A GitHub *transfer* moves the entire repo + history and
+vacates the old location; you cannot transfer it and also keep it producer-only or
+keep the public site alive. There's an unstated prerequisite decision:
+
+- **Is the standalone public dashboard being retired?** If yes → transfer, then strip
+  to producer (app + `deploy.yml` deleted). If no → leave the app repo intact and
+  create a **fresh** producer repo cherry-picking `scripts/` + `data-raw/` + products
+  (an *extraction*, not a transfer). Pick one; the spec currently reads as both.
+
+### R3. S2 belongs in Phase 0 — but is more tractable than the spec fears
+
+The spec parks the distribution panel's data as a Phase-2 task (lines 288–290) and a
+blocking risk (lines 308–310: "not established … Phase 2 must source them or the panel
+is blocked"). Two corrections:
+
+- **It's not merely wiring.** The dashboard has onset data only as **pre-rendered
+  SVGs** (`daily_onset_*.svg` via `onset_trends`, `payload.py:198`) and a
+  report-date cumulative series (`confirmed_timeseries`) — neither is the numeric,
+  splittable per-date onset series the interactive panel needs. "Beyond-tree" has no
+  hook anywhere in `Scripts/`.
+- **But the hard part already exists canonically.** The imputed-onset numeric data
+  lands per-snapshot in the ingested repo:
+  `BDBV2026-Processed_Sensitive_Data/outputs/<date>/dhis2_linelist_with_imputed_onset.csv`.
+  So the imputation producer effectively already runs; the remaining work is
+  **aggregate that linelist → per-date/per-zone counts in `payload.py`** + a new
+  payload key + define/implement the **beyond-tree** join against the tree's sampling
+  set (the one genuinely unhooked piece). Medium, not "stand up a new producer."
+
+So the spec is slightly too pessimistic on availability, and slightly too relaxed on
+timing. **Recommend:** add a Phase-0 data-availability checkpoint — does
+`dhis2_linelist_with_imputed_onset.csv` give per-date/zone counts at the resolution
+the panel needs, and how is "beyond-tree" defined? — so the third panel isn't found
+blocked in Phase 2 after the repo/seam/hooks are already built.
+
+## The two soft spots from round one — still soft
+
+### R4. Phase 0 exit criteria have no written pass bar or pre-committed fallback
+
+"Either all three feasible → proceed; or a documented design change folded back"
+(lines 106–108) is still subjective. The sharpest case is PearTree: "decide fork vs.
+relax" (line 92) defers a *scope-defining* choice — forking a 1.5 MB minified,
+licence-unclear "dev" bundle vs. abandoning the flagship "one zone = one colour"
+goal — to mid-spike. These have wildly different cost. **Pre-commit the fallback now**
+(e.g. "if `embed` exposes no per-zone palette map, we relax to [tree keeps its own
+palette + a documented legend], owner = X"), and give the spike an explicit
+acceptance artifact (one dark screenshot: tree in the dashboard's zone colours, no
+external font request). Then Phase 0 is genuinely go/no-go rather than "gather info,
+re-decide later."
+
+### R5. Goal #2 is now contingent on that unresolved spike
+
+"A health zone is the same colour everywhere (subject to the PearTree spike, M4)"
+(lines 37–38) makes a headline goal conditional on an open question. A goal that may
+be unachievable should carry its fallback *in the goal*, not a parenthetical — tie it
+to R4's pre-committed relaxation.
+
+## Smaller / new
+
+- **R6. "Minimal engine.js hooks / the only shared-code change" is optimistic**
+  (lines 218–223). It's three capabilities — zone-selection subscribe/emit, add/remove
+  an external layer, and **highlight-tips** — and highlight-tips leaks genomic marker
+  styling into shared code, in tension with the "genomic-local coordinator" decision.
+  Nail the boundary in Phase 0: `engine.js` exposes the raw map + generic
+  layer-registration + a zone-select subscribe; *all* tip logic stays in `genomic.js`.
+- **R7. The M3 ownership rule states the outcome, not the mechanism** (lines 220–223).
+  Making the legacy per-view selection paths "inert here" likely requires branching the
+  shared zone-polygon click handler on `activeView` (`engine.js` currently calls
+  `setMapSelection` on zone click) — itself a shared-code change beyond "minimal," and
+  adjacent to (though not breaking) the "existing tabs untouched" non-goal. Good that
+  Phase 0 must verify it; the design should name the handler branch as expected work.
+- **R8. S1 is well-supported (positive).** `meta.json` already carries `updated`
+  (2026-07-28) distinct from `mostRecentDate` (2026-06-23) and `sourceTree`, and
+  `build-tree.mjs` stamps it — so surfacing the tree's vintage is cheap. Minor:
+  `updated` is a manually-stamped *build* date (defaults to today), not the BEAST-run
+  date; label it "data build date," not "analysis date," to avoid overclaiming.
+
+## Net
+
+The revision is a real step forward and the Phase-0 gate is right. To make it a true
+gate: (1) give the spike a written pass/fallback bar, especially the PearTree
+fork-vs-relax decision (R4/R5); (2) fold two cheap reality-checks into Phase 0 — the
+onset/beyond-tree data availability (R3) and the zone-level-vs-area map reality (R1);
+and (3) resolve the Decision 3 transfer-vs-extract + standalone-site-retirement
+question before Phase 1 (R2).
