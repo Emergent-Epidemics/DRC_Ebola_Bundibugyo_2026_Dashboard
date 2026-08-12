@@ -36,7 +36,7 @@ NAV_ITEMS = [
 # "stub-view" body class below), matching every other page for now; see the
 # README "Multi-page structure" section for why that engine/payload sharing
 # exists and the trade-off it implies.
-STUB_VIEWS = {"clinical-symptoms", "surveillance-testing", "genomic-epidemiology"}
+STUB_VIEWS = {"clinical-symptoms", "surveillance-testing"}
 
 HEAD_TEMPLATE = r"""<!doctype html>
 <html lang="en">
@@ -395,10 +395,7 @@ __NAV_LINKS__
   <h2 data-i18n="ui.view_surveillance_testing">Surveillance and Testing</h2>
   <p data-i18n="ui.stub_coming_soon">Coming soon.</p>
 </div>
-<div id="stub-genomic-epidemiology" class="panel stub-panel">
-  <h2 data-i18n="ui.view_genomic_epidemiology">Genomic Epidemiology</h2>
-  <p data-i18n="ui.stub_coming_soon">Coming soon.</p>
-</div>
+__PAGE_BODY__
 </div>
 """
 
@@ -406,6 +403,7 @@ SCRIPTS_TEMPLATE = r"""<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script id="payload" type="application/json">__PAYLOAD__</script>
 <script src="__ASSETS_PREFIX__engine.js"></script>
+__EXTRA_SCRIPTS__
 </body>
 </html>
 """
@@ -451,7 +449,8 @@ _PAGE_SCOPED_PAYLOAD_KEYS = {
 }
 
 
-def render_page(view_id: str, payload: dict, assets_prefix: str = "assets/") -> str:
+def render_page(view_id: str, payload: dict, assets_prefix: str = "assets/",
+                *, page_body: str = "", extra_scripts: str = "") -> str:
     """Assemble one full page. ``view_id`` is one of the ids in NAV_ITEMS
     (map | trends | epi-trends | context | clinical-symptoms |
     surveillance-testing | genomic-epidemiology); the last three are
@@ -479,8 +478,12 @@ def render_page(view_id: str, payload: dict, assets_prefix: str = "assets/") -> 
     body = BODY_TEMPLATE.replace("__INITIAL_VIEW__", view_id)
     body = body.replace("__EXTRA_BODY_CLASS__", "stub-view" if view_id in STUB_VIEWS else "")
     body = body.replace("__NAV_LINKS__", _render_nav(view_id, assets_prefix))
+    body = body.replace("__PAGE_BODY__", page_body)
 
     scripts = SCRIPTS_TEMPLATE.replace("__PAYLOAD__", payload_json)
+    # Expand __EXTRA_SCRIPTS__ before __ASSETS_PREFIX__ so any prefix tokens the
+    # page's own <script> tags carry are resolved too.
+    scripts = scripts.replace("__EXTRA_SCRIPTS__", extra_scripts)
     scripts = scripts.replace("__ASSETS_PREFIX__", assets_prefix)
 
     return head + body + scripts
