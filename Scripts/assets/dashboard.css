@@ -1148,3 +1148,18 @@
   }
   .modal .methods-table th { background:#262626; color:#ffd28a; font-weight:600; }
   .modal .methods-table tr:nth-child(even) td { background:#1f1f1f; }
+
+  /* Genomic Epidemiology tab (Phase 3 seam skeleton). Light rail matching the
+     Trends/Spatial-Risk side panels (#f6f5f2/#2a2a27/#e7e3db); full layout
+     (drag splitter, collapse, real panels) arrives in later phases. */
+  #genomic-panel {
+    position: absolute; top: 0; right: 0; bottom: 0; width: 440px;
+    display: flex; flex-direction: column; gap: 10px;
+    background: #f6f5f2; color: #2a2a27; border-left: 1px solid #e7e3db;
+    padding: 10px; overflow: auto; z-index: 500;
+  }
+  #genomic-panel .gen-card {
+    background: #fff; border: 1px solid #e7e3db; border-radius: 4px; padding: 8px 10px;
+  }
+  #genomic-panel .gen-card h2 { margin: 0 0 6px; font-size: 13px; color: #2a2a27; }
+  #genomic-panel .gen-body { font-size: 12px; color: #5c574f; }

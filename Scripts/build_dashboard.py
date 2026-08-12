@@ -79,6 +79,11 @@ def _write_shared_assets(assets_dir) -> tuple[int, int]:
     engine_js = (SCRIPT_DIR / "assets" / "engine.js").read_text(encoding="utf-8")
     (assets_dir / "engine.js").write_text(engine_js, encoding="utf-8")
 
+    # Page-scoped script for the genomic tab (only that page references it, but
+    # it's written unconditionally alongside engine.js).
+    genomic_js = (SCRIPT_DIR / "assets" / "genomic.js").read_text(encoding="utf-8")
+    (assets_dir / "genomic.js").write_text(genomic_js, encoding="utf-8")
+
     return len(css.encode("utf-8")), len(engine_js.encode("utf-8"))
 
 
