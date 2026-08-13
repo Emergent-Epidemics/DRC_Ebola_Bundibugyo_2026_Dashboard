@@ -684,23 +684,28 @@
     };
   }
 
-  // Drag-to-resize the right rail; width persisted per browser (like the
-  // Trends/Spatial-Risk rails). Clamped to a sensible range.
-  var WIDTH_KEY = "bdbv_genomic_rail_width_px";
+  // Drag-to-resize the right rail. Session-only: the width is NOT persisted, so a
+  // reload snaps back to the CSS default width (this panel rebuilds its contents
+  // each load, so a predictable default reads better than a remembered width).
+  // Clamped to a sensible range.
   var MIN_W = 320;
   function maxW() { return Math.round(window.innerWidth * 0.7); }
+  // PearTree re-fits its tree + time-axis on a window "resize", but its own
+  // container ResizeObserver doesn't fire for this embed, so a rail drag alone
+  // leaves the phylogeny at the old width. Nudge it with a synthetic resize on
+  // every width change. mousemove is already frame-throttled, so this matches how
+  // PearTree behaves under a real window-resize drag.
   function applyWidth(px) {
     var panel = document.getElementById("genomic-panel");
     if (!panel) return;
     px = Math.max(MIN_W, Math.min(maxW(), px));
     panel.style.width = px + "px";
+    window.dispatchEvent(new Event("resize"));
   }
   function initResize() {
     var panel = document.getElementById("genomic-panel");
     var handle = document.getElementById("genomic-resize");
     if (!panel || !handle) return;
-    var stored = parseFloat(localStorage.getItem(WIDTH_KEY) || "");
-    if (isFinite(stored)) applyWidth(stored);
 
     var dragging = false;
     function onMove(e) {
@@ -714,7 +719,6 @@
       document.body.classList.remove("genomic-resizing");
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      try { localStorage.setItem(WIDTH_KEY, String(parseInt(panel.style.width, 10) || MIN_W)); } catch (e) {}
     }
     handle.addEventListener("mousedown", function (e) {
       dragging = true;
@@ -728,8 +732,6 @@
       var cur = parseInt(panel.style.width, 10) || panel.getBoundingClientRect().width;
       if (e.key === "ArrowLeft") { applyWidth(cur + 20); e.preventDefault(); }
       else if (e.key === "ArrowRight") { applyWidth(cur - 20); e.preventDefault(); }
-      else return;
-      try { localStorage.setItem(WIDTH_KEY, String(parseInt(panel.style.width, 10))); } catch (err) {}
     });
   }
 
