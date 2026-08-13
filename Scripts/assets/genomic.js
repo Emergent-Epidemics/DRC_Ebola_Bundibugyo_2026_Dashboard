@@ -425,17 +425,43 @@
     if (!host) return;
     var od = genomic.onset_distribution;
     if (!od || !od.dates || !od.dates.length) { host.textContent = "No sample-distribution data"; return; }
-    var series = od.national || {};
     var beyondFrom = od.beyond_tree_from ? +new Date(od.beyond_tree_from) : Infinity;
     var meta = genomic.meta || {};
     var treeMin = +new Date(meta.rootDate), treeMax = +new Date(meta.mostRecentDate);
     var showImputed = true, showBeyond = false;
     var transform = null;      // tree view transform (x-axis lock); null = own span
     var markerDates = [];      // selected-tip dates (ms) → dashed vertical lines
-    var days = od.dates.map(function (d) {
-      var c = series[d] || { observed: 0, imputed: 0 };
-      return { t: +new Date(d), ds: d, obs: c.observed || 0, imp: c.imputed || 0 };
-    });
+
+    // Per-zone scope: selecting health zone(s) on the map/tree re-scopes the bars to
+    // those zones' onset counts (summed), matching the standalone; an empty scope
+    // falls back to the national series. `by_zone` is keyed by canonical nom, so index
+    // it upper-cased to match the coordinator's zoneNom() keys.
+    var byZoneUpper = {};
+    Object.keys(od.by_zone || {}).forEach(function (z) { byZoneUpper[up(z)] = od.by_zone[z]; });
+    var scopeZones = [];       // current zone scope (empty = national)
+    function scopedSeries() {
+      if (!scopeZones.length) return od.national || {};
+      var merged = {};
+      scopeZones.forEach(function (z) {
+        var s = byZoneUpper[up(z)];
+        if (!s) return;
+        Object.keys(s).forEach(function (d) {
+          var cur = merged[d] || (merged[d] = { observed: 0, imputed: 0 });
+          cur.observed += s[d].observed || 0;
+          cur.imputed += s[d].imputed || 0;
+        });
+      });
+      return merged;
+    }
+    var days = [];
+    function rebuildDays() {
+      var series = scopedSeries();
+      days = od.dates.map(function (d) {
+        var c = series[d] || { observed: 0, imputed: 0 };
+        return { t: +new Date(d), ds: d, obs: c.observed || 0, imp: c.imputed || 0 };
+      });
+    }
+    rebuildDays();
     var tip = document.createElement("div"); tip.className = "ne-tip"; tip.style.display = "none";
 
     // Lock the x-axis to the tree ONLY when NOT in "Look beyond" mode: beyond-tree
@@ -548,7 +574,9 @@
     }
     return {
       setTransform: function (t) { transform = isUsableTransform(t) ? t : null; render(); },
-      setMarkers: function (dates) { markerDates = (dates || []).map(function (d) { return +new Date(d); }).filter(function (v) { return isFinite(v); }); render(); }
+      setMarkers: function (dates) { markerDates = (dates || []).map(function (d) { return +new Date(d); }).filter(function (v) { return isFinite(v); }); render(); },
+      // Re-scope the bars to the given zones (summed); [] restores the national series.
+      setZones: function (zones) { scopeZones = (zones || []).slice(); rebuildDays(); render(); }
     };
   }
 
@@ -599,6 +627,9 @@
       programmatic = false;
       zoneSelecting = false;
       hooks.highlightZones([zoneNom(nom)]);          // outline the zone + its marker
+      // Scope the cases panel to this zone directly (not via the tree round-trip), so
+      // it works even for a zone with confirmed cases but no genome tips.
+      if (distPanel && distPanel.setZones) distPanel.setZones([zoneNom(nom)]);
     }
 
     hooks.onMarkerClick(function (nom) { selectZone(nom); });
@@ -609,21 +640,22 @@
     // (2) map zone highlight (except when a marker/zone click already did it).
     tree.onSelect(function (ev) {
       var selected = (ev && ev.selected) || [];
-      var seen = {}, dates = [];
+      var seen = {}, dates = [], zoneSet = {};
       selected.forEach(function (n) {
-        var ds = n.annotations && n.annotations.date;
-        if (ds && !seen[ds]) { seen[ds] = 1; dates.push(ds); }
+        var a = n.annotations || {};
+        if (a.date && !seen[a.date]) { seen[a.date] = 1; dates.push(a.date); }
+        var z = realZone(a.health_zone);
+        if (z) zoneSet[zoneNom(z)] = true;
       });
       if (nePanel) nePanel.setMarkers(dates);
       if (distPanel) distPanel.setMarkers(dates);
-      if (zoneSelecting) return;                     // marker/zone click already highlighted the map
+      if (zoneSelecting) return;                     // marker/zone click already drove map + cases scope
       if (!programmatic) activeKey = null;           // a direct tree click isn't a toggle target
-      var zones = {};
-      selected.forEach(function (n) {
-        var z = realZone(n.annotations && n.annotations.health_zone);
-        if (z) zones[zoneNom(z)] = true;
-      });
-      hooks.highlightZones(Object.keys(zones));
+      var zoneList = Object.keys(zoneSet);
+      hooks.highlightZones(zoneList);
+      // Direct tree/clade selection (or a clear) re-scopes the cases panel to the union
+      // of the selected tips' zones; an empty selection restores the national series.
+      if (distPanel && distPanel.setZones) distPanel.setZones(zoneList);
     });
 
     // x-axis lock: keep the Ne panel's time axis aligned with the tree's live view
