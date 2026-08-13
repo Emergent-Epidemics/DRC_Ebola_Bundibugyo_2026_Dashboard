@@ -145,12 +145,27 @@
         if (e.target && e.target.id === "tree-canvas") { e.stopPropagation(); e.preventDefault(); }
       }, true);
 
-      // Let the mouse wheel scroll the rail when the cursor is over the tree. PearTree
-      // binds its own wheel-zoom on the canvas and preventDefaults it, trapping the
-      // scroll; intercept in the capture phase (before its handler) and stop
-      // propagation so the browser's native scroll of the rail proceeds. (Tree zoom
-      // stays available via the toolbar +/- buttons.)
-      host.addEventListener("wheel", function (e) { e.stopPropagation(); }, true);
+      // Wheel over the tree: scroll the RAIL when the tree is fitted, but let
+      // PearTree PAN the tree when it's zoomed in. PearTree pans vertically on the
+      // wheel and preventDefaults it (trapping the rail scroll), and its drag-pan
+      // needs Space held — so when fitted we intercept in the capture phase and stop
+      // propagation (native rail scroll proceeds), and when zoomed in we let the
+      // event reach PearTree so there's a way to move around. Zoom is only driven by
+      // the toolbar buttons (wheel-zoom never reaches PearTree while fitted), so we
+      // track the zoom level from their clicks.
+      var zoomLevel = 0;   // 0 = fitted; > 0 = zoomed in
+      function bindZoom(id, delta) {
+        var b = document.getElementById(id);
+        if (b) b.addEventListener("click", function () {
+          zoomLevel = delta === 0 ? 0 : Math.max(0, zoomLevel + delta);
+        });
+      }
+      bindZoom("btn-zoom-in", 1);
+      bindZoom("btn-zoom-out", -1);
+      bindZoom("btn-fit", 0);           // "Fit all" → back to fitted
+      host.addEventListener("wheel", function (e) {
+        if (zoomLevel <= 0) e.stopPropagation();   // fitted → rail scrolls; zoomed → PearTree pans
+      }, true);
 
       wireTreeToggles(tree, pal);
       return makeTreeApi(tree, meta);
