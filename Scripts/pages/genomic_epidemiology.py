@@ -25,9 +25,14 @@ _HEAD = r"""<meta http-equiv="Content-Security-Policy" content="font-src 'self' 
 # genomic.js fills the .gen-body divs from PAYLOAD.genomic.
 _BODY = r"""<div id="genomic-panel">
   <div id="genomic-resize" role="separator" aria-orientation="vertical" title="Drag to resize" tabindex="0"></div>
+  <p class="gen-intro">A more detailed report of the data, methodology, and result interpretation can be found at <a href="https://virological.org/t/genomic-epidemiology-of-the-ongoing-2026-bundibugyo-virus-disease-outbreak-in-the-democratic-republic-of-the-congo/1045" target="_blank" rel="noopener">virological.org/t/genomic-epidemiology-of-the-ongoing-2026-bundibugyo-virus-disease-outbreak-in-the-democratic-republic-of-the-congo/1045</a>.</p>
   <section class="gen-card gen-tree-card" id="gen-tree-card">
     <div class="gen-card-head">
-      <h2>Phylogeny</h2>
+      <span class="gen-title" tabindex="0">
+        <h2>Phylogeny</h2>
+        <span class="gen-info" aria-hidden="true">i</span>
+        <span class="gen-tip" role="tooltip">Time-scale phylogeny of sequenced Bundibugyo viral genomes, with tips coloured by health zone where sample collection took place. Node bars indicate the 95% HPD of the inferred dates.</span>
+      </span>
       <span class="gen-toggles">
         <button type="button" id="gen-tree-legend" class="gen-toggle" aria-pressed="false" title="Show/hide the health-zone colour legend">Legend</button>
         <button type="button" id="gen-tree-nodebars" class="gen-toggle" aria-pressed="true" title="Show/hide node confidence (95% HPD) bars">Node Bars</button>
@@ -41,7 +46,11 @@ _BODY = r"""<div id="genomic-panel">
   </section>
   <section class="gen-card" id="gen-ne-card">
     <div class="gen-card-head">
-      <h2>Effective population size</h2>
+      <span class="gen-title" tabindex="0">
+        <h2>Effective population size</h2>
+        <span class="gen-info" aria-hidden="true">i</span>
+        <span class="gen-tip" role="tooltip">Estimated effective population size (N<sub>e</sub>) of the outbreak through time (up to the latest sample in the phylogeny). A rising curve indicates a growing epidemic; a plateau or decline indicates slowing transmission. SkyGrid is a flexible non-parametric estimate, Exp assumes an exponential-growth model. Shaded regions represent the 95% credible intervals.</span>
+      </span>
       <span class="gen-toggles">
         <button type="button" id="gen-ne-skygrid" class="gen-toggle" aria-pressed="true">SkyGrid</button>
         <button type="button" id="gen-ne-exp" class="gen-toggle" aria-pressed="true">Exp</button>
@@ -54,7 +63,7 @@ _BODY = r"""<div id="genomic-panel">
       <h2>Confirmed positive cases</h2>
       <span class="gen-toggles">
         <button type="button" id="gen-dist-imputed" class="gen-toggle" aria-pressed="true" title="Show cases with imputed onset dates">Imputed</button>
-        <button type="button" id="gen-dist-beyond" class="gen-toggle" aria-pressed="false" title="Include onset dates after the tree's latest tip">Look beyond</button>
+        <button type="button" id="gen-dist-beyond" class="gen-toggle" aria-pressed="false" title="Include onset dates after the tree's latest tip">Look Beyond</button>
       </span>
     </div>
     <div class="gen-body gen-chart" id="gen-dist-body"></div>
