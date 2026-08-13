@@ -135,6 +135,9 @@ def build_shared_payload() -> dict:
     # sibling isn't present, so the build stays green without it.
     genomic = load_genomic_products()
     if genomic:
+        # Reconcile tip health_zone spellings to the canonical noms (producer typos
+        # like 'Nyakunde'->'Nyankunde' otherwise break map<->tree selection + case scope).
+        canonicalize_genomic_zones(genomic, set(zone_data))
         genomic["onset_distribution"] = load_onset_imputed_series(
             known_noms=set(zone_data),
             tree_most_recent=(genomic.get("meta") or {}).get("mostRecentDate"),

@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import csv
 import json
+import difflib
 import math
 import os
 import re
@@ -224,6 +225,7 @@ __all__ = [
     'build_i18n_payload',
     'load_data_build_info',
     'load_genomic_products',
+    'canonicalize_genomic_zones',
     'load_onset_imputed_series',
 ]
 
@@ -3965,6 +3967,54 @@ def load_genomic_products(genomic_dir=None):
         "exponential": json.loads((d / "exponential.json").read_text(encoding="utf-8")),
         "data_build_date": meta.get("updated"),
     }
+
+
+def canonicalize_genomic_zones(genomic: dict, known_noms) -> dict:
+    """Correct tip ``health_zone`` spellings to the canonical zone ``nom`` set.
+
+    The genomic tree producer occasionally spells a zone differently from the
+    dashboard's build-GeoJSON noms (observed: 'Nyakunde' -> 'Nyankunde', 'Gethy'
+    -> 'Gety'). Left unfixed, selecting such a zone on the map highlights no tips
+    (``zoneToTips`` is keyed by the tip spelling) and the by-zone case scope misses
+    it. Correct BOTH the tips list and the inline NEXUS ``health_zone`` annotations
+    so tree colouring, selection, and case scoping all agree. Matching is exact
+    (via ``_norm``, catching accent/case) first, then a conservative fuzzy fallback
+    for letter-level typos; every correction is logged for review.
+    """
+    if not genomic:
+        return genomic
+    known = set(known_noms or ())
+    if not known:
+        return genomic
+    tips = genomic.get("tips") or []
+    zones = {(t.get("health_zone") or "").strip()
+             for t in tips if (t.get("health_zone") or "").strip()}
+    known_by_norm = {_norm(n): n for n in known}
+    correction: dict[str, str] = {}
+    for z in zones:
+        if z in known:
+            continue
+        exact = known_by_norm.get(_norm(z))
+        if exact and exact != z:
+            correction[z] = exact
+            continue
+        near = difflib.get_close_matches(z, known, n=1, cutoff=0.85)
+        if near and near[0] != z:
+            correction[z] = near[0]
+    if not correction:
+        return genomic
+    for t in tips:
+        z = (t.get("health_zone") or "").strip()
+        if z in correction:
+            t["health_zone"] = correction[z]
+    tree = genomic.get("tree")
+    if isinstance(tree, str):
+        for old, new in correction.items():
+            tree = tree.replace(f'health_zone="{old}"', f'health_zone="{new}"')
+        genomic["tree"] = tree
+    print("  genomic zone canonicalisation: "
+          + ", ".join(f"{o!r}->{n!r}" for o, n in sorted(correction.items())))
+    return genomic
 
 
 _ONSET_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
