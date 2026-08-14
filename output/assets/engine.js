@@ -1928,10 +1928,16 @@ function restoreRoleZoneOrder() {
 // paths cannot drift into different selection behaviour.
 function handleZoneClick(feature) {
   if (activeView === "trends") {
+    // Re-clicking the current selection clears it, same as Context / Spatial
+    // Risk / Snapshot. In province scope the unit is the PARENT province, so
+    // clicking any zone inside the selected province deselects it -- there is
+    // no such thing as "the province polygon you originally clicked".
     if (trendsScope === "province") {
-      setTrendsSelection(feature.properties.province || null);
+      const province = feature.properties.province || null;
+      setTrendsSelection(province === trendsSelectedKey ? null : province);
     } else if (trendsScope === "health_zone") {
-      setTrendsSelection(feature.properties.nom || null);
+      const nom = feature.properties.nom || null;
+      setTrendsSelection(nom === trendsSelectedKey ? null : nom);
     }
     return;   // national scope has no zone selection
   }
@@ -2349,6 +2355,28 @@ function zoneSearchInsetX() {
   return panel ? panel.offsetWidth : 0;
 }
 
+// The two knobs that decide how close a searched unit is framed. Tune these,
+// not the fitBounds() call.
+//
+// BACKOFF is the one that matters. A bare fitBounds() frames the polygon
+// edge-to-edge, so a health zone fills the map and every neighbour falls off
+// screen -- the map stops answering "where is this?" at the moment it is most
+// being asked. One level out halves the scale, leaving the unit dominant but
+// ringed by its neighbours. It is applied to the NATURAL fit rather than by
+// lowering MAX_ZOOM, because the cap only bites on the very smallest polygons:
+// a mid-sized zone fits at z9 and never reaches the cap at all, so a lower cap
+// would do nothing for the common case.
+//
+// MAX_ZOOM still caps the smallest units, which back off from a fit so tight
+// (z13+) that one level out is still too close.
+const ZONE_SEARCH_ZOOM_BACKOFF = 1;
+const ZONE_SEARCH_MAX_ZOOM = 9;
+
+// Frames one unit. Named for its first caller, but it is the shared zoom now:
+// the Spatial Risk table calls it too, with a literal {kind, id} rather than a
+// search-index entry. Anything that selects a unit the user did not point at
+// on the map should route through here, so one set of knobs frames them all.
+//
 // NEVER pass `padding` alongside paddingTopLeft/paddingBottomRight: Leaflet
 // resolves each side as `paddingBottomRight || padding || [0,0]`, so a
 // directional key REPLACES padding on that side rather than adding to it, and
@@ -2368,12 +2396,22 @@ function zoneSearchZoomTo(entry) {
   // selection still applies, the zoom is simply skipped.
   if (!bounds || !bounds.isValid()) return;
   const pad = zoneSearchPad();
+  const topLeft = pad;
+  const bottomRight = [pad[0] + zoneSearchInsetX(), pad[1]];
+  // getBoundsZoom() takes TOTAL padding as a single point, where fitBounds
+  // takes it per side -- sum the two sides so this sees exactly the fit
+  // fitBounds is about to compute, then hand back one level less as the cap.
+  const fitZoom = map.getBoundsZoom(bounds, false, L.point(
+    topLeft[0] + bottomRight[0],
+    topLeft[1] + bottomRight[1]
+  ));
   map.fitBounds(bounds, {
-    paddingTopLeft: pad,
-    paddingBottomRight: [pad[0] + zoneSearchInsetX(), pad[1]],
-    // Caps how far we zoom INTO a small unit; a large province fits well below
-    // z10 and never reaches it.
-    maxZoom: 10,
+    paddingTopLeft: topLeft,
+    paddingBottomRight: bottomRight,
+    // fitBounds() only ever zooms further OUT than its natural fit for a
+    // maxZoom below it, so capping at fit-minus-backoff is what applies the
+    // back-off; the framing (centre, directional padding) stays Leaflet's.
+    maxZoom: Math.min(ZONE_SEARCH_MAX_ZOOM, fitZoom - ZONE_SEARCH_ZOOM_BACKOFF),
   });
 }
 
@@ -2569,11 +2607,22 @@ function provinceBaseWeight() {
     : zoneNum("--province-outline-weight", "1");
 }
 
-// Provinces keep their gold resting colour -- that is what makes the province
-// layer read as a different layer from the zones -- but adopt the same state
-// grammar: hover is a white lift, selection is the cased amber ring drawn in
-// the province-selection pane. A SELECTED province draws its RESTING outline;
-// without that it would show a red base line under an amber ring.
+// Province outlines wear one of two resting colours, decided by whether they
+// are an OVERLAY or the polygon layer itself:
+//
+//   overlay (every other tab/scope) -- gold. Zone borders are drawn underneath
+//     them, and the colour difference is what makes the province mesh read as
+//     a separate layer rather than a heavier zone border.
+//   province scope on Trends -- off-white, the same --zone-stroke every other
+//     tab's polygons rest at. Here styleFn() zeroes the zone borders, so these
+//     outlines ARE the clickable polygon layer: there is no second layer left
+//     for gold to distinguish them from, and a gold mesh just looks like the
+//     one tab that opted out of the shared resting colour.
+//
+// Both share the rest of the state grammar: hover is a white lift, selection is
+// the cased amber ring drawn in the province-selection pane. A SELECTED
+// province draws its RESTING outline; without that it would show a red base
+// line under an amber ring.
 function provinceOutlineStyle(state) {
   const provinceMode = activeView === "trends" && trendsScope === "province";
   if (state === "hover") {
@@ -2585,8 +2634,12 @@ function provinceOutlineStyle(state) {
     };
   }
   return {
-    color: themeVar("--province-outline", "#9b7d4e"),
+    color: provinceMode
+      ? themeVar("--zone-stroke", "#fdfaf4")
+      : themeVar("--province-outline", "#9b7d4e"),
     weight: provinceBaseWeight(),
+    // Held above the zone resting opacity (0.7) on purpose: in province scope
+    // this mesh carries the whole map, with no zone borders under it.
     opacity: provinceMode ? 0.95 : 0.88,
     fillOpacity: 0,
   };
@@ -3003,7 +3056,14 @@ function setTrendsSelection(key) {
   // Repaint outlines and the province ring for the new selection. All three
   // scopes want the same call now that the ring reads trendsSelectedKey itself;
   // the branches only survived from when this passed the selection in.
-  applyProvinceOutlineStyles(null);
+  //
+  // Carries the CURRENT hover through rather than clearing it. Deselecting by
+  // re-clicking leaves the cursor sitting on the province it just cleared, and
+  // passing null there dropped it to flat resting with no way back until the
+  // pointer crossed into another zone -- mouseover does not re-fire inside the
+  // zone you are already in. Search-driven calls are unaffected: the pointer is
+  // in the search box, so trendsHoveredProvince is already null.
+  applyProvinceOutlineStyles(trendsHoveredProvince);
   renderTrendsPlots();
   if (activeView === "trends") geoLayer.setStyle(styleFn);
   refreshZoneSelection();
@@ -4074,7 +4134,19 @@ if (!PAYLOAD.flow_arcs_available || !FLOW_ARC_LAYER) {
     tbody.addEventListener("click", function(e) {
       const tr = e.target.closest("tr[data-nom]");
       if (!tr) return;
-      setEpiSelected(tr.getAttribute("data-nom"));
+      const nom = tr.getAttribute("data-nom");
+      setEpiSelected(nom);
+      // Rows zoom, polygons do not (see the note above setTrendsSelection).
+      // A row sits in a scrolling ranked table that is sorted by risk, not by
+      // geography, so the zone it names is routinely nowhere near the current
+      // viewport -- the same "can be offscreen" case the search box answers,
+      // and the reason a polygon click is exempt does not apply.
+      //
+      // Only follow a selection that actually took: setEpiSelected() silently
+      // clears when the zone is missing from INVASION_ZONES or hidden for the
+      // active layer, and framing a zone that nothing ended up selecting is
+      // worse than not moving at all.
+      if (epiSelectedNom === nom) zoneSearchZoomTo({kind: "health_zone", id: nom});
     });
   }
   const epiCases = document.getElementById("epi-show-cases");
