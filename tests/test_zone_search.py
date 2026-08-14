@@ -86,7 +86,14 @@ def test_retired_css_vocabulary_is_gone():
 
 
 def test_component_has_a_visually_hidden_utility():
-    assert ".visually-hidden" in _css()
+    """The live region is announcement-only: it must be in the a11y tree but
+    off-screen. A bare substring check would pass on an empty rule."""
+    rules = _rules_for(_css(), ".visually-hidden")
+    assert rules, ".visually-hidden is not defined in dashboard.css"
+    body = rules[0][1].replace(" ", "")
+    for decl in ("position:absolute", "width:1px", "height:1px", "overflow:hidden"):
+        assert decl in body, f".visually-hidden is missing {decl}"
+    assert 'class="visually-hidden"' in _chrome(), "nothing applies .visually-hidden"
 
 
 # --- CSS structure helpers -------------------------------------------------
@@ -131,3 +138,86 @@ def _rules_for(text, target):
         if re.search(rf"(^|[\s,]){re.escape(target)}\s*(,|$)", selector):
             out.append((selector, body))
     return out
+
+
+def test_stylesheet_nesting_stays_within_helper_assumptions():
+    """_rules()/_media_blocks() assume at most one level of nesting
+    (@media > rule). Violate that and _rules() silently drops the enclosing
+    rule and fabricates a selector from the leftovers -- no error, just wrong
+    data, which would make the band assertions below pass vacuously. Fail
+    loudly here instead."""
+    css = _css()
+    assert css.count("{") == css.count("}"), "unbalanced braces in dashboard.css"
+    for at_rule in ("@supports", "@keyframes", "@font-face", "@container", "@layer"):
+        assert at_rule not in css, (
+            f"{at_rule} introduces nesting the CSS test helpers cannot parse; "
+            "extend _rules()/_media_blocks() before using it"
+        )
+    # Native CSS nesting needs no preprocessor and still balances braces, so
+    # neither check above sees it. Given `#zone-search { &:hover { ... } }`,
+    # _rules() skips the outer rule and matches the INNER block as a flat rule
+    # with selector "&:hover" -- dropping #zone-search from the parsed set.
+    assert "&" not in css, (
+        "native CSS nesting (or a stray &) breaks the flat-rule parser in "
+        "_rules(); extend the helpers before using it"
+    )
+
+
+# --token: value;  (comments already stripped by _css())
+CSS_DECL = re.compile(r"(--[a-z0-9-]+)\s*:\s*([^;]+);")
+
+OWNED_TOKENS = ["--layer-panel-width", "--context-panel-width", "--zone-search-height"]
+
+
+def _root_block():
+    """The single :root { ... } declaration block."""
+    css = _css()
+    start = css.index(":root {")
+    return css[start:css.index("}", start)]
+
+
+def test_tokens_declared_exactly_once_in_root():
+    css = _css()
+    root = _root_block()
+    for token in OWNED_TOKENS:
+        declared = [m.group(1) for m in CSS_DECL.finditer(css) if m.group(1) == token]
+        assert len(declared) == 1, f"{token} declared {len(declared)} times, expected 1"
+        assert token in root, f"{token} is not declared in :root"
+
+
+def test_search_offset_reads_panel_tokens_only_in_band_a():
+    """Band A is the unqualified default; bands B and C are max-width blocks.
+
+    #controls / #context-national read these tokens for their own width in ALL
+    bands -- that is correct and unconstrained. The constraint is on the
+    CONSUMER: only the band-A search offset may read them.
+    """
+    for query, body in _media_blocks(_css()):
+        for selector, decls in _rules(body):
+            if "#zone-search" not in selector:
+                continue
+            for token in ("--layer-panel-width", "--context-panel-width"):
+                assert token not in decls, (
+                    f"search offset reads {token} inside {query}: {selector}"
+                )
+
+
+def test_band_a_offsets_sit_beside_the_two_corner_panels():
+    """The first #zone-search rule for each of these views is the band-A one
+    (bands B and C come later in the file and are grouped selectors). If Task 4
+    ever adds a standalone per-view rule in a band-B/C block ABOVE this point,
+    this regex matches that instead -- it fails loudly rather than silently,
+    since band B/C rules must not contain these tokens, but the fix is to
+    anchor the search rather than to relax the assertion."""
+    css = _css()
+    for view, token in (("map", "--layer-panel-width"), ("context", "--context-panel-width")):
+        m = re.search(rf"body\.view-{view} #zone-search \{{([^}}]*)\}}", css)
+        assert m, f"no band-A #zone-search rule for view-{view}"
+        assert token in m.group(1), f"band-A view-{view} offset does not read {token}"
+
+
+def test_zone_search_positioned_for_every_non_stub_view():
+    css = _css()
+    for view in NON_STUB_VIEWS:
+        assert f"body.view-{view} #zone-search" in css, f"no #zone-search rule for view-{view}"
+    assert "body.stub-view #zone-search" in css
