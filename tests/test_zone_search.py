@@ -260,3 +260,22 @@ def test_genomic_search_hidden_in_band_c():
     genomic = [b for s, b in rules if "genomic-epidemiology" in s]
     assert genomic, "no band-C #zone-search rule for the genomic view"
     assert any("display:none" in b.replace(" ", "") for b in genomic)
+
+
+def test_zone_search_views_covers_exactly_the_non_stub_views():
+    """A tab added later must not silently ship without a search, and a
+    removed tab must not leave a dangling entry."""
+    engine = _engine()
+    start = engine.index("const ZONE_SEARCH_VIEWS = {")
+    block = engine[start:engine.index("\n};", start)]
+    keys = set(re.findall(r'^\s*"([a-z-]+)":\s*\{', block, flags=re.MULTILINE))
+    assert keys == set(NON_STUB_VIEWS), f"ZONE_SEARCH_VIEWS keys {sorted(keys)}"
+
+
+def test_view_is_read_from_the_body_dataset_not_active_view():
+    """bootstrapInitialView() runs at the bottom of engine.js, long after the
+    search block, so activeView is still its "map" default there."""
+    engine = _engine()
+    assert "document.body.dataset.initialView" in engine
+    start = engine.index("const ZONE_SEARCH_VIEW =")
+    assert "dataset.initialView" in engine[start:start + 200]

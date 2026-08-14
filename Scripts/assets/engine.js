@@ -2209,7 +2209,13 @@ map.on("click", function() {
   if (activeView === "genomic-epidemiology" && genomicMapHooks) genomicMapHooks._emitBackgroundClick();
 });
 
-// --- health-zone search ---
+// --- unified health-zone search -----------------------------------------
+// One #zone-search node (common/chrome.py), a sibling of #map, serving every
+// view. dashboard.css positions it per body.view-*; the ZONE_SEARCH_VIEWS
+// table below supplies each view's index filter, i18n keys and select()
+// action; wireZoneSearch() at the end of this section is the single
+// controller. Replaces the three separate implementations that used to live
+// in #controls, #trends-controls and .epi-controls.
 const ZONE_SEARCH_INDEX = (PAYLOAD.geometry.features || []).map(function(feat) {
   const props = feat.properties || {};
   const name = props.name || props.nom || "";
@@ -2225,12 +2231,12 @@ const ZONE_SEARCH_INDEX = (PAYLOAD.geometry.features || []).map(function(feat) {
     return String(a.name).localeCompare(String(b.name), undefined, {sensitivity: "base"});
   });
 
-// --- Trends tab location search: every province + health zone, regardless
-// of whether a plot happens to exist for it (unlike the old trendsEntityList()
-// approach, which only ever listed places trendsPlotData() had a plot for).
-// Mirrors ZONE_SEARCH_INDEX above so behaviour matches the Current Snapshot
-// search, just also covering provinces since Trends has a province scope.
-const TRENDS_LOCATION_INDEX = (function() {
+// --- the one search index: every province + health zone, regardless of
+// whether a plot happens to exist for it. Each view filters it down by `kind`
+// via ZONE_SEARCH_VIEWS below -- only Trends lists provinces, because only
+// Trends has a province scope. ZONE_SEARCH_INDEX above is now a private
+// intermediate of this list; nothing else reads it.
+const LOCATION_INDEX = (function() {
   const provinceNames = {};
   (PAYLOAD.province_boundaries && PAYLOAD.province_boundaries.features || []).forEach(function(feat) {
     const name = feat.properties && feat.properties.province;
@@ -2246,6 +2252,78 @@ const TRENDS_LOCATION_INDEX = (function() {
     return String(a.label).localeCompare(String(b.label), undefined, {sensitivity: "base"});
   });
 })();
+
+// The view comes from <body data-initial-view>, NOT from activeView:
+// bootstrapInitialView() runs at the very bottom of this file, so activeView
+// is still its "map" default here. Every page is a single view (the nav is
+// real cross-page links, and setActiveView() is called once, from that
+// bootstrap), so one read at init is enough.
+const ZONE_SEARCH_VIEW = document.body.dataset.initialView || "map";
+
+const ZONE_SEARCH_VIEWS = {
+  "map": {
+    kinds: ["health_zone"],
+    placeholder: "ui.zone_search_placeholder",
+    aria: "ui.zone_search",
+    select: function(entry) { setMapSelection(entry.id); },
+  },
+  "context": {
+    kinds: ["health_zone"],
+    placeholder: "ui.zone_search_placeholder",
+    aria: "ui.zone_search",
+    select: function(entry) { selectContextZone(entry.id); },
+  },
+  "trends": {
+    kinds: ["province", "health_zone"],
+    // The only tab that lists provinces, so the only one whose placeholder
+    // and accessible name say "location" rather than "health zone".
+    placeholder: "ui.trends_search_placeholder",
+    aria: "ui.trends_search",
+    select: function(entry) {
+      // Scope FIRST: setTrendsScope() nulls the selection, so setting the
+      // selection before it would be undone immediately.
+      if (entry.kind !== trendsScope) {
+        document.querySelectorAll(".trends-scope-btn").forEach(function(b) {
+          b.classList.toggle("active", b.getAttribute("data-scope") === entry.kind);
+        });
+        setTrendsScope(entry.kind);
+      }
+      setTrendsSelection(entry.id);
+    },
+  },
+  "epi-trends": {
+    kinds: ["health_zone"],
+    placeholder: "ui.zone_search_placeholder",
+    aria: "ui.zone_search",
+    select: function(entry) {
+      // A ranked list of one zone isn't useful, so this selects/highlights the
+      // row rather than filtering the table -- same as clicking the row.
+      // setEpiSelected() re-renders the table, so find the row afterwards.
+      setEpiSelected(entry.id);
+      const tbody = document.getElementById("epi-trends-tbody");
+      if (!tbody) return;
+      const rows = tbody.querySelectorAll("tr[data-nom]");
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].getAttribute("data-nom") === entry.id) {
+          if (rows[i].scrollIntoView) rows[i].scrollIntoView({block: "center"});
+          break;
+        }
+      }
+    },
+  },
+  "genomic-epidemiology": {
+    kinds: ["health_zone"],
+    placeholder: "ui.zone_search_placeholder",
+    aria: "ui.zone_search",
+    // {toggle:false} matters: _emitZoneClick is a toggle by design (clicking
+    // the same polygon twice clears). The search clears its input after every
+    // pick, so a repeat search would silently DEselect while the shared zoom
+    // still framed the zone -- map says "here", tree says "nothing".
+    select: function(entry) {
+      if (genomicMapHooks) genomicMapHooks._emitZoneClick(entry.id, {toggle: false});
+    },
+  },
+};
 
 const zoneSearchInput = document.getElementById("zone-search-input");
 const zoneSearchResults = document.getElementById("zone-search-results");
@@ -2863,7 +2941,7 @@ function renderTrendsSearchResults(query) {
     root.innerHTML = "";
     return;
   }
-  let items = TRENDS_LOCATION_INDEX.filter(function(it) {
+  let items = LOCATION_INDEX.filter(function(it) {
     return it.haystack.indexOf(q) >= 0;
   });
   if (!items.length) {
@@ -3978,7 +4056,7 @@ if (!PAYLOAD.flow_arcs_available || !FLOW_ARC_LAYER) {
     }
   }
 
-  // Shares TRENDS_LOCATION_INDEX with the Trends tab (every province + health
+  // Shares LOCATION_INDEX with the Trends tab (every province + health
   // zone), but this page has no provincial scope, so province entries are
   // filtered out -- only health zones are shown/selectable here.
   function renderEpiSearchResults(query) {
@@ -3989,7 +4067,7 @@ if (!PAYLOAD.flow_arcs_available || !FLOW_ARC_LAYER) {
       epiSearchResults.innerHTML = "";
       return;
     }
-    const items = TRENDS_LOCATION_INDEX.filter(function(it) {
+    const items = LOCATION_INDEX.filter(function(it) {
       return it.kind === "health_zone" && it.haystack.indexOf(q) >= 0;
     });
     if (!items.length) {
