@@ -692,6 +692,82 @@ map.getPane("epi-links").style.zIndex = "455";
 const flowArcLayer = L.layerGroup();
 const epiLinkLayer = L.layerGroup();
 
+// A selected zone's highlight is drawn OUTSIDE the polygon layer, in its own
+// pane. Inside the polygon layer, every hover handler calls bringToFront() on
+// the zone under the cursor, so a hovered neighbour's border paints over the
+// selected zone's shared edge -- and no amount of re-fronting survives the next
+// restyle. A higher pane makes the guarantee structural instead.
+//
+// The ring is two stacked paths because a single Leaflet path carries one
+// stroke: a dark casing underneath, then the amber ring. The casing's visible
+// part is the half that sticks out, (casingMult - innerMult) / 2 of the resting
+// weight on each side.
+function SelectionRing(paneName, zIndex, weights) {
+  map.createPane(paneName);
+  const pane = map.getPane(paneName);
+  pane.style.zIndex = String(zIndex);
+  // Clicks must reach the polygon underneath, or click-to-deselect dies the
+  // moment a zone is selected.
+  pane.style.pointerEvents = "none";
+  const group = L.layerGroup().addTo(map);
+  let current = [];
+
+  function ring(features, color, opacity, weight) {
+    return L.geoJSON({type: "FeatureCollection", features: features}, {
+      pane: paneName,
+      interactive: false,
+      style: function () {
+        return {color: color, opacity: opacity, weight: weight, fill: false};
+      }
+    });
+  }
+
+  function draw() {
+    group.clearLayers();
+    if (!current.length) return;
+    // The caller resolves its own weights, so every token is read with literal
+    // arguments at the call site. Passing token NAMES in here instead would
+    // hide them from tests/test_zone_state_styling.py, whose regex only sees
+    // literal zoneNum()/themeVar() calls -- the guard would silently stop
+    // covering exactly the tokens that draw the selection.
+    const w = weights();
+    group.addLayer(ring(
+      current,
+      themeVar("--zone-selected-casing", "#5c3a12"),
+      zoneNum("--zone-selected-casing-opacity", "0.9"),
+      w.casing
+    ));
+    group.addLayer(ring(
+      current,
+      themeVar("--zone-selected-stroke", "#ffae42"),
+      zoneNum("--zone-selected-stroke-opacity", "1"),
+      w.inner
+    ));
+  }
+
+  return {
+    // Takes GeoJSON features, not keys: one factory serves both the zone (nom)
+    // and province (province name) key spaces, and each caller already knows
+    // how to resolve its own keys.
+    set: function (features) { current = (features || []).filter(Boolean); draw(); },
+    clear: function () { current = []; draw(); },
+    redraw: draw
+  };
+}
+
+// 445: above the zone polygons (overlayPane, 400), below the flow arcs (450)
+// and epi-links (455). Selecting a zone on the spatial-risk tab is what draws
+// its arcs, so a ring above them would occlude every arc terminus at the
+// selected zone. Markers (600) and tooltips (650) still draw over the ring --
+// requirement 4 is a guarantee against zones, not against everything.
+const zoneRings = SelectionRing("zone-selection", 445, function () {
+  const base = zoneWeight(map.getZoom());
+  return {
+    inner: base * zoneNum("--zone-selected-weight-mult", "2.2"),
+    casing: base * zoneNum("--zone-selected-casing-mult", "3.6")
+  };
+});
+
 function zoneCentroid(nom) {
   const z = ZONE_DATA[nom];
   if (!z || z.centroid_lat == null || z.centroid_lon == null) return null;
