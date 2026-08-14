@@ -589,6 +589,92 @@ function zoomWeight(base) {
   return base * f;
 }
 
+// Zone borders read as hairlines at the national default zoom (many small
+// zones packed together) and gain presence as you zoom into the outbreak.
+// One ramp drives the resting stroke; every other state is a multiple of it,
+// so the hierarchy (resting < focus < hover < selected) holds at every zoom.
+//
+// ramp-min is both the z5 intercept and the clamp floor on purpose: the map
+// sets no minZoom, so below z5 the border stops thinning rather than vanishing.
+function zoneWeight(zoom) {
+  const base = zoneNum("--zone-stroke-weight-base", "1.7");
+  const lo = zoneNum("--zone-stroke-ramp-min", "0.6");
+  const hi = zoneNum("--zone-stroke-ramp-max", "1.15");
+  const slope = zoneNum("--zone-stroke-ramp-slope", "0.1");
+  return base * Math.max(lo, Math.min(hi, lo + (zoom - 5) * slope));
+}
+
+// themeVar() returns strings; this is the numeric read. The fallback is parsed
+// too, so a malformed theme value degrades to the documented default rather
+// than to NaN (a NaN weight silently drops the stroke entirely in Leaflet).
+//
+// Reads a token directly rather than taking a resolved value, so each token
+// appears exactly once in the source, with exactly one fallback literal.
+// tests/test_zone_state_styling.py treats zoneNum() as a token reader
+// alongside themeVar() for that reason.
+function zoneNum(name, fallback) {
+  const v = parseFloat(themeVar(name, fallback));
+  return isFinite(v) ? v : parseFloat(fallback);
+}
+
+// Stroke half of a zone's style, by state. Weight is already resolved for the
+// current zoom. Callers Object.assign() this onto the fill half, so nothing
+// hardcodes a colour or a weight.
+//
+// "hidden"  -- zone not visible for the active spatial-risk layer
+// "failloud" -- active zone with no count; should never happen, must stay loud
+// "focus"   -- spatial-risk flow-connected neighbour of the selected zone
+// "dim"     -- spatial-risk non-focus zone while something is selected
+function zoneStroke(state) {
+  const w = zoneWeight(map.getZoom());
+  const rest = themeVar("--zone-stroke", "#fdfaf4");
+  const restOp = zoneNum("--zone-stroke-opacity", "0.7");
+  switch (state) {
+    case "hover":
+      return {
+        color: themeVar("--zone-hover-stroke", "#ffffff"),
+        opacity: zoneNum("--zone-hover-stroke-opacity", "0.98"),
+        weight: w * zoneNum("--zone-hover-weight-mult", "1.7")
+      };
+    case "nodata":
+      return {
+        color: themeVar("--zone-nodata-stroke", "#6b635a"),
+        opacity: zoneNum("--zone-nodata-stroke-opacity", "0.45"),
+        weight: w * zoneNum("--zone-nodata-weight-mult", "1")
+      };
+    case "hidden":
+      return {
+        color: themeVar("--zone-nodata-stroke", "#6b635a"),
+        opacity: zoneNum("--zone-nodata-stroke-opacity", "0.45"),
+        weight: w * zoneNum("--zone-hidden-weight-mult", "0.7")
+      };
+    case "failloud":
+      return {
+        color: themeVar("--zone-failloud-stroke", "#111"),
+        opacity: zoneNum("--zone-failloud-stroke-opacity", "1"),
+        weight: w * zoneNum("--zone-failloud-weight-mult", "1")
+      };
+    case "focus":
+      return {color: rest, opacity: restOp, weight: w * zoneNum("--zone-focus-weight-mult", "1.35")};
+    case "dim":
+      return {color: rest, opacity: zoneNum("--zone-dim-stroke-opacity", "0.25"), weight: w};
+    case "epicenter":
+      return {
+        color: themeVar("--zone-role-stroke", "#111"),
+        opacity: 1,
+        weight: w * zoneNum("--zone-role-weight-mult-epicenter", "1.35")
+      };
+    case "origin":
+      return {
+        color: themeVar("--zone-role-stroke", "#111"),
+        opacity: 1,
+        weight: w * zoneNum("--zone-role-weight-mult-origin", "1.6")
+      };
+    default:   // "rest"
+      return {color: rest, opacity: restOp, weight: w};
+  }
+}
+
 map.createPane("flow-arcs");
 map.getPane("flow-arcs").style.zIndex = "450";
 map.createPane("epi-links");

@@ -15,12 +15,14 @@ REPO = Path(__file__).resolve().parents[1]
 ENGINE = REPO / "Scripts" / "assets" / "engine.js"
 THEME = REPO / "Data" / "Branding" / "dashboard-theme.css"
 
-# themeVar("--token", "fallback") -- either quote style, since nothing in this
-# repo enforces one and a single-quoted call would otherwise be reported as
-# "never read". Groups: 1 and 3 are the quote characters (needed for the
-# backreferences), so the token is group 2 and the fallback is group 4.
-# A match's .start()/.end() still span the whole themeVar(...) call.
-THEMEVAR = re.compile(r"""themeVar\(\s*(["'])(--[a-z0-9-]+)\1\s*,\s*(["'])([^"']*)\3\s*\)""")
+# themeVar("--token", "fallback") / zoneNum("--token", "fallback") -- both are
+# token readers; zoneNum() is the numeric wrapper around themeVar(). Either
+# quote style, since nothing in this repo enforces one. Groups: 1 and 3 are the
+# quote characters (needed for the backreferences), so the token is group 2 and
+# the fallback is group 4. A match's .start()/.end() still span the whole call.
+THEMEVAR = re.compile(
+    r"""(?:themeVar|zoneNum)\(\s*(["'])(--[a-z0-9-]+)\1\s*,\s*(["'])([^"']*)\3\s*\)"""
+)
 # --token: value;
 CSS_DECL = re.compile(r'(--[a-z0-9-]+)\s*:\s*([^;]+);')
 
