@@ -939,6 +939,7 @@ function renderFlowArcs(hubNom, layer) {
         to: hubDisplayName(dest),
         count: fmt(count),
       }), {direction: "top", sticky: true});
+      line.on("click", forwardArcClickToZone);
       line.addTo(flowArcLayer);
       addFlowWingMarker(pts, FLOW_OUT_COLOR);
     });
@@ -973,6 +974,7 @@ function renderFlowArcs(hubNom, layer) {
         foi: e.foi.toPrecision(2),
         share: (e.share != null ? (e.share * 100).toFixed(1) + "%" : "—"),
       }), {direction: "top", sticky: true});
+      line.on("click", forwardArcClickToZone);
       line.addTo(flowArcLayer);
       addFlowWingMarker(pts, FLOW_OUT_COLOR, {nearEnd: true});
     });
@@ -1020,6 +1022,7 @@ function renderFlowArcs(hubNom, layer) {
         count: fmt(count),
       }), {direction: "top", sticky: true});
     }
+    line.on("click", forwardArcClickToZone);
     line.addTo(flowArcLayer);
     addFlowWingMarker(pts, color, useImportPressure ? {nearEnd: true} : null);
   });
@@ -1635,6 +1638,7 @@ function recompute() {
   } else {
     clearFlowArcs();
   }
+  restoreRoleZoneOrder();
   updateLegend(layer);
   updateLayerMeta(layer);
 }
@@ -1891,6 +1895,85 @@ function layerHoverTooltipHTML(feature) {
   return "<strong>" + name + "</strong><br/>" + body;
 }
 
+// Hover calls bringToFront() on the zone under the cursor, and resetStyle() on
+// mouseout restores that zone's STYLE but not its DOM order -- so it stays in
+// front and clips the heavier border of any role-marker zone (epicentre /
+// travel origin) it shares an edge with. Selection is immune because its ring
+// is drawn in a pane above the polygons; role markers still live in the polygon
+// layer, where order is all they have. Re-assert it whenever a hover ends or
+// the layer is re-styled.
+function restoreRoleZoneOrder() {
+  const layer = getLayer(layerSelect.value);
+  const wantsEpicenter = layerEpicenterHighlight(layer);
+  const wantsOrigin = layerUsesMatrix(layer) && layerOriginHighlight(layer);
+  if (!wantsEpicenter && !wantsOrigin) return;
+  geoLayer.eachLayer(function (l) {
+    if (!l.feature) return;
+    const ref = l.feature.properties.nom;
+    if (isHubZone(ref, layer) || isEpicenterZone(ref, layer)) l.bringToFront();
+  });
+}
+
+// What a click on a zone means, per view. Factored out of the polygon click
+// handler so a click landing on a flow arc can be forwarded to the polygon
+// underneath (see forwardArcClickToZone) and behave identically -- the two
+// paths cannot drift into different selection behaviour.
+function handleZoneClick(feature) {
+  if (activeView === "trends") {
+    if (trendsScope === "province") {
+      setTrendsSelection(feature.properties.province || null);
+    } else if (trendsScope === "health_zone") {
+      setTrendsSelection(feature.properties.nom || null);
+    }
+    return;   // national scope has no zone selection
+  }
+  if (activeView === "context") {
+    // Re-clicking the selected zone toggles it off (empty-map click also
+    // clears -- see the map "click" handler below).
+    if (feature.properties.nom === contextSelectedNom) clearContextSelection();
+    else selectContextZone(feature.properties.nom);
+    return;
+  }
+  if (activeView === "epi-trends") {
+    // Re-clicking the already-selected zone toggles it off. Any other zone
+    // switches the selection to it.
+    const nom = feature.properties.nom;
+    setEpiSelected(nom === epiSelectedNom ? null : nom);
+    return;
+  }
+  if (activeView === "genomic-epidemiology") {
+    // Ownership rule (R7): on the genomic view the genomic coordinator drives
+    // selection, not setMapSelection. Route the zone click to the generic hook
+    // (genomic.js maps the zone to its tip-set and highlights the tree).
+    if (genomicMapHooks) genomicMapHooks._emitZoneClick(feature.properties.nom);
+    return;
+  }
+  if (activeView === "map") {
+    // One "focused zone" for the snapshot view: click to focus, click the
+    // focused zone again to clear. Focus drives the info box, the flow-arc
+    // origin, and the matrix travel origin. No click-to-zoom.
+    setMapSelection(feature.properties.nom);
+  }
+}
+
+// Arrows annotate the selected zone rather than acting as controls, and they
+// sit in a pane above the zones -- so a click landing on one used to be
+// swallowed outright, making every arrow a dead stripe across an otherwise
+// clickable polygon. Forward it to the polygon underneath instead.
+//
+// bubblingMouseEvents stays false on the arcs: with no zone under the cursor
+// the click must still NOT reach the map handler, which would clear the
+// selection and take the arrows with it.
+function forwardArcClickToZone(ev) {
+  L.DomEvent.stop(ev);
+  const src = ev.originalEvent;
+  const pt = (src && src.clientX != null)
+    ? {x: src.clientX, y: src.clientY}
+    : lastPointerClient;
+  const layer = zoneLayerAtClientPoint(pt);
+  if (layer && layer.feature) handleZoneClick(layer.feature);
+}
+
 const geoLayer = L.geoJSON(PAYLOAD.geometry, {
   style: styleFn,
   onEachFeature: function (feature, layer) {
@@ -1902,18 +1985,25 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         // not what a mid-move mouseover creates). Suppress it entirely while
         // moving -- a real hover after the map settles re-fires mouseover.
         if (mapMoving) return;
-        // The genomic tab uses the map only as a backdrop; it must NOT open the
-        // snapshot's layer-value zone tooltips (the default fall-through below).
-        // Without this guard, hovering zones opens per-hover tooltips that the
-        // "tooltipopen" sweep never closes (it only covers marker/arc layers), so
-        // dropped mouseouts on fast motion strand them. Genomic zone interaction
-        // arrives with the coordinator in a later phase.
-        if (activeView === "genomic-epidemiology") return;
         // Requirement: a selected zone does not react to hover. That is about
         // STYLING only -- it keeps its tooltip, its floating readout and its
         // province-hover behaviour. Guard the setStyle/bringToFront pairs
         // below, never the whole handler.
         const isSelected = currentSelectedNoms().indexOf(feature.properties.nom) !== -1;
+        if (activeView === "genomic-epidemiology") {
+          // Zones are clickable here -- the click routes to the genomic
+          // coordinator -- so they get the same hover lift as everywhere else.
+          // What they must NOT get is the snapshot's layer-value tooltip (the
+          // default fall-through below): those are bound per-hover, and the
+          // "tooltipopen" sweep only covers marker/arc layers, so a dropped
+          // mouseout on fast motion strands one open. Lift the border, bind
+          // nothing.
+          if (!isSelected) {
+            e.target.setStyle(zoneStroke("hover"));
+            e.target.bringToFront();
+          }
+          return;
+        }
         if (activeView === "trends") {
           if (trendsScope === "national") return;
           if (trendsScope === "province") {
@@ -1953,7 +2043,13 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         e.target.bindTooltip(layerHoverTooltipHTML(feature), {sticky: true, direction: "top"}).openTooltip(e.latlng);
       },
       mouseout: function(e) {
-        if (activeView === "genomic-epidemiology") return;   // no zone hover decoration on the genomic tab
+        if (activeView === "genomic-epidemiology") {
+          // Mirror of the mouseover lift. No tooltip was bound, so nothing to
+          // unbind; resetStyle cannot disturb a selected zone's ring, which
+          // lives in the zone-selection pane.
+          geoLayer.resetStyle(e.target);
+          return;
+        }
         if (activeView === "trends") {
           if (trendsScope === "province") {
             // Zone was never restyled on hover in province scope; just clear the
@@ -1979,52 +2075,8 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         // cannot disturb it -- there is no focus border left in styleFn to lose.
       },
       click: function(e) {
-        if (activeView === "trends") {
-          L.DomEvent.stop(e);
-          if (trendsScope === "national") return;
-          if (trendsScope === "province") {
-            setTrendsSelection(feature.properties.province || null);
-            return;
-          }
-          if (trendsScope === "health_zone") {
-            setTrendsSelection(feature.properties.nom || null);
-            return;
-          }
-          return;
-        }
-        if (activeView === "context") {
-          L.DomEvent.stop(e);
-          // Re-clicking the selected zone toggles it off (empty-map click also
-          // clears -- see the map "click" handler below).
-          if (feature.properties.nom === contextSelectedNom) clearContextSelection();
-          else selectContextZone(feature.properties.nom);
-          return;
-        }
-        if (activeView === "epi-trends") {
-          L.DomEvent.stop(e);
-          // Re-clicking the already-selected zone toggles it off. Any other
-          // zone switches the selection to it. (Clicking empty map also
-          // clears -- see the map "click" handler below.)
-          const nom = feature.properties.nom;
-          setEpiSelected(nom === epiSelectedNom ? null : nom);
-          return;
-        }
-        if (activeView === "genomic-epidemiology") {
-          // Ownership rule (R7): on the genomic view the genomic coordinator drives
-          // selection, not setMapSelection. Route the zone click to the generic hook
-          // (genomic.js maps the zone to its tip-set and highlights the tree).
-          L.DomEvent.stop(e);
-          if (genomicMapHooks) genomicMapHooks._emitZoneClick(feature.properties.nom);
-          return;
-        }
-        if (activeView === "map") {
-          L.DomEvent.stop(e);
-          // One "focused zone" for the snapshot view: click to focus, click the
-          // focused zone again to clear. Focus drives the info box, the flow-arc
-          // origin, and the matrix travel origin. No click-to-zoom.
-          setMapSelection(feature.properties.nom);
-          return;
-        }
+        L.DomEvent.stop(e);
+        handleZoneClick(feature);
       },
       dblclick: function(e) {
         if (activeView === "context") return;
@@ -2036,6 +2088,9 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         map.fitBounds(e.target.getBounds(), {padding:[40,40]});
       }
     });
+    // Registered separately from the handler map above so it runs whichever
+    // branch that mouseout took (several return early).
+    layer.on("mouseout", restoreRoleZoneOrder);
   }
 }).addTo(map);
 
@@ -2045,6 +2100,7 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
 // per-view bringToFront() blocks were doing.
 function restyleZonesForActiveView() {
   geoLayer.setStyle(styleFn);
+  restoreRoleZoneOrder();
   refreshZoneSelection();
 }
 
@@ -2090,9 +2146,57 @@ map.on("movestart", function () {
 // The mapMoving guard on mouseover means nothing should have accumulated during
 // the move, but tear down once more as a safety net (e.g. a mouseover that
 // raced the movestart, or a marker/arc tooltip Leaflet opened mid-drag).
+// A pan that starts ON a zone leaves the cursor inside that same zone when it
+// ends. The hover lift was torn down at movestart, and Leaflet fires no fresh
+// mouseover because the pointer never left -- so the border stays un-lifted
+// until you move out and back in. Track the pointer and restore the lift for
+// whatever zone sits under it once the map settles.
+//
+// Border only, deliberately: re-opening a tooltip here is the stranding hazard
+// tearDownHoverDecoration() exists to prevent, and the spatial-risk float
+// readout needs a latlng this path does not have. Both come back on the next
+// real mouseover.
+let lastPointerClient = null;
+document.addEventListener("mousemove", function (e) {
+  lastPointerClient = {x: e.clientX, y: e.clientY};
+}, {passive: true});
+
+function zoneLayerAtClientPoint(pt) {
+  if (!pt) return null;
+  // Scan the whole stack rather than just the topmost element: flow arcs and
+  // epi-links sit in panes above the zones, and what we want is the polygon
+  // underneath them. Elements with pointer-events:none (the selection rings)
+  // are already excluded by the browser.
+  const els = document.elementsFromPoint
+    ? document.elementsFromPoint(pt.x, pt.y)
+    : [document.elementFromPoint(pt.x, pt.y)];
+  let found = null;
+  for (let i = 0; i < els.length && !found; i++) {
+    const el = els[i];
+    if (!el) continue;
+    geoLayer.eachLayer(function (layer) {
+      if (!found && layer._path === el) found = layer;
+    });
+  }
+  return found;
+}
+
+function restoreHoverUnderCursor() {
+  // Mirrors which views lift a zone border on hover (see the mouseover
+  // handler): national scope has no zone hover, and province scope hovers the
+  // parent province outline rather than the zone.
+  if (activeView === "trends" && trendsScope !== "health_zone") return;
+  const layer = zoneLayerAtClientPoint(lastPointerClient);
+  if (!layer || !layer.feature) return;
+  if (currentSelectedNoms().indexOf(layer.feature.properties.nom) !== -1) return;
+  layer.setStyle(zoneStroke("hover"));
+  layer.bringToFront();
+}
+
 map.on("moveend", function () {
   mapMoving = false;
   tearDownHoverDecoration();
+  restoreHoverUnderCursor();
 });
 
 map.on("click", function() {
