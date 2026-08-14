@@ -2296,20 +2296,32 @@ function themeVar(name, fallback) {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || fallback;
 }
-function provinceOutlineStyle(selected) {
+function provinceBaseWeight() {
   const provinceMode = activeView === "trends" && trendsScope === "province";
-  const baseWeight = provinceMode
-    ? parseFloat(themeVar("--province-outline-weight-wide", "1.4"))
-    : parseFloat(themeVar("--province-outline-weight", "1"));
-  const selWeight = provinceMode
-    ? parseFloat(themeVar("--province-outline-weight-wide-hover", "2"))
-    : parseFloat(themeVar("--province-outline-weight-hover", "1.5"));
+  return provinceMode
+    ? zoneNum("--province-outline-weight-wide", "1.4")
+    : zoneNum("--province-outline-weight", "1");
+}
+
+// Provinces keep their gold resting colour -- that is what makes the province
+// layer read as a different layer from the zones -- but adopt the same state
+// grammar: hover is a white lift, selection is the cased amber ring drawn in
+// the province-selection pane. A SELECTED province draws its RESTING outline;
+// without that it would show a red base line under an amber ring.
+function provinceOutlineStyle(state) {
+  const provinceMode = activeView === "trends" && trendsScope === "province";
+  if (state === "hover") {
+    return {
+      color: themeVar("--province-hover-stroke", "#ffffff"),
+      opacity: zoneNum("--province-hover-stroke-opacity", "0.98"),
+      weight: provinceBaseWeight() * zoneNum("--province-hover-weight-mult", "1.7"),
+      fillOpacity: 0,
+    };
+  }
   return {
-    color: selected
-      ? themeVar("--province-outline-hover", "#b23b2e")
-      : themeVar("--province-outline", "#9b7d4e"),
-    weight: selected ? selWeight : baseWeight,
-    opacity: selected ? 1 : (provinceMode ? 0.95 : 0.88),
+    color: themeVar("--province-outline", "#9b7d4e"),
+    weight: provinceBaseWeight(),
+    opacity: provinceMode ? 0.95 : 0.88,
     fillOpacity: 0,
   };
 }
@@ -2320,19 +2332,43 @@ const provinceOutlineLayer = L.geoJSON(PAYLOAD.province_boundaries || {type:"Fea
   pane: "province-outline",
   interactive: false,
   style: function() {
-    return provinceOutlineStyle(false);
+    return provinceOutlineStyle("rest");
   },
 });
 
-function applyProvinceOutlineStyles(selectedProvince) {
-  trendsHoveredProvince = selectedProvince || null;
-  document.body.classList.toggle("trends-province-hovered", !!trendsHoveredProvince);
-  provinceOutlineLayer.eachLayer(function(layer) {
-    const match = trendsHoveredProvince &&
-      layer.feature.properties.province === trendsHoveredProvince;
-    layer.setStyle(provinceOutlineStyle(!!match));
-    if (match) layer.bringToFront();
+// 560: above the province outlines (550). Province rings are NOT zoom-scaled --
+// they multiply the province resting weight, which is fixed.
+const provinceRings = SelectionRing("province-selection", 560, function () {
+  const base = provinceBaseWeight();
+  return {
+    inner: base * zoneNum("--province-selected-weight-mult", "2.2"),
+    casing: base * zoneNum("--province-selected-casing-mult", "3.6")
+  };
+});
+
+function provinceFeaturesFor(name) {
+  if (!name) return [];
+  const fc = PAYLOAD.province_boundaries || {features: []};
+  return (fc.features || []).filter(function (f) {
+    return f.properties && f.properties.province === name;
   });
+}
+
+// Hover and selection were a single variable: whichever province was passed in
+// got the red style, and hover was suppressed entirely once anything was
+// selected. They are now distinct states -- hovering a non-selected province
+// still lifts it while another is selected, and the selected one ignores hover.
+function applyProvinceOutlineStyles(hoveredProvince) {
+  trendsHoveredProvince = hoveredProvince || null;
+  const selected = (activeView === "trends" && trendsScope === "province")
+    ? trendsSelectedKey : null;
+  provinceOutlineLayer.eachLayer(function (layer) {
+    const name = layer.feature.properties.province;
+    const isHover = !!trendsHoveredProvince && name === trendsHoveredProvince && name !== selected;
+    layer.setStyle(provinceOutlineStyle(isHover ? "hover" : "rest"));
+    if (isHover) layer.bringToFront();
+  });
+  provinceRings.set(provinceFeaturesFor(selected));
 }
 
 function escHtml(s) {
@@ -2348,8 +2384,9 @@ function renderTrendsPanel(_unused) {
 }
 
 function setTrendsProvinceHover(province) {
-  // Kept for compatibility; selection-driven plots replace hover plots.
-  if (activeView === "trends" && trendsScope === "province" && !trendsSelectedKey) {
+  // No longer gated on "nothing selected": a selected province ignores hover,
+  // but its neighbours still respond.
+  if (activeView === "trends" && trendsScope === "province") {
     applyProvinceOutlineStyles(province || null);
   }
 }
@@ -2695,7 +2732,7 @@ function setTrendsSelection(key, opts) {
   opts = opts || {};
   trendsSelectedKey = key || null;
   if (trendsScope === "province") {
-    applyProvinceOutlineStyles(trendsSelectedKey);
+    applyProvinceOutlineStyles(null);
   } else if (trendsScope === "health_zone") {
     applyProvinceOutlineStyles(null);
   } else {
