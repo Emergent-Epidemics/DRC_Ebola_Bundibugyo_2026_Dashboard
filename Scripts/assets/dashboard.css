@@ -936,6 +936,12 @@
     }
     body.view-context #context-national {
       top:clamp(128px, 24vh, 200px);
+      /* Cancels band B's give-back: that max-height compensates band B's 40px
+         top displacement, but the top offset just above is NOT displaced --
+         this panel already clears the search here. Declared explicitly because
+         band B still matches at this width and the cascade resolves per
+         declaration, so an unset max-height would inherit band B's. */
+      max-height:80vh;
       left:6px; bottom:auto;
       width:min(260px, calc(50vw - 12px));
       max-width:min(260px, 46vw);
@@ -957,7 +963,8 @@
        collapsed to just their title bar by default here (see
        wirePanelToggles()'s narrow-screen auto-collapse in engine.js), so
        this mostly affects where that collapsed title bar sits. */
-    /* ── Band C: the search owns the whole top row ──────────────────────
+    /* ── Band C — the search owns the whole top row (bands A and B are up by
+       the #zone-search component block, ~line 200) ──────────────────────
        Full width, so no clamp has to reason about the opposite corner --
        #info can be re-expanded to 60vw by the user at any time, so no static
        clamp derived from its collapsed width could have been correct. The
@@ -972,7 +979,13 @@
     }
     /* No search on Genomic here: #genomic-panel has no narrow rule, so the
        map is a ~108px strip and any usable box would float over the
-       phylogeny. See "Known gaps" in the design spec. */
+       phylogeny. See "Known gaps" in the design spec.
+
+       !important is load-bearing, not defensive: Task 8's readiness gate adds
+       body.view-genomic-epidemiology #zone-search.zone-search-ready
+       { display:block }, which outranks this rule on specificity. Without it,
+       a phone-sized Genomic page would reveal the search as soon as the tree
+       coordinator registered. */
     body.view-genomic-epidemiology #zone-search { display:none !important; }
     #controls       { top:calc(12px + var(--zone-search-height) + 8px); }
     #info {
