@@ -375,9 +375,10 @@ def test_genomic_publishes_its_panel_width():
 
 
 def test_zone_search_view_panels_name_real_elements():
-    """ZONE_SEARCH_VIEWS[...].panel is passed straight to getElementById().
-    A typo would fail silently -- expandPanel() would find nothing and simply
-    not expand, with no error anywhere."""
+    """ZONE_SEARCH_VIEWS[...].panel is passed straight to getElementById(), and
+    expandPanel() then looks up that panel's toggle button. Both halves fail
+    silently -- a wrong id finds no panel, a panel with no toggle hits
+    expandPanel()'s `if (btn)` guard -- so check the element AND its toggle."""
     engine = _engine()
     start = engine.index("const ZONE_SEARCH_VIEWS = {")
     block = engine[start:engine.index("\n};", start)]
@@ -386,3 +387,42 @@ def test_zone_search_view_panels_name_real_elements():
     chrome = _chrome()
     for pid in panels:
         assert f'id="{pid}"' in chrome, f'ZONE_SEARCH_VIEWS names panel #{pid}, absent from chrome.py'
+        # expandPanel() special-cases #info, whose toggle carries no data-target.
+        toggle = f'id="info-toggle"' if pid == "info" else f'data-target="{pid}"'
+        assert toggle in chrome, (
+            f'panel #{pid} has no toggle button ({toggle}); expandPanel() would '
+            "silently no-op on it"
+        )
+
+
+LOCALES = [REPO / "locales" / "en.yaml", REPO / "locales" / "fr.yaml"]
+
+# Keys engine.js names from JS rather than from a data-i18n attribute. Nothing
+# else in the repo checks these exist -- a typo would silently render the key
+# path as the UI string, in one language only.
+JS_NAMED_KEYS = [
+    "zone_search",
+    "zone_search_placeholder",
+    "zone_search_no_matches",
+    "zone_search_matches",
+    "trends_search",
+    "trends_search_placeholder",
+]
+
+
+def test_every_js_named_locale_key_exists_in_both_locales():
+    for path in LOCALES:
+        text = path.read_text(encoding="utf-8")
+        missing = [k for k in JS_NAMED_KEYS if not re.search(rf"^\s*{k}:", text, re.MULTILINE)]
+        assert not missing, f"{path.name} is missing {missing}"
+
+
+def test_zone_search_views_only_names_existing_keys():
+    engine = _engine()
+    start = engine.index("const ZONE_SEARCH_VIEWS = {")
+    block = engine[start:engine.index("\n};", start)]
+    referenced = set(re.findall(r'"ui\.([a-z_]+)"', block))
+    for path in LOCALES:
+        text = path.read_text(encoding="utf-8")
+        missing = [k for k in sorted(referenced) if not re.search(rf"^\s*{k}:", text, re.MULTILINE)]
+        assert not missing, f"{path.name} is missing {missing}"

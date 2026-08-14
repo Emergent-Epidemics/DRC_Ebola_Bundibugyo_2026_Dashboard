@@ -4230,6 +4230,9 @@ wireModal("terms-modal", ["terms-btn", "header-terms-btn"], "terms-close");
   expandPanel = function(panelId) {
     const panel = document.getElementById(panelId);
     if (!panel || !panel.classList.contains("collapsed")) return;
+    // #info is the one collapsible panel whose toggle is a bare id rather than
+    // a .panel-toggle[data-target] -- see chrome.py. tests/test_zone_search.py
+    // checks both forms so a new panel: entry cannot silently miss its toggle.
     const btn = panelId === "info"
       ? document.getElementById("info-toggle")
       : document.querySelector('.panel-toggle[data-target="' + panelId + '"]');

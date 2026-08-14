@@ -94,6 +94,7 @@ ui:
   zone_search: "Rechercher une zone de santé"
   zone_search_placeholder: "Saisir le nom d'une zone de santé…"
   zone_search_no_matches: "Aucun résultat"
+  zone_search_matches: "{n} résultats"
   source: "Source"
   show_cases: "Afficher les marqueurs de cas actifs"
   show_genomes: "Afficher le nombre de séquences génomiques"

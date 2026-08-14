@@ -94,6 +94,7 @@ ui:
   zone_search: "Search health zone"
   zone_search_placeholder: "Type a health zone name…"
   zone_search_no_matches: "No matches"
+  zone_search_matches: "{n} matches"
   source: "Source"
   show_cases: "Show active-case markers"
   show_genomes: "Show numbers of genome sequences"
