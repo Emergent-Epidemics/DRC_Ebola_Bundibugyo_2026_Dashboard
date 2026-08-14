@@ -15,8 +15,12 @@ REPO = Path(__file__).resolve().parents[1]
 ENGINE = REPO / "Scripts" / "assets" / "engine.js"
 THEME = REPO / "Data" / "Branding" / "dashboard-theme.css"
 
-# themeVar("--token", "fallback")
-THEMEVAR = re.compile(r'themeVar\(\s*"(--[a-z0-9-]+)"\s*,\s*"([^"]*)"\s*\)')
+# themeVar("--token", "fallback") -- either quote style, since nothing in this
+# repo enforces one and a single-quoted call would otherwise be reported as
+# "never read". Groups: 1 and 3 are the quote characters (needed for the
+# backreferences), so the token is group 2 and the fallback is group 4.
+# A match's .start()/.end() still span the whole themeVar(...) call.
+THEMEVAR = re.compile(r"""themeVar\(\s*(["'])(--[a-z0-9-]+)\1\s*,\s*(["'])([^"']*)\3\s*\)""")
 # --token: value;
 CSS_DECL = re.compile(r'(--[a-z0-9-]+)\s*:\s*([^;]+);')
 
@@ -31,6 +35,11 @@ def _engine_source():
 
 def _css_tokens():
     text = THEME.read_text(encoding="utf-8")
+    # A commented-out declaration must not look like a live one: last-match-wins
+    # would otherwise let a stale "/* was --x: 1.5; */" shadow the real value, or
+    # make a deleted token look defined -- a silent false pass in exactly the
+    # drift these tests exist to catch.
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
     return {m.group(1): m.group(2).strip() for m in CSS_DECL.finditer(text)}
 
 
@@ -42,7 +51,8 @@ def _fallbacks():
     """token -> set of distinct fallback strings used in engine.js."""
     out = {}
     for m in THEMEVAR.finditer(_engine_source()):
-        out.setdefault(m.group(1), set()).add(m.group(2).strip())
+        # Groups 1 and 3 are the quote characters; see THEMEVAR above.
+        out.setdefault(m.group(2), set()).add(m.group(4).strip())
     return out
 
 
