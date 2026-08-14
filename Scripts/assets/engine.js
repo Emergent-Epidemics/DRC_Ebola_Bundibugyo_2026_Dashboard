@@ -204,6 +204,28 @@ function featureByNom(nom) {
   return null;
 }
 
+// One derived read of "what is selected right now". The five per-view
+// selection variables stay where they are -- merging them would touch every
+// view's logic -- but only this function is allowed to answer the question, so
+// the tabs cannot drift apart into five different selection treatments again.
+function currentSelectedNoms() {
+  if (activeView === "map") return mapSelectedNom ? [mapSelectedNom] : [];
+  if (activeView === "epi-trends") return epiSelectedNom ? [epiSelectedNom] : [];
+  if (activeView === "context") return contextSelectedNom ? [contextSelectedNom] : [];
+  if (activeView === "genomic-epidemiology") return genomicHighlightNoms.slice();
+  if (activeView === "trends") {
+    // Province scope selects a province, not a zone; that ring is drawn by
+    // applyProvinceOutlineStyles() into the province-selection pane.
+    if (trendsScope === "health_zone" && trendsSelectedKey) return [trendsSelectedKey];
+    return [];
+  }
+  return [];
+}
+
+function refreshZoneSelection() {
+  zoneRings.set(currentSelectedNoms().map(featureByNom).filter(Boolean));
+}
+
 // The snapshot view's single focused zone. Drives the info box, the persistent
 // highlight, and — where the active layer cares — the flow-arc origin and the
 // matrix travel origin. Passing the already-focused nom (or null) clears focus.
@@ -218,6 +240,7 @@ function setMapSelection(nom) {
   recompute();
   syncMatrixUi();
   renderMapInfoBox();
+  refreshZoneSelection();
 }
 
 function renderMapInfoBox() {
@@ -1315,6 +1338,7 @@ function setEpiSelected(nom) {
   }
   renderEpiTrendsTable();
   recomputeEpiTrends();
+  refreshZoneSelection();
 }
 
 // Extracts the value used to sort a given column -- shared by the click
@@ -1572,6 +1596,7 @@ function leaveEpiTrendsView() {
   clearEpiLinks();
   clearFlowArcs();
   document.body.classList.remove("view-epi-trends", "epi-splitting");
+  refreshZoneSelection();
 }
 
 const ZERO_FILL    = "#c4bfb6";
@@ -2026,27 +2051,13 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
 // zoom). styleFn already encodes the map/epi-trends selection, so re-styling the
 // whole layer preserves those; the trends/context selection highlight lives
 // outside styleFn, so re-apply it.
+// Re-apply zone borders (e.g. after a zoom, so the weight ramp picks up the new
+// zoom). styleFn encodes every resting/tier style; selection lives in its own
+// pane and is rebuilt here rather than re-fronted, which is what the old
+// per-view bringToFront() blocks were doing.
 function restyleZonesForActiveView() {
   geoLayer.setStyle(styleFn);
-  if (activeView === "trends" && trendsScope === "health_zone" && trendsSelectedKey) {
-    geoLayer.eachLayer(function (layer) {
-      if (layer.feature && layer.feature.properties.nom === trendsSelectedKey) {
-        layer.setStyle({weight: 2, color: "#ffae42"});
-        layer.bringToFront();
-      }
-    });
-  } else if (activeView === "context" && contextSelectedLayer) {
-    contextSelectedLayer.setStyle({weight: 1.6, color: "#ffae42"});
-    contextSelectedLayer.bringToFront();
-  } else if (activeView === "genomic-epidemiology" && genomicHighlightNoms.length) {
-    // styleFn already paints the outline, but bring the selected zones to front so
-    // their border isn't hidden under neighbours after a restyle.
-    geoLayer.eachLayer(function (layer) {
-      if (layer.feature && genomicHighlightNoms.indexOf(layer.feature.properties.nom) !== -1) {
-        layer.bringToFront();
-      }
-    });
-  }
+  refreshZoneSelection();
 }
 
 map.on("zoomend", restyleZonesForActiveView);
@@ -2724,6 +2735,7 @@ function setTrendsSelection(key, opts) {
       results.innerHTML = "";
     }
   }
+  refreshZoneSelection();
 }
 
 function setTrendsScope(scope) {
@@ -2735,6 +2747,7 @@ function setTrendsScope(scope) {
     geoLayer.setStyle(styleFn);
     showProvinceOutlines();
   }
+  refreshZoneSelection();
 }
 
 function renderTrendsSearchResults(query) {
@@ -2973,6 +2986,7 @@ function clearContextSelection() {
   }
   contextSelectedNom = null;
   renderContextPanel(null);
+  refreshZoneSelection();
 }
 
 function selectContextZone(nom, layer) {
@@ -2985,6 +2999,7 @@ function selectContextZone(nom, layer) {
   layer.setStyle({weight: 1.6, color: "#ffae42"});
   layer.bringToFront();
   renderContextPanel(nom);
+  refreshZoneSelection();
 }
 
 function renderContextPanel(nom) {
@@ -3235,6 +3250,7 @@ function leaveTrendsView() {
     layerSelect.value = savedMapLayerId;
     recompute();
   }
+  refreshZoneSelection();
 }
 
 function setActiveView(view) {
@@ -3266,6 +3282,7 @@ function setActiveView(view) {
     }
   }
   activeView = view;
+  refreshZoneSelection();
   restoreCaseMarkersForView(view);
   restoreFlowArcsForView(view);
   document.body.classList.toggle("view-map", view === "map");
@@ -3715,6 +3732,7 @@ genomicMapHooks = (function () {
         const el = m.getElement && m.getElement();
         if (el && m._bdbvGenome) el.classList.toggle("genome-marker-sel", !!sel[m._bdbvGenome.nom]);
       });
+      refreshZoneSelection();
     },
   };
 })();
