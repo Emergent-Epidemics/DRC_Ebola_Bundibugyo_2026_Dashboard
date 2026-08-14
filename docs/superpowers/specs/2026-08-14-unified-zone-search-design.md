@@ -97,7 +97,11 @@ Markup moves out of `#controls` into `#viewport-area`, as a sibling of `#map`:
 
 The input and results ids are unchanged, so `ui.zone_search`,
 `ui.zone_search_placeholder` and `ui.zone_search_no_matches` carry over as-is.
-No new locale keys are needed.
+One new key pair is needed after all: `ui.zone_search_matches` = `"{n} matches"`
+/ `"{n} résultats"`, for the live region below. `tf(path, vars)`
+(`engine.js:62-70`) already does `{n}` interpolation, so no new machinery comes
+with it. Every per-view key in `ZONE_SEARCH_VIEWS` still resolves to a string
+that already exists.
 
 **Three elements, three jobs.** Today `.zone-search-empty` is a bare `<div>`
 child of `#zone-search-results[role=listbox]` (`engine.js:2287-2288`), which is
@@ -341,6 +345,14 @@ const ZONE_SEARCH_VIEWS = {
 Stub views have no entry; the controller no-ops on a missing entry rather than
 dereferencing `.kinds`.
 
+**The active view is read from `document.body.dataset.initialView`, not from
+`activeView`.** `bootstrapInitialView()` runs at the very bottom of `engine.js`
+(`4288-4293`), long after the search block, so `activeView` is still its `"map"`
+default when the controller initialises — keying off it would give every page
+the Snapshot behaviour. Every page is a single view (the nav is real cross-page
+`<a>` links, and `setActiveView()` is called exactly once, from that
+bootstrap), so one read at init is sufficient and no re-keying is needed.
+
 ### Per-view i18n must be applied to attributes, not properties
 
 `applyI18n()` re-reads `data-i18n-aria` and `data-i18n-placeholder` from the DOM
@@ -531,9 +543,10 @@ and is named here because §Removals is the checklist the diff gets read against
 - Spatial Risk: `renderEpiSearchResults()`, `epiClearSearchUi()`,
   `epiApplyHealthZone()`, and the search half of `wireEpiTrendsUi()`.
 
-`dashboard.css`: the dark `#zone-search-*` / `.zone-search-option` block, the
-`.location-search-*` block, `#trends-search-slot`'s base and narrow-screen
-positioning, and `.epi-controls`.
+`dashboard.css`: the dark `#zone-search-*` block and the dark `.zone-search-option`
+rules (the class name is retained by the new component — only its styling is
+replaced), the `.location-search-*` block, `#trends-search-slot`'s base and
+narrow-screen positioning, and `.epi-controls`.
 
 Two layout consequences to decide rather than discover:
 
@@ -559,9 +572,10 @@ Net effect is negative lines in both `engine.js` and `dashboard.css`.
 3. The `ZONE_SEARCH_VIEWS` keys in `engine.js` equal exactly the non-stub view
    ids in `chrome.NAV_ITEMS` — so a tab added later cannot silently ship without
    a search, and a removed tab cannot leave a dangling entry.
-4. No `.location-search-wrap`, `.location-search-results`, or
-   `.zone-search-option` selector survives in `dashboard.css`, and none is
-   referenced from `engine.js`.
+4. No `.location-search-wrap` or `.location-search-results` selector survives in
+   `dashboard.css`, and neither is referenced from `engine.js`.
+   (`.zone-search-option` is *retained* — it is the option class of the new
+   component. Only its dark styling is replaced.)
 5. `dashboard.css` carries a `#zone-search` rule for every non-stub
    `body.view-*` **in every band it is meant to appear in** — a view positioned
    in band A only must fail. It is hidden for `body.stub-view`, and for
