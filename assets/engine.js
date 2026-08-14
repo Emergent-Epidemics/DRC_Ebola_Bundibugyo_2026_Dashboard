@@ -22,6 +22,17 @@ let flowHubUserSelected = false;
 let mapSelectedNom = null;          // the single "focused zone" for the snapshot view
 let flowArcStats = null;
 let activeView = "map";
+// Declared up here, far from the context-view code that owns it, because
+// applyStaticI18n() reads it and the zone-search controller calls that during
+// module init -- leaving the declaration next to its users put it in the
+// temporal dead zone at that point and threw on every page load.
+let contextSelectedNom = null;
+// Assigned by wirePanelToggles() far below; lets the zone search open a
+// collapsed detail panel on narrow screens without duplicating
+// setCollapsed()'s glyph handling. Declared up here rather than beside that
+// IIFE so the binding exists before any earlier code can reach it -- the same
+// precaution contextSelectedNom above needed.
+let expandPanel = function() {};
 // Genomic tab (see genomic.js): the shared engine exposes only GENERIC, tip-
 // agnostic map hooks. `genomicMapHooks` is assigned once the map/layers exist
 // (below) and drives zone-level selection subscribe/emit + zone highlighting;
@@ -511,9 +522,6 @@ function setLang(lang) {
   recompute();
   syncMatrixUi();
   refreshMarkerTooltips();
-  if (zoneSearchInput && zoneSearchResults && !zoneSearchResults.hidden) {
-    renderZoneSearchResults(zoneSearchInput.value);
-  }
   if (activeView === "trends") {
     updateTrendsDateLabel();
     syncTrendsPlayButton();
@@ -2209,7 +2217,13 @@ map.on("click", function() {
   if (activeView === "genomic-epidemiology" && genomicMapHooks) genomicMapHooks._emitBackgroundClick();
 });
 
-// --- health-zone search ---
+// --- unified health-zone search -----------------------------------------
+// One #zone-search node (common/chrome.py), a sibling of #map, serving every
+// view. dashboard.css positions it per body.view-*; the ZONE_SEARCH_VIEWS
+// table below supplies each view's index filter, i18n keys and select()
+// action; wireZoneSearch() at the end of this section is the single
+// controller. Replaces the three separate implementations that used to live
+// in #controls, #trends-controls and .epi-controls.
 const ZONE_SEARCH_INDEX = (PAYLOAD.geometry.features || []).map(function(feat) {
   const props = feat.properties || {};
   const name = props.name || props.nom || "";
@@ -2225,12 +2239,12 @@ const ZONE_SEARCH_INDEX = (PAYLOAD.geometry.features || []).map(function(feat) {
     return String(a.name).localeCompare(String(b.name), undefined, {sensitivity: "base"});
   });
 
-// --- Trends tab location search: every province + health zone, regardless
-// of whether a plot happens to exist for it (unlike the old trendsEntityList()
-// approach, which only ever listed places trendsPlotData() had a plot for).
-// Mirrors ZONE_SEARCH_INDEX above so behaviour matches the Current Snapshot
-// search, just also covering provinces since Trends has a province scope.
-const TRENDS_LOCATION_INDEX = (function() {
+// --- the one search index: every province + health zone, regardless of
+// whether a plot happens to exist for it. Each view filters it down by `kind`
+// via ZONE_SEARCH_VIEWS below -- only Trends lists provinces, because only
+// Trends has a province scope. ZONE_SEARCH_INDEX above is now a private
+// intermediate of this list; nothing else reads it.
+const LOCATION_INDEX = (function() {
   const provinceNames = {};
   (PAYLOAD.province_boundaries && PAYLOAD.province_boundaries.features || []).forEach(function(feat) {
     const name = feat.properties && feat.properties.province;
@@ -2247,11 +2261,121 @@ const TRENDS_LOCATION_INDEX = (function() {
   });
 })();
 
-const zoneSearchInput = document.getElementById("zone-search-input");
-const zoneSearchResults = document.getElementById("zone-search-results");
-const zoneSearchWrap = document.getElementById("zone-search-wrap");
-let zoneSearchMatches = [];
-let zoneSearchActiveIdx = -1;
+// The view comes from <body data-initial-view>, NOT from activeView:
+// bootstrapInitialView() runs at the very bottom of this file, so activeView
+// is still its "map" default here. Every page is a single view (the nav is
+// real cross-page links, and setActiveView() is called once, from that
+// bootstrap), so one read at init is enough.
+const ZONE_SEARCH_VIEW_ID = document.body.dataset.initialView || "map";
+
+const ZONE_SEARCH_VIEWS = {
+  "map": {
+    kinds: ["health_zone"],
+    placeholder: "ui.zone_search_placeholder",
+    aria: "ui.zone_search",
+    // Collapsible detail panel to open after a narrow-screen selection; absent
+    // on views that have none. See pick() in wireZoneSearch().
+    panel: "info",
+    select: function(entry) { setMapSelection(entry.id); },
+  },
+  "context": {
+    kinds: ["health_zone"],
+    placeholder: "ui.zone_search_placeholder",
+    aria: "ui.zone_search",
+    panel: "context",
+    select: function(entry) { selectContextZone(entry.id); },
+  },
+  "trends": {
+    kinds: ["province", "health_zone"],
+    // The only tab that lists provinces, so the only one whose placeholder
+    // and accessible name say "location" rather than "health zone".
+    placeholder: "ui.trends_search_placeholder",
+    aria: "ui.trends_search",
+    select: function(entry) {
+      // Scope FIRST: setTrendsScope() nulls the selection, so setting the
+      // selection before it would be undone immediately.
+      if (entry.kind !== trendsScope) activateTrendsScope(entry.kind);
+      setTrendsSelection(entry.id);
+    },
+  },
+  "epi-trends": {
+    kinds: ["health_zone"],
+    placeholder: "ui.zone_search_placeholder",
+    aria: "ui.zone_search",
+    select: function(entry) {
+      // A ranked list of one zone isn't useful, so this selects/highlights the
+      // row rather than filtering the table -- same as clicking the row.
+      // setEpiSelected() re-renders the table, so find the row afterwards.
+      setEpiSelected(entry.id);
+      const tbody = document.getElementById("epi-trends-tbody");
+      if (!tbody) return;
+      const rows = tbody.querySelectorAll("tr[data-nom]");
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].getAttribute("data-nom") === entry.id) {
+          if (rows[i].scrollIntoView) rows[i].scrollIntoView({block: "center"});
+          break;
+        }
+      }
+    },
+  },
+  "genomic-epidemiology": {
+    kinds: ["health_zone"],
+    placeholder: "ui.zone_search_placeholder",
+    aria: "ui.zone_search",
+    // {toggle:false} matters: _emitZoneClick is a toggle by design (clicking
+    // the same polygon twice clears). The search clears its input after every
+    // pick, so a repeat search would silently DEselect while the shared zoom
+    // still framed the zone -- map says "here", tree says "nothing".
+    select: function(entry) {
+      if (genomicMapHooks) genomicMapHooks._emitZoneClick(entry.id, {toggle: false});
+    },
+  },
+};
+
+// Zoom padding as Leaflet [x, y]. Narrow Trends/Spatial Risk maps are
+// height:40vh -- ~192px on a 480px viewport -- so [40,40] would eat 80px of it.
+function zoneSearchPad() {
+  return window.matchMedia("(max-width: 700px)").matches ? [16, 16] : [40, 40];
+}
+
+// Width of map hidden behind an OVERLAYING panel. Zero everywhere except
+// Genomic: the Trends and Spatial Risk rails narrow #map itself, so Leaflet
+// already fits inside the visible area there, but #genomic-panel sits on top
+// of a full-width #map. Its width is an inline px style written by
+// applyWidth() in genomic.js, so it is read from the element.
+function zoneSearchInsetX() {
+  if (ZONE_SEARCH_VIEW_ID !== "genomic-epidemiology") return 0;
+  const panel = document.getElementById("genomic-panel");
+  return panel ? panel.offsetWidth : 0;
+}
+
+// NEVER pass `padding` alongside paddingTopLeft/paddingBottomRight: Leaflet
+// resolves each side as `paddingBottomRight || padding || [0,0]`, so a
+// directional key REPLACES padding on that side rather than adding to it, and
+// [0,0] is truthy. tests/test_zone_search.py guards this.
+function zoneSearchZoomTo(entry) {
+  let bounds = null;
+  if (entry.kind === "province") {
+    provinceOutlineLayer.eachLayer(function(layer) {
+      const props = layer.feature && layer.feature.properties;
+      if (!bounds && props && props.province === entry.id) bounds = layer.getBounds();
+    });
+  } else {
+    const layer = findGeoLayerByNom(entry.id);
+    if (layer) bounds = layer.getBounds();
+  }
+  // No geometry (a zone in the index but absent from the drawn layer): the
+  // selection still applies, the zoom is simply skipped.
+  if (!bounds || !bounds.isValid()) return;
+  const pad = zoneSearchPad();
+  map.fitBounds(bounds, {
+    paddingTopLeft: pad,
+    paddingBottomRight: [pad[0] + zoneSearchInsetX(), pad[1]],
+    // Caps how far we zoom INTO a small unit; a large province fits well below
+    // z10 and never reaches it.
+    maxZoom: 10,
+  });
+}
 
 function findGeoLayerByNom(nom) {
   let found = null;
@@ -2263,119 +2387,171 @@ function findGeoLayerByNom(nom) {
   return found;
 }
 
-function closeZoneSearchResults() {
-  if (!zoneSearchResults) return;
-  zoneSearchResults.hidden = true;
-  zoneSearchResults.innerHTML = "";
-  zoneSearchMatches = [];
-  zoneSearchActiveIdx = -1;
-  if (zoneSearchInput) zoneSearchInput.setAttribute("aria-expanded", "false");
-}
+(function wireZoneSearch() {
+  const view = ZONE_SEARCH_VIEWS[ZONE_SEARCH_VIEW_ID];
+  const root = document.getElementById("zone-search");
+  const input = document.getElementById("zone-search-input");
+  const results = document.getElementById("zone-search-results");
+  const empty = document.getElementById("zone-search-empty");
+  const live = document.getElementById("zone-search-live");
+  // Stub pages have no table entry: no-op rather than dereference view.kinds.
+  if (!view || !root || !input || !results || !empty || !live) return;
 
-function renderZoneSearchResults(query) {
-  if (!zoneSearchResults) return;
-  const q = String(query || "").trim().toLowerCase();
-  if (!q) {
-    closeZoneSearchResults();
-    return;
-  }
-  zoneSearchMatches = ZONE_SEARCH_INDEX.filter(function(z) {
-    return z.haystack.indexOf(q) !== -1;
-  }).slice(0, 12);
-  zoneSearchActiveIdx = zoneSearchMatches.length ? 0 : -1;
-  if (!zoneSearchMatches.length) {
-    zoneSearchResults.innerHTML =
-      "<div class='zone-search-empty' data-i18n-live='1'>" + t("ui.zone_search_no_matches") + "</div>";
-    zoneSearchResults.hidden = false;
-    if (zoneSearchInput) zoneSearchInput.setAttribute("aria-expanded", "true");
-    return;
-  }
-  zoneSearchResults.innerHTML = zoneSearchMatches.map(function(z, i) {
-    return (
-      "<button type='button' class='zone-search-option" + (i === 0 ? " active" : "") +
-      "' role='option' data-nom='" + escHtml(z.nom) + "'>" + escHtml(z.label) + "</button>"
-    );
-  }).join("");
-  zoneSearchResults.hidden = false;
-  if (zoneSearchInput) zoneSearchInput.setAttribute("aria-expanded", "true");
-}
+  // Set, not a hand-rolled object: matches EPICENTER_NOMS / PROJ_MASK_LAYERS
+  // above, which are the file's existing idiom for small membership tests.
+  const kinds = new Set(view.kinds);
 
-function setZoneSearchActive(idx) {
-  if (!zoneSearchMatches.length) return;
-  zoneSearchActiveIdx = Math.max(0, Math.min(idx, zoneSearchMatches.length - 1));
-  const opts = zoneSearchResults.querySelectorAll(".zone-search-option");
-  opts.forEach(function(el, i) {
-    el.classList.toggle("active", i === zoneSearchActiveIdx);
-  });
-  const active = opts[zoneSearchActiveIdx];
-  if (active && active.scrollIntoView) active.scrollIntoView({block: "nearest"});
-}
+  let matches = [];
+  let activeIdx = -1;
 
-function selectHealthZone(nom) {
-  const layer = findGeoLayerByNom(nom);
-  if (!layer || !layer.feature) return;
-  const feature = layer.feature;
-  const displayName = feature.properties.name || nom;
+  // Per-view i18n goes on the data-i18n-* ATTRIBUTES, never the properties:
+  // applyStaticI18n() re-reads those attributes on every language toggle, so
+  // setting input.placeholder here would survive only until the first EN/FR
+  // switch -- a bug that only ever shows up in the French build.
+  input.setAttribute("data-i18n-placeholder", view.placeholder);
+  input.setAttribute("data-i18n-aria", view.aria);
+  applyStaticI18n();
 
-  if (activeView === "context") {
-    selectContextZone(nom);
-    map.fitBounds(layer.getBounds(), {padding: [40, 40], maxZoom: 10});
-  } else if (activeView === "map") {
-    // Searching focuses the zone (persistent highlight + info box come from the
-    // focus state itself, not a transient overlay). Keep the zoom-to-frame: a
-    // searched zone may be offscreen, unlike an already-visible clicked one.
-    setMapSelection(nom);
-    map.fitBounds(layer.getBounds(), {padding: [40, 40], maxZoom: 10});
-    // No transient timer: the focus highlight is persistent via styleFn.
+  function isNarrow() {
+    return window.matchMedia("(max-width: 700px)").matches;
   }
 
-  if (zoneSearchInput) zoneSearchInput.value = displayName;
-  closeZoneSearchResults();
-}
+  function close() {
+    results.hidden = true;
+    results.innerHTML = "";
+    empty.hidden = true;
+    matches = [];
+    activeIdx = -1;
+    input.setAttribute("aria-expanded", "false");
+    input.setAttribute("aria-activedescendant", "");
+    live.textContent = "";
+  }
 
-if (zoneSearchWrap) {
-  L.DomEvent.disableClickPropagation(zoneSearchWrap);
-  L.DomEvent.disableScrollPropagation(zoneSearchWrap);
-}
+  function setActive(idx) {
+    if (!matches.length) return;
+    activeIdx = Math.max(0, Math.min(idx, matches.length - 1));
+    const opts = results.querySelectorAll(".zone-search-option");
+    opts.forEach(function(el, i) {
+      const on = i === activeIdx;
+      el.classList.toggle("active", on);
+      el.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    const active = opts[activeIdx];
+    if (active) {
+      input.setAttribute("aria-activedescendant", active.id);
+      if (active.scrollIntoView) active.scrollIntoView({block: "nearest"});
+    }
+  }
 
-if (zoneSearchInput && zoneSearchResults) {
-  zoneSearchInput.addEventListener("input", function() {
-    renderZoneSearchResults(zoneSearchInput.value);
+  function render(query) {
+    const q = String(query || "").trim().toLowerCase();
+    if (!q) {
+      close();
+      return;
+    }
+    matches = LOCATION_INDEX.filter(function(it) {
+      return kinds.has(it.kind) && it.haystack.indexOf(q) !== -1;
+    }).slice(0, 40);
+    if (!matches.length) {
+      const msg = t("ui.zone_search_no_matches");
+      results.hidden = true;
+      results.innerHTML = "";
+      empty.textContent = msg;
+      empty.hidden = false;
+      activeIdx = -1;
+      // aria-expanded tracks the LISTBOX, and there is nothing selectable.
+      input.setAttribute("aria-expanded", "false");
+      input.setAttribute("aria-activedescendant", "");
+      live.textContent = msg;
+      return;
+    }
+    empty.hidden = true;
+    results.innerHTML = matches.map(function(it, i) {
+      return "<button type='button' role='option' class='zone-search-option' tabindex='-1'" +
+        " id='zone-search-opt-" + i + "' aria-selected='false' data-idx='" + i + "'>" +
+        escHtml(it.label) + "</button>";
+    }).join("");
+    results.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+    setActive(0);
+    live.textContent = tf("ui.zone_search_matches", {n: matches.length});
+  }
+
+  function pick(idx) {
+    const entry = matches[idx];
+    if (!entry) return;
+    view.select(entry);
+    zoneSearchZoomTo(entry);
+    // The box is a query field, not a state indicator: the selection is
+    // visible in the map highlight / info panel / table row / plot titles.
+    input.value = "";
+    close();
+    // Desktop: stay focused so the next search starts immediately. Narrow:
+    // the on-screen keyboard would cover half the map we just zoomed.
+    if (isNarrow()) {
+      input.blur();
+      // wirePanelToggles() auto-collapses every panel on load at this width,
+      // so without this the only feedback from a search is a zoom and a
+      // highlight on a map the user may not recognise. #context-national is
+      // deliberately left collapsed: the search selects a ZONE, and #context
+      // is where zone context appears.
+      if (view.panel) expandPanel(view.panel);
+    }
+  }
+
+  input.addEventListener("input", function() { render(input.value); });
+  input.addEventListener("focus", function() {
+    if (input.value.trim()) render(input.value);
   });
-  zoneSearchInput.addEventListener("focus", function() {
-    if (zoneSearchInput.value.trim()) renderZoneSearchResults(zoneSearchInput.value);
-  });
-  zoneSearchInput.addEventListener("keydown", function(e) {
+
+  input.addEventListener("keydown", function(e) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      if (zoneSearchResults.hidden) renderZoneSearchResults(zoneSearchInput.value);
-      setZoneSearchActive(zoneSearchActiveIdx + 1);
+      if (results.hidden) render(input.value);
+      else setActive(activeIdx + 1);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setZoneSearchActive(zoneSearchActiveIdx - 1);
+      setActive(activeIdx - 1);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (zoneSearchActiveIdx >= 0 && zoneSearchMatches[zoneSearchActiveIdx]) {
-        selectHealthZone(zoneSearchMatches[zoneSearchActiveIdx].nom);
-      } else if (!zoneSearchResults.hidden && zoneSearchMatches[0]) {
-        selectHealthZone(zoneSearchMatches[0].nom);
-      }
+      // No-op on a closed list.
+      if (!results.hidden) pick(activeIdx);
     } else if (e.key === "Escape") {
-      closeZoneSearchResults();
-      zoneSearchInput.blur();
+      // preventDefault matters: Chrome and WebKit clear an
+      // input[type=search] natively on Esc, which would pre-empt the
+      // two-stage close-then-clear.
+      e.preventDefault();
+      if (!results.hidden || !empty.hidden) close();
+      else input.value = "";
+    } else if (e.key === "Tab") {
+      close();
     }
   });
-  zoneSearchResults.addEventListener("mousedown", function(e) {
+
+  // mousedown, not click: the input must not lose focus before we read the
+  // index. pointermove moves the ACTIVE row rather than painting a separate
+  // hover state, so keyboard and mouse can never highlight two rows at once.
+  results.addEventListener("mousedown", function(e) {
     const btn = e.target.closest(".zone-search-option");
     if (!btn) return;
     e.preventDefault();
-    selectHealthZone(btn.getAttribute("data-nom"));
+    pick(parseInt(btn.getAttribute("data-idx"), 10));
   });
+  results.addEventListener("pointermove", function(e) {
+    const btn = e.target.closest(".zone-search-option");
+    if (!btn) return;
+    const idx = parseInt(btn.getAttribute("data-idx"), 10);
+    // Only on an actual row change: setActive() also calls scrollIntoView(),
+    // and re-running it on every pixel of movement within one row is wasted
+    // work that can nudge the list under a stationary cursor.
+    if (idx === activeIdx) return;
+    setActive(idx);
+  });
+
   document.addEventListener("click", function(e) {
-    if (!zoneSearchWrap) return;
-    if (!zoneSearchWrap.contains(e.target)) closeZoneSearchResults();
+    if (!root.contains(e.target)) close();
   });
-}
+})();
 
 // --- province outlines (Trends view) ---
 let trendsScope = "national";
@@ -2815,11 +2991,14 @@ function renderTrendsPlots() {
 // the old floating trends panel that used to sit on top of the map. Now
 // that the map and plots panel are two separate fixed columns (nothing
 // overlaps), that auto-pan just made the map jump around distractingly on
-// every click, so it's been removed -- selecting a zone/province no longer
-// moves the map at all.
+// every click, so it's been removed -- CLICKING a zone/province still does
+// not move the map.
+//
+// SEARCHING one does, via zoneSearchZoomTo(). The asymmetry is deliberate:
+// a searched location can be offscreen, a clicked one cannot. Do not
+// "restore consistency" by deleting one side -- they answer different needs.
 
-function setTrendsSelection(key, opts) {
-  opts = opts || {};
+function setTrendsSelection(key) {
   trendsSelectedKey = key || null;
   // Repaint outlines and the province ring for the new selection. All three
   // scopes want the same call now that the ring reads trendsSelectedKey itself;
@@ -2827,15 +3006,6 @@ function setTrendsSelection(key, opts) {
   applyProvinceOutlineStyles(null);
   renderTrendsPlots();
   if (activeView === "trends") geoLayer.setStyle(styleFn);
-  if (opts.fromSearch) {
-    const input = document.getElementById("trends-search-input");
-    const results = document.getElementById("trends-search-results");
-    if (input) input.value = "";
-    if (results) {
-      results.classList.remove("open");
-      results.innerHTML = "";
-    }
-  }
   refreshZoneSelection();
 }
 
@@ -2849,34 +3019,6 @@ function setTrendsScope(scope) {
     showProvinceOutlines();
   }
   refreshZoneSelection();
-}
-
-function renderTrendsSearchResults(query) {
-  const root = document.getElementById("trends-search-results");
-  if (!root) return;
-  const q = String(query || "").trim().toLowerCase();
-  // Only open the match list once the user starts typing. Search covers
-  // every province/health zone regardless of current scope or plot
-  // availability -- picking a result switches scope automatically.
-  if (!q) {
-    root.classList.remove("open");
-    root.innerHTML = "";
-    return;
-  }
-  let items = TRENDS_LOCATION_INDEX.filter(function(it) {
-    return it.haystack.indexOf(q) >= 0;
-  });
-  if (!items.length) {
-    root.innerHTML = "<div class='zone-search-empty'>" + escHtml(t("ui.zone_search_no_matches") || "No matches") + "</div>";
-    root.classList.add("open");
-    return;
-  }
-  // Keep enough matches that the expanded panel can fill its ≥5-hit capacity.
-  root.innerHTML = items.slice(0, 40).map(function(it) {
-    return "<button type='button' role='option' data-id='" + escHtml(it.id) + "' data-kind='" + escHtml(it.kind) + "'>" +
-      escHtml(it.label) + "</button>";
-  }).join("");
-  root.classList.add("open");
 }
 
 function syncTrendsPlayButton() {
@@ -3076,8 +3218,6 @@ function renderNationalContextPanel(nom) {
     return renderContextPillarHtml(p);
   }).join("");
 }
-
-let contextSelectedNom = null;
 
 function clearContextSelection() {
   contextSelectedNom = null;
@@ -3452,87 +3592,24 @@ document.querySelectorAll(".view-tab").forEach(function(tab) {
   syncTrendsPlayButton();
 })();
 
+// Single source of truth for "make this scope the active one": syncs the
+// segmented-control buttons and updates the scope state together. Both the
+// button click handler below and ZONE_SEARCH_VIEWS.trends.select() call it, so
+// the button UI and trendsScope can never disagree.
+function activateTrendsScope(scope) {
+  document.querySelectorAll(".trends-scope-btn").forEach(function(b) {
+    b.classList.toggle("active", b.getAttribute("data-scope") === scope);
+  });
+  setTrendsScope(scope);
+}
+
 (function wireTrendsPanelUi() {
-  const scopeButtons = document.querySelectorAll(".trends-scope-btn");
-  const searchInput = document.getElementById("trends-search-input");
-  const searchResults = document.getElementById("trends-search-results");
-
-  scopeButtons.forEach(function(btn) {
+  document.querySelectorAll(".trends-scope-btn").forEach(function(btn) {
     btn.addEventListener("click", function() {
-      const scope = btn.getAttribute("data-scope") || "national";
-      scopeButtons.forEach(function(b) { b.classList.toggle("active", b === btn); });
-      setTrendsScope(scope);
-      if (searchInput) searchInput.value = "";
-      if (searchResults) {
-        searchResults.classList.remove("open");
-        searchResults.innerHTML = "";
-      }
+      activateTrendsScope(btn.getAttribute("data-scope") || "national");
     });
   });
-  if (searchInput) {
-    searchInput.addEventListener("input", function() {
-      renderTrendsSearchResults(searchInput.value);
-    });
-    searchInput.addEventListener("focus", function() {
-      renderTrendsSearchResults(searchInput.value);
-    });
-  }
-  if (searchResults) {
-    searchResults.addEventListener("click", function(e) {
-      const btn = e.target.closest("button[data-id]");
-      if (!btn) return;
-      const kind = btn.getAttribute("data-kind");
-      if (kind && kind !== trendsScope) {
-        const targetBtn = document.querySelector(".trends-scope-btn[data-scope='" + kind + "']");
-        if (targetBtn) {
-          scopeButtons.forEach(function(b) { b.classList.toggle("active", b === targetBtn); });
-        }
-        setTrendsScope(kind);
-      }
-      setTrendsSelection(btn.getAttribute("data-id"), {fromSearch: true});
-    });
-  }
-  document.addEventListener("click", function(e) {
-    if (!searchResults || !searchResults.classList.contains("open")) return;
-    if (e.target.closest("#trends-search-wrap")) return;
-    searchResults.classList.remove("open");
-  });
-  setTrendsScope("national");
-})();
-
-// --- Trends tab: on narrow screens, relocate the location search bar out of
-// #trends-controls (now buried in the stacked bottom panel, see
-// body.view-trends #trends-panel in dashboard.css) into #trends-search-slot,
-// a sibling of #map, positioned top-left in the corner the Leaflet zoom control
-// used to occupy before it was removed map-wide. Moves it
-// back to its original spot -- right after .trends-scope-row inside
-// #trends-controls -- on wider screens. ---
-(function wireTrendsSearchSlot() {
-  const searchWrap = document.getElementById("trends-search-wrap");
-  const slot = document.getElementById("trends-search-slot");
-  const controls = document.getElementById("trends-controls");
-  if (!searchWrap || !slot || !controls) return;
-  const scopeRow = controls.querySelector(".trends-scope-row");
-  const mq = window.matchMedia("(max-width: 700px)");
-
-  function place(narrow) {
-    if (narrow) {
-      if (searchWrap.parentElement !== slot) slot.appendChild(searchWrap);
-    } else if (searchWrap.parentElement !== controls) {
-      if (scopeRow && scopeRow.nextSibling) {
-        controls.insertBefore(searchWrap, scopeRow.nextSibling);
-      } else {
-        controls.appendChild(searchWrap);
-      }
-    }
-  }
-
-  place(mq.matches);
-  if (mq.addEventListener) {
-    mq.addEventListener("change", function(e) { place(e.matches); });
-  } else if (mq.addListener) {
-    mq.addListener(function(e) { place(e.matches); });
-  }
+  activateTrendsScope("national");
 })();
 
 // --- Trends tab map/plots split handle (mirrors wireEpiTrendsUi's
@@ -3804,10 +3881,27 @@ genomicMapHooks = (function () {
     // Per-zone genome markers ({nom,name,lat,lon,count}); genomic.js joins these
     // zones to the tree tips. A defensive copy so callers can't mutate ours.
     genomeMarkers: GENOME_SEQUENCES.map(function (g) { return { nom: g.nom, name: g.name, count: g.count }; }),
-    onZoneClick: function (cb) { onZoneClickCb = cb; },
+    // Registration doubles as the genomic readiness signal: it happens in
+    // startCoordinator(), i.e. only once the tree/tip data has resolved. Until
+    // then _emitZoneClick no-ops, so the search would zoom the map and select
+    // nothing -- and would do so forever if the payload is absent or the tree
+    // never mounts. So #zone-search starts hidden on this view and appears
+    // here. Hiding rather than disabling means a never-mounting tree leaves no
+    // broken-looking box. _emitMarkerClick shares this coordinator, so this
+    // one gate covers every genomic entry point.
+    //
+    // This is the ONE place the search reaches into these otherwise
+    // tip-agnostic hooks; it is deliberate, not drift.
+    onZoneClick: function (cb) {
+      onZoneClickCb = cb;
+      const box = document.getElementById("zone-search");
+      if (box) box.classList.add("zone-search-ready");
+    },
     onMarkerClick: function (cb) { onMarkerClickCb = cb; },
     onBackgroundClick: function (cb) { onBackgroundClickCb = cb; },
-    _emitZoneClick: function (nom) { if (onZoneClickCb) onZoneClickCb(nom); },
+    // opts is forwarded untouched; the search passes {toggle:false} so a
+    // repeat search selects rather than deselecting. See genomic.js selectZone.
+    _emitZoneClick: function (nom, opts) { if (onZoneClickCb) onZoneClickCb(nom, opts); },
     _emitMarkerClick: function (nom) { if (onMarkerClickCb) onMarkerClickCb(nom); },
     _emitBackgroundClick: function () { if (onBackgroundClickCb) onBackgroundClickCb(); },
     // Outline a set of zones (by canonical nom) on the backdrop map, and emphasise
@@ -3952,79 +4046,6 @@ if (!PAYLOAD.flow_arcs_available || !FLOW_ARC_LAYER) {
     if (splitHandle) splitHandle.style.display = "none";
     return;
   }
-  const epiSearchInput = document.getElementById("epi-search-input");
-  const epiSearchResults = document.getElementById("epi-search-results");
-
-  function epiClearSearchUi() {
-    if (epiSearchInput) epiSearchInput.value = "";
-    if (epiSearchResults) {
-      epiSearchResults.classList.remove("open");
-      epiSearchResults.innerHTML = "";
-    }
-  }
-
-  // Picking a health zone from search selects/highlights its row (a ranked
-  // list of one zone isn't useful, so it doesn't filter the table), same as
-  // clicking that row directly. setEpiSelected() re-renders the table, so the
-  // scroll-into-view happens after it.
-  function epiApplyHealthZone(nom) {
-    setEpiSelected(nom);
-    if (tbody) {
-      const tr = Array.prototype.find.call(
-        tbody.querySelectorAll("tr[data-nom]"),
-        function(el) { return el.getAttribute("data-nom") === nom; }
-      );
-      if (tr && tr.scrollIntoView) tr.scrollIntoView({block: "center"});
-    }
-  }
-
-  // Shares TRENDS_LOCATION_INDEX with the Trends tab (every province + health
-  // zone), but this page has no provincial scope, so province entries are
-  // filtered out -- only health zones are shown/selectable here.
-  function renderEpiSearchResults(query) {
-    if (!epiSearchResults) return;
-    const q = String(query || "").trim().toLowerCase();
-    if (!q) {
-      epiSearchResults.classList.remove("open");
-      epiSearchResults.innerHTML = "";
-      return;
-    }
-    const items = TRENDS_LOCATION_INDEX.filter(function(it) {
-      return it.kind === "health_zone" && it.haystack.indexOf(q) >= 0;
-    });
-    if (!items.length) {
-      epiSearchResults.innerHTML = "<div class='zone-search-empty'>" +
-        escHtml(t("ui.zone_search_no_matches") || "No matches") + "</div>";
-      epiSearchResults.classList.add("open");
-      return;
-    }
-    epiSearchResults.innerHTML = items.slice(0, 40).map(function(it) {
-      return "<button type='button' role='option' data-id='" + escHtml(it.id) + "' data-kind='" + escHtml(it.kind) + "'>" +
-        escHtml(it.label) + "</button>";
-    }).join("");
-    epiSearchResults.classList.add("open");
-  }
-
-  if (epiSearchInput) {
-    epiSearchInput.addEventListener("input", function() { renderEpiSearchResults(epiSearchInput.value); });
-    epiSearchInput.addEventListener("focus", function() { renderEpiSearchResults(epiSearchInput.value); });
-  }
-  if (epiSearchResults) {
-    epiSearchResults.addEventListener("click", function(e) {
-      const btn = e.target.closest("button[data-id]");
-      if (!btn) return;
-      const kind = btn.getAttribute("data-kind");
-      const id = btn.getAttribute("data-id");
-      if (kind === "health_zone") epiApplyHealthZone(id);
-      epiClearSearchUi();
-    });
-  }
-  document.addEventListener("click", function(e) {
-    if (!epiSearchResults || !epiSearchResults.classList.contains("open")) return;
-    if (e.target.closest("#epi-search-wrap")) return;
-    epiSearchResults.classList.remove("open");
-  });
-
   // Sortable column headers replace the old rank-by-RR/rank-by-priority
   // buttons -- click (or Enter/Space) any header to sort by it, click again
   // to reverse. See epiSortValue()/epiCompareValues()/epiSortedRows() and
@@ -4206,6 +4227,17 @@ wireModal("terms-modal", ["terms-btn", "header-terms-btn"], "terms-close");
       btn.textContent = "−";
     }
   }
+  expandPanel = function(panelId) {
+    const panel = document.getElementById(panelId);
+    if (!panel || !panel.classList.contains("collapsed")) return;
+    // #info is the one collapsible panel whose toggle is a bare id rather than
+    // a .panel-toggle[data-target] -- see chrome.py. tests/test_zone_search.py
+    // checks both forms so a new panel: entry cannot silently miss its toggle.
+    const btn = panelId === "info"
+      ? document.getElementById("info-toggle")
+      : document.querySelector('.panel-toggle[data-target="' + panelId + '"]');
+    if (btn) setCollapsed(panel, btn, false);
+  };
   const infoPanel = document.getElementById("info");
   const infoBtn = document.getElementById("info-toggle");
   if (infoPanel && infoBtn) {
