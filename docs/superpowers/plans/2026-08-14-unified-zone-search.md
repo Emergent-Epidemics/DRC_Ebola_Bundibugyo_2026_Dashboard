@@ -1855,12 +1855,20 @@ Record the result of each. Any failure stops the task and gets fixed before proc
 12. **Keyboard only**, one tab: Tab into the input, type, `↓`/`↑` (clamping at both ends), `Enter` selects, `Esc` closes, `Esc` clears.
 13. **All five tabs**, wide and narrow: each tab's own selection state updates (map highlight, info/context panel, table row, plot title) and the map zooms.
 
-- [ ] **Step 4: Deploy the build to the repo root**
+- [ ] **Step 4: Do NOT deploy the build to the repo root**
+
+An earlier revision of this plan said to `cp output/*.html .` and replace `assets/`.
+**That was wrong.** `git log -- index.html` shows every commit to the built
+pages is authored by CI ("CI: rebuild dashboard from …"), and
+`.github/workflows/` carries both `build-dashboard.yml` and `pr-preview.yml`.
+Committing generated HTML here would add ~120MB of churn to the branch, collide
+with CI on merge, and duplicate work CI already does from source. Leave the
+repo-root `*.html` and `assets/` untouched; revert anything the build wrote:
 
 ```bash
 cd /Users/user/Documents/work/BDBV2026-Epidemic_Dashboard
-cp output/*.html .
-rm -rf assets && cp -r output/assets assets
+git checkout -- output/
+git status --short   # expect empty
 ```
 
 - [ ] **Step 5: Final full-suite run**
@@ -1873,10 +1881,32 @@ Expected: all pass.
 
 - [ ] **Step 6: Commit**
 
-```bash
-git add -A
-git commit -m "Rebuild pages with the unified zone search"
+Only if the checklist produced source fixes. If the pass was clean there is
+nothing to commit — the build output is deliberately not tracked from here (see
+Step 4), so a clean pass ends with a clean tree.
+
+## A note on viewport control
+
+Several checklist items need a real narrow or mid viewport. In this environment
+the browser tooling's `resize_window` does **not** change the tab's effective
+`window.innerWidth`, so it cannot exercise CSS media queries.
+
+Patching `matchMedia` is not a substitute here: it moves the JS `isNarrow()`
+branch but leaves the CSS bands evaluating at the real width, which is exactly
+what these items are meant to test.
+
+Use an **iframe harness** instead. A same-origin iframe establishes its own
+viewport, so media queries, `vw` units and `matchMedia` inside it all resolve
+against the iframe's box:
+
+```html
+<iframe src="http://localhost:8000/index.html" style="width:390px;height:780px;border:0"></iframe>
 ```
+
+Drive the page inside via `frames[0].document` / `frames[0].window`. Widths
+worth using: 390 (band C), 760 and 900 (band B), 1200 (band A). If even that
+proves impossible, say which items went unverified rather than reporting a pass
+that did not happen.
 
 ---
 
