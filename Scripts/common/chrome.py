@@ -123,13 +123,27 @@ __NAV_LINKS__
 </div>
 <div id="viewport-area">
 <div id="map"></div>
-<!-- Trends only, narrow screens only: engine.js moves #trends-search-wrap
-     in here (out of #trends-controls, now down in the stacked bottom
-     panel) so location search stays reachable next to the map, in the
-     top-left corner the Leaflet zoom control used to occupy on this page
-     (see body.view-trends .leaflet-control-zoom in dashboard.css). Moved
-     back to its normal spot on wider screens. -->
-<div id="trends-search-slot"></div>
+<!-- Standalone health-zone search: ONE node serving every view, a sibling of
+     #map so it is never trapped inside a panel or rail. dashboard.css
+     positions it per body.view-* across three width bands; engine.js's
+     ZONE_SEARCH_VIEWS table supplies each view's index filter, i18n keys and
+     select() action. Replaces the three separate boxes that used to live in
+     #controls, #trends-controls and .epi-controls.
+
+     #zone-search-results holds ONLY options (it is a listbox); the
+     no-matches message is #zone-search-empty, a sibling shown in its place;
+     #zone-search-live is announcement-only. -->
+<div id="zone-search">
+  <input type="search" id="zone-search-input" autocomplete="off" spellcheck="false"
+         role="combobox" aria-autocomplete="list" aria-controls="zone-search-results"
+         aria-expanded="false" aria-activedescendant=""
+         data-i18n-placeholder="ui.zone_search_placeholder"
+         placeholder="Type a health zone name…"
+         data-i18n-aria="ui.zone_search" aria-label="Search health zone" />
+  <div id="zone-search-results" role="listbox" hidden></div>
+  <div id="zone-search-empty" hidden></div>
+  <div id="zone-search-live" role="status" aria-live="polite" class="visually-hidden"></div>
+</div>
 <div id="context-hint" data-i18n="ui.hints.context">Click a health zone to see response context</div>
 <div id="travel-hint" data-i18n="ui.hints.travel">Click a health zone to set travel origin (double-click to zoom)</div>
 <div id="flow-hint" data-i18n="ui.hints.flow">Click a health zone to show movement flows (double-click to zoom)</div>
@@ -140,14 +154,6 @@ __NAV_LINKS__
     <button class="panel-toggle" data-target="controls" type="button" data-i18n-aria="ui.aria.toggle_layer" data-i18n-title="ui.aria.collapse_layer" aria-label="Toggle layer controls" title="Collapse / expand layer controls">−</button>
   </div>
   <div class="panel-body">
-    <div id="zone-search-wrap">
-      <input type="search" id="zone-search-input" autocomplete="off" spellcheck="false"
-             data-i18n-placeholder="ui.zone_search_placeholder"
-             placeholder="Type a health zone name…"
-             data-i18n-aria="ui.zone_search" aria-label="Search health zone"
-             aria-autocomplete="list" aria-controls="zone-search-results" aria-expanded="false" />
-      <div id="zone-search-results" role="listbox" hidden></div>
-    </div>
     <label for="layer-select" data-i18n="ui.source">Source</label>
     <select id="layer-select"></select>
     <div class="checkbox-row">
@@ -218,22 +224,9 @@ __NAV_LINKS__
   <h2 id="epi-trends-title" data-i18n="ui.epi_trends_title">Health zones ranked by national relative risk of invasion</h2>
   <p id="epi-trends-subtitle"></p>
   <!-- The table always shows the national ranking; there is no geographic
-       scope toggle. The search box below only matches health zones (provinces
-       are filtered out in renderEpiSearchResults()), and picking one
-       selects/highlights its row rather than filtering the list -- see the
-       epi-search-results click handler in wireEpiTrendsUi(). Search wrap
-       shares the Trends tab's .location-search-wrap/.location-search-results
-       classes for styling. -->
-  <div class="epi-controls">
-    <div id="epi-search-wrap" class="location-search-wrap">
-      <input type="search" id="epi-search-input" autocomplete="off" spellcheck="false"
-             data-i18n-placeholder="ui.trends_search_placeholder"
-             placeholder="Search for a location…"
-             data-i18n-aria="ui.trends_search" aria-label="Search"
-             aria-autocomplete="list" aria-controls="epi-search-results" aria-expanded="false" />
-      <div id="epi-search-results" class="location-search-results" role="listbox"></div>
-    </div>
-  </div>
+       scope toggle. Zone search lives in the standalone #zone-search
+       component over the map (see ZONE_SEARCH_VIEWS in engine.js); picking a
+       zone there selects/highlights its row rather than filtering the list. -->
   <!-- Sortable column headers replace the old "Rank by relative risk /
        Rank by vulnerability-based priority" buttons -- click (or Enter/Space)
        any header to sort by it, click again to reverse. See
@@ -307,7 +300,7 @@ __NAV_LINKS__
 <!-- Trends tab right-hand rail: a persistent (not floating) panel, sized by
      dragging #trends-split-handle, mirroring the #epi-trends-panel /
      #epi-split-handle pattern used on the Spatial Risk tab. Holds the scope
-     scope/search controls up top and a scrollable column of plot cards
+     controls up top and a scrollable column of plot cards
      below -- #trends is the first card; more can be appended into
      #trends-plots-column later without touching the layout mechanics. -->
 <div id="trends-panel">
@@ -320,14 +313,6 @@ __NAV_LINKS__
               data-i18n="ui.trends_scope_province">Provincial</button>
       <button type="button" class="trends-scope-btn" data-scope="health_zone"
               data-i18n="ui.trends_scope_health_zone">Health Zone</button>
-    </div>
-    <div id="trends-search-wrap" class="location-search-wrap">
-      <input type="search" id="trends-search-input" autocomplete="off" spellcheck="false"
-             data-i18n-placeholder="ui.trends_search_placeholder"
-             placeholder="Search for a location…"
-             data-i18n-aria="ui.trends_search" aria-label="Search"
-             aria-autocomplete="list" aria-controls="trends-search-results" aria-expanded="false" />
-      <div id="trends-search-results" class="location-search-results" role="listbox"></div>
     </div>
   </div>
   <div id="trends-plots-column">

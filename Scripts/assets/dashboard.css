@@ -4,6 +4,24 @@
     --view-chrome-height: 44px;
     --epi-panel-width: 50%;
     --trends-panel-width: 40%;
+    /* Band-A (wide-branch) panel widths #zone-search's offset is derived from.
+       Each is read by the panel's own width rule (unconditional, all bands)
+       and by the band-A search offset (default block only), so the 10px gap
+       between panel and search cannot drift. --context-panel-width also sizes
+       #context, the right-hand mirror of #context-national: band B's 834px
+       boundary is the search's right edge against #context's LEFT edge, so
+       the two panels staying equal is load-bearing, not cosmetic. The narrow
+       branches use different numbers on purpose -- see the band B/C blocks. */
+    --layer-panel-width: min(340px, calc(100vw - 24px));
+    --context-panel-width: min(280px, calc(50vw - 24px));
+    /* Sets #zone-search-input's min-height AND every band B/C displacement
+       offset, so the two can never disagree about how tall the search is. */
+    --zone-search-height: 32px;
+    /* The clearance a displaced panel must leave below the search: its height
+       plus an 8px gap. Split out from --zone-search-height so displaced tops
+       (12px + drop) and their max-height give-backs (Xvh - drop) can't drift
+       apart arithmetically -- they are the same quantity with opposite signs. */
+    --zone-search-drop: calc(var(--zone-search-height) + 8px);
   }
   /* Common full-width header (title + build info on the left, outbreak size
      summary on the right), identical on every page -- see common/chrome.py.
@@ -100,8 +118,8 @@
   }
   #controls     {
     top:12px; left:12px;
-    width:min(340px, calc(100vw - 24px));
-    max-width:min(340px, calc(100vw - 24px));
+    width:var(--layer-panel-width);
+    max-width:var(--layer-panel-width);
   }
   #controls .panel-body { min-width:0; }
   #controls select {
@@ -110,32 +128,141 @@
     max-width:100%;
     box-sizing:border-box;
   }
-  #zone-search-wrap { position:relative; margin-top:2px; }
+  /* ── Standalone health-zone search ──────────────────────────────────────
+     One node (see common/chrome.py), sibling of #map, serving every view.
+     Placement per body.view-* lives further down, in the three band blocks.
+
+     No L.DomEvent.disableClickPropagation/disableScrollPropagation is used or
+     needed: #zone-search is a SIBLING of #map, not a descendant of the Leaflet
+     container, so its events never reach Leaflet's container-bound handlers in
+     the first place. Do not "fix" this by moving the node into the map pane.
+
+     z-index 1200 ties with #trends-split-handle / #epi-split-handle, which
+     come later in BODY_TEMPLATE and therefore win the tie. That is fine, and
+     it is load-bearing on the rail clamp below: the handles sit at the rail's
+     inner edge while the search sits at the map's left corner. The clamp's
+     -24px leaves 12px to the panel's nominal edge, but each handle is centred
+     ON that edge by margin-right:-5px, so it overhangs 5px onto the map and
+     the real clearance is 7px. Widen the search past that, or drop the clamp,
+     and the handle starts painting over the search. */
+  #zone-search {
+    position:absolute; z-index:1200;
+    width:min(240px, calc(100vw - 24px));
+  }
   #zone-search-input {
-    display:block; width:100%; max-width:100%; box-sizing:border-box;
-    background:#222; color:#eee; border:1px solid #444; padding:5px 8px;
-    border-radius:4px; font-size:12px;
+    display:block; width:100%; box-sizing:border-box;
+    min-height:var(--zone-search-height);
+    background:#ffffff; color:#2a2a27;
+    border:1px solid #e7e3db; border-radius:4px;
+    padding:6px 8px; font-size:12px;
+    /* Floats over a basemap rather than sitting in a light rail, so the input
+       carries the same lift the dropdown does. */
+    box-shadow:0 2px 8px rgba(42,42,39,0.18);
   }
   #zone-search-input:focus {
     outline:none; border-color:#9b7d4e; box-shadow:0 0 0 1px rgba(155,125,78,0.35);
   }
-  #zone-search-results {
+  /* Results and the no-matches panel share one position: exactly one of them
+     is ever visible, and the empty panel takes the results panel's place
+     rather than stacking under it. */
+  #zone-search-results,
+  #zone-search-empty {
     position:absolute; left:0; right:0; top:100%;
-    margin-top:2px; max-height:220px; overflow-y:auto;
-    background:#1a1a1a; border:1px solid #444; border-radius:4px;
-    box-shadow:0 4px 14px rgba(0,0,0,0.45); z-index:1100;
+    margin-top:6px;
+    background:#ffffff; border:1px solid #e7e3db; border-radius:4px;
+    box-shadow:0 4px 14px rgba(0,0,0,0.14);
+    z-index:1100;
   }
-  #zone-search-results[hidden] { display:none !important; }
+  #zone-search-results {
+    /* The 30vh arm matters on narrow Trends/Spatial Risk, where the map is
+       height:40vh -- an unclamped five-row list opens over the whole map. */
+    max-height:min(calc(5 * 32px), 30vh);
+    overflow-y:auto;
+  }
+  #zone-search-results[hidden],
+  #zone-search-empty[hidden] { display:none !important; }
+  #zone-search-empty {
+    padding:8px; font-size:12px; color:#9c968b; font-style:italic;
+  }
+  /* No :hover rule on purpose -- the controller moves .active on pointermove
+     so keyboard and mouse can never highlight two different rows at once. */
   .zone-search-option {
     display:block; width:100%; text-align:left;
-    background:transparent; color:#eee; border:none; border-bottom:1px solid #2a2a2a;
-    padding:7px 8px; font-size:12px; cursor:pointer; border-radius:0;
+    background:#ffffff; color:#2a2a27;
+    border:none; border-bottom:1px solid #e7e3db; border-radius:0;
+    padding:7px 8px; font-size:12px; line-height:1.35;
+    min-height:32px; box-sizing:border-box; cursor:pointer;
   }
   .zone-search-option:last-child { border-bottom:none; }
-  .zone-search-option:hover,
-  .zone-search-option.active { background:#2a2a2a; color:#ffd28a; }
-  .zone-search-empty {
-    padding:8px; font-size:12px; color:#888; font-style:italic;
+  .zone-search-option.active { background:#f3f1ec; color:#9b7d4e; }
+  /* Announcement-only region (#zone-search-live). */
+  .visually-hidden {
+    position:absolute; width:1px; height:1px;
+    margin:-1px; padding:0; border:0;
+    clip-path:inset(50%); overflow:hidden; white-space:nowrap;
+  }
+  /* ── #zone-search placement, band A (the unqualified default, ≳1000px) ──
+     Bands B and C are carved out below with max-width queries only, so no
+     viewport width can fall between two rules the way a
+     max-width:999px / min-width:1000px pair would at 999.5px.
+
+     On map and context the search sits beside the panel already in the
+     corner; the other three tabs have an empty corner. The three rail views
+     additionally clamp their width to the visible map -- see the rail clamp
+     note on each rule. */
+  body.view-map #zone-search {
+    top:12px; left:calc(12px + var(--layer-panel-width) + 10px);
+  }
+  body.view-context #zone-search {
+    top:12px; left:calc(12px + var(--context-panel-width) + 10px);
+  }
+  body.view-trends #zone-search {
+    top:12px; left:12px;
+    /* The rail can be dragged to 72% (TRENDS_SPLIT_MAX), leaving a map
+       narrower than the search; --trends-panel-width is a percentage and
+       #zone-search is positioned in #viewport-area, so this tracks a live
+       drag for free. */
+    width:min(240px, calc(100% - var(--trends-panel-width) - 24px));
+  }
+  body.view-epi-trends #zone-search {
+    top:12px; left:12px;
+    width:min(240px, calc(100% - var(--epi-panel-width) - 24px));
+  }
+  body.view-genomic-epidemiology #zone-search {
+    top:12px; left:12px;
+    /* #genomic-panel OVERLAYS a full-width #map (no body.view-… #map rule),
+       and its width is an inline px style, so genomic.js publishes
+       --genomic-panel-width for this clamp. The 70vw fallback matches the
+       CSS default before genomic.js runs. */
+    width:min(240px, calc(100% - var(--genomic-panel-width, 70vw) - 24px));
+  }
+  body.stub-view #zone-search { display:none !important; }
+  /* Genomic only: revealed by genomicMapHooks.onZoneClick() once the tree
+     coordinator has registered -- see that hook in engine.js for why. */
+  body.view-genomic-epidemiology #zone-search { display:none; }
+  body.view-genomic-epidemiology #zone-search.zone-search-ready { display:block; }
+  /* ── Band B — 701px … 999.98px ─────────────────────────────────────────
+     The beside-the-panel layout of band A collides with the opposite corner
+     here: on map the search would span 362–602px while #info (right:12px,
+     max-width:340px) starts at 100vw − 352, meeting at ~954px; on context the
+     figures are 302–542px against #context at 100vw − 292, meeting at ~834px.
+     #info is content-sized under a bare max-width, so the space actually left
+     is not derivable in CSS; context could be clamped (it has a definite
+     width) but follows map so the two tabs do not diverge.
+
+     So: corner on every tab, and the two views with something already at
+     12px/12px displace it downward. #info needs no displacement -- at ≥701px
+     it starts at ≥349px, clear of the search's 252px right edge. */
+  @media (max-width: 999.98px) {
+    body.view-map #zone-search,
+    body.view-context #zone-search { top:12px; left:12px; }
+    body.view-map #controls { top:calc(12px + var(--zone-search-drop)); }
+    body.view-context #context-national {
+      top:calc(12px + var(--zone-search-drop));
+      /* Displacement must not push the panel's bottom edge toward the footer:
+         give back exactly what the top took. */
+      max-height:calc(80vh - var(--zone-search-drop));
+    }
   }
   #legend       { bottom:calc(var(--view-chrome-height) + 12px); left:12px; width:max-content; max-width:min(360px, calc(100vw - 24px)); }
   /* Size the legend to its widest line so the (sometimes long) layer title
@@ -160,11 +287,6 @@
   }
   body.view-trends #trends-panel { display:flex; flex-direction:column; gap:10px; }
   body.view-trends #map { right: var(--trends-panel-width); }
-  /* Sibling of #map (see chrome.py) -- engine.js relocates #trends-search-wrap
-     in here on narrow screens (see @media max-width:700px below), out of
-     #trends-controls, so search stays reachable next to the map instead of
-     being buried in the stacked bottom panel. Hidden/inert otherwise. */
-  #trends-search-slot { display:none; }
   #trends-split-handle {
     display:none;
     position:absolute;
@@ -273,11 +395,12 @@
   body.view-trends #epi-split-handle,
   body.view-trends #epi-trends-legend,
   body.view-trends #epi-float { display:none !important; }
-  /* #trends-controls: scope buttons + location search side by side, no
-     panel/card chrome around them -- they sit directly in the #trends-panel
-     rail, above the plots column. */
+  /* #trends-controls: just the scope buttons now (location search moved to
+     the standalone #zone-search component over the map). Kept as a flex row
+     so a second control can be added back beside the scope buttons without
+     re-deriving the layout; no justify-content, since one child needs none. */
   #trends-controls {
-    display:flex; align-items:center; justify-content:space-between;
+    display:flex; align-items:center;
     gap:10px; flex-wrap:wrap;
   }
   /* Scope is a row of buttons (National / Provincial / Health Zone) rather
@@ -295,52 +418,8 @@
   .trends-scope-btn.active {
     background:rgba(155,125,78,0.16); color:#7c4a12; border-color:#9b7d4e;
   }
-  /* Shared by #trends-search-wrap (Trends tab) and #epi-search-wrap (Spatial
-     Risk tab) so both tabs' location search looks/behaves identically.
-     Scoped to the class itself (not the parent controls row) so the input
-     keeps its styling when engine.js relocates #trends-search-wrap into
-     #trends-search-slot on narrow screens -- see wireTrendsSearchSlot(). */
-  .location-search-wrap input[type="search"] {
-    background:#ffffff; color:#2a2a27; border:1px solid #e7e3db; border-radius:4px;
-    padding:6px 8px; font-size:12px; width:100%; box-sizing:border-box;
-  }
-  .location-search-wrap input[type="search"]:focus {
-    outline:none; border-color:#9b7d4e; box-shadow:0 0 0 1px rgba(155,125,78,0.35);
-  }
-  /* Location search sits on the right side of the row (wide screens; see
-     #trends-search-slot for the Trends-tab narrow-screen position). */
-  .location-search-wrap { position:relative; flex:0 1 200px; min-width:140px; }
-  /* Floats over the content below rather than pushing it down. Tall enough
-     for ≥5 hits. */
-  .location-search-results {
-    display:none;
-    position:absolute; left:0; right:0; top:100%;
-    margin-top:6px;
-    max-height:calc(5 * 32px);
-    overflow-y:auto;
-    background:#ffffff; border:1px solid #e7e3db; border-radius:4px;
-    box-shadow:0 4px 14px rgba(0,0,0,0.14);
-    z-index:1100;
-  }
-  .location-search-results.open { display:block; }
-  .location-search-results button {
-    display:block; width:100%; text-align:left; border:none; border-bottom:1px solid #e7e3db;
-    background:#ffffff; color:#2a2a27; padding:7px 8px; font-size:12px; line-height:1.35;
-    min-height:32px; box-sizing:border-box; cursor:pointer;
-  }
-  .location-search-results button:hover,
-  .location-search-results button.active { background:#f3f1ec; color:#9b7d4e; }
-  .location-search-results .zone-search-empty {
-    padding:8px; font-size:12px; color:#9c968b; font-style:italic;
-  }
   #epi-trends-panel h2 {
     margin:0; font-size:14px; color:#2a2a27; font-weight:700;
-  }
-  /* Holds just the location search now (the National/Provincial scope buttons
-     were removed) -- same row layout as #trends-controls on the Trends tab. */
-  .epi-controls {
-    display:flex; align-items:center; justify-content:space-between;
-    gap:10px; flex-wrap:wrap;
   }
   #epi-trends-table-wrap {
     flex:1 1 auto; overflow:auto; border:1px solid #e7e3db; border-radius:6px;
@@ -404,6 +483,7 @@
   #epi-trends-downloads button:hover {
     background:rgba(155,125,78,0.08); color:#7c1d1d; border-color:#9b7d4e;
   }
+  body.epi-map-exporting #zone-search,
   body.epi-map-exporting #epi-trends-legend,
   body.epi-map-exporting #epi-float,
   body.epi-map-exporting #epi-split-handle,
@@ -637,7 +717,7 @@
   .trends-empty { color:#888; font-size:12px; }
   #context-national {
     top:12px; left:12px; bottom:auto; right:auto;
-    width:min(280px, calc(50vw - 24px));
+    width:var(--context-panel-width);
     max-width:280px;
     max-height:80vh;
     overflow:hidden; display:none;
@@ -646,7 +726,7 @@
   }
   #context {
     top:12px; right:12px; bottom:auto; left:auto;
-    width:min(280px, calc(50vw - 24px));
+    width:var(--context-panel-width);
     max-width:280px;
     max-height:80vh;
     overflow:hidden; display:none;
@@ -815,15 +895,6 @@
       box-shadow:0 -2px 12px rgba(42,42,39,0.06);
     }
     #trends-split-handle { display:none !important; }
-    /* Location search moves to the map's top-left corner (where the zoom
-       control used to be) instead of staying buried in #trends-controls,
-       now down in the stacked bottom panel -- engine.js does the actual
-       DOM move (wireTrendsSearchSlot()), this just positions the slot. */
-    body.view-trends #trends-search-slot {
-      display:block; position:absolute; z-index:1000;
-      top:12px; left:12px;
-      width:min(220px, calc(100vw - 24px));
-    }
     /* Trends tab: replace the full legend (title/description/colour bar/
        ticks/scale/date-slider) with just a small play-button panel,
        top-right -- not enough room for all of that, and autoplay already
@@ -833,7 +904,7 @@
       /* Map is full-width in its own top section on narrow screens (see
          "map and plots column stack" rules below), so no panel-width
          offset is needed here the way there is on wider screens. */
-      top:12px; bottom:auto; right:12px;
+      top:calc(12px + var(--zone-search-drop)); bottom:auto; right:12px;
       max-width:none; width:auto; padding:6px;
     }
     #trends-legend-title,
@@ -869,11 +940,17 @@
       /* Cancel the wide-screen right:calc(...) offset -- the map is
          full-width in its own top section here (see the map/table stacking
          rules above), so this just needs to sit in its own top-left corner. */
-      top:12px; left:12px; right:auto; bottom:auto;
+      top:calc(12px + var(--zone-search-drop)); left:12px; right:auto; bottom:auto;
       max-width:min(240px, calc(100vw - 24px));
     }
     body.view-context #context-national {
       top:clamp(128px, 24vh, 200px);
+      /* Cancels band B's give-back: that max-height compensates band B's 40px
+         top displacement, but the top offset just above is NOT displaced --
+         this panel already clears the search here. Declared explicitly because
+         band B still matches at this width and the cascade resolves per
+         declaration, so an unset max-height would inherit band B's. */
+      max-height:80vh;
       left:6px; bottom:auto;
       width:min(260px, calc(50vw - 12px));
       max-width:min(260px, 46vw);
@@ -895,8 +972,35 @@
        collapsed to just their title bar by default here (see
        wirePanelToggles()'s narrow-screen auto-collapse in engine.js), so
        this mostly affects where that collapsed title bar sits. */
-    #controls       { top:12px; }
-    #info           { top:12px; }
+    /* ── Band C — the search owns the whole top row (bands A and B are up by
+       the #zone-search component block, ~line 200) ──────────────────────
+       Full width, so no clamp has to reason about the opposite corner --
+       #info can be re-expanded to 60vw by the user at any time, so no static
+       clamp derived from its collapsed width could have been correct. The
+       rail clamp is switched off here: the rails stack BELOW a full-width
+       map at this width. Everything else at top:12px drops below the search
+       by exactly its height. */
+    body.view-map #zone-search,
+    body.view-context #zone-search,
+    body.view-trends #zone-search,
+    body.view-epi-trends #zone-search {
+      top:12px; left:12px; width:calc(100vw - 24px);
+    }
+    /* No search on Genomic here: #genomic-panel has no narrow rule, so the
+       map is a ~108px strip and any usable box would float over the
+       phylogeny. See "Known gaps" in the design spec.
+
+       !important is load-bearing, not defensive: Task 8's readiness gate adds
+       body.view-genomic-epidemiology #zone-search.zone-search-ready
+       { display:block }, which outranks this rule on specificity. Without it,
+       a phone-sized Genomic page would reveal the search as soon as the tree
+       coordinator registered. */
+    body.view-genomic-epidemiology #zone-search { display:none !important; }
+    #controls       { top:calc(12px + var(--zone-search-drop)); }
+    #info {
+      top:calc(12px + var(--zone-search-drop));
+      max-height:calc(80vh - var(--zone-search-drop));
+    }
     /* #controls' wide-screen width (min(340px, 100vw-24px) -- needed when
        expanded, to fit the search box/select/checkboxes) makes its
        collapsed-by-default title bar stretch almost the full screen width,
@@ -930,6 +1034,13 @@
       max-width:min(12vmin, 72px);
     }
     .view-tab { padding:3px 8px; font-size:11px; }
+  }
+  /* A landscape phone is band C AND max-height:500px; the 70vh cap above wins
+     over band C's, so re-apply the displacement give-back here. Deliberately
+     NOT folded into the max-height:500px block: a wide, short window (e.g.
+     1200x450) is band A, where nothing is displaced. */
+  @media (max-width: 700px) and (max-height: 500px) {
+    #info { max-height:calc(70vh - var(--zone-search-drop)); }
   }
   /* Tracker stack ("outbreak size summary", top-right of #site-header;
      rows are right-aligned to hug the header's right edge). */
