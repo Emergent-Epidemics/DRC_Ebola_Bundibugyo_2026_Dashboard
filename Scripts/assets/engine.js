@@ -2731,13 +2731,10 @@ function renderTrendsPlots() {
 function setTrendsSelection(key, opts) {
   opts = opts || {};
   trendsSelectedKey = key || null;
-  if (trendsScope === "province") {
-    applyProvinceOutlineStyles(null);
-  } else if (trendsScope === "health_zone") {
-    applyProvinceOutlineStyles(null);
-  } else {
-    applyProvinceOutlineStyles(null);
-  }
+  // Repaint outlines and the province ring for the new selection. All three
+  // scopes want the same call now that the ring reads trendsSelectedKey itself;
+  // the branches only survived from when this passed the selection in.
+  applyProvinceOutlineStyles(null);
   renderTrendsPlots();
   if (activeView === "trends") geoLayer.setStyle(styleFn);
   if (opts.fromSearch) {
@@ -3045,6 +3042,14 @@ function hideProvinceOutlines() {
   if (map.hasLayer(provinceOutlineLayer)) {
     map.removeLayer(provinceOutlineLayer);
   }
+  // Clear the ring explicitly rather than letting applyProvinceOutlineStyles()
+  // infer it from state. Callers reach here BEFORE clearing trendsSelectedKey
+  // and before activeView moves off "trends" (see leaveTrendsView), so the
+  // inference would re-draw the ring instead of removing it -- and the ring
+  // lives in its own pane, so dropping provinceOutlineLayer does not take it
+  // with us. Unreachable today (tab switches are full page loads), but live
+  // the moment soft navigation lands.
+  provinceRings.clear();
   applyProvinceOutlineStyles(null);
 }
 
