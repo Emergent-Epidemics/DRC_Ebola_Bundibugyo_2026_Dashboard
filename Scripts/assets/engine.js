@@ -3863,10 +3863,27 @@ genomicMapHooks = (function () {
     // Per-zone genome markers ({nom,name,lat,lon,count}); genomic.js joins these
     // zones to the tree tips. A defensive copy so callers can't mutate ours.
     genomeMarkers: GENOME_SEQUENCES.map(function (g) { return { nom: g.nom, name: g.name, count: g.count }; }),
-    onZoneClick: function (cb) { onZoneClickCb = cb; },
+    // Registration doubles as the genomic readiness signal: it happens in
+    // startCoordinator(), i.e. only once the tree/tip data has resolved. Until
+    // then _emitZoneClick no-ops, so the search would zoom the map and select
+    // nothing -- and would do so forever if the payload is absent or the tree
+    // never mounts. So #zone-search starts hidden on this view and appears
+    // here. Hiding rather than disabling means a never-mounting tree leaves no
+    // broken-looking box. _emitMarkerClick shares this coordinator, so this
+    // one gate covers every genomic entry point.
+    //
+    // This is the ONE place the search reaches into these otherwise
+    // tip-agnostic hooks; it is deliberate, not drift.
+    onZoneClick: function (cb) {
+      onZoneClickCb = cb;
+      const box = document.getElementById("zone-search");
+      if (box) box.classList.add("zone-search-ready");
+    },
     onMarkerClick: function (cb) { onMarkerClickCb = cb; },
     onBackgroundClick: function (cb) { onBackgroundClickCb = cb; },
-    _emitZoneClick: function (nom) { if (onZoneClickCb) onZoneClickCb(nom); },
+    // opts is forwarded untouched; the search passes {toggle:false} so a
+    // repeat search selects rather than deselecting. See genomic.js selectZone.
+    _emitZoneClick: function (nom, opts) { if (onZoneClickCb) onZoneClickCb(nom, opts); },
     _emitMarkerClick: function (nom) { if (onMarkerClickCb) onMarkerClickCb(nom); },
     _emitBackgroundClick: function () { if (onBackgroundClickCb) onBackgroundClickCb(); },
     // Outline a set of zones (by canonical nom) on the backdrop map, and emphasise

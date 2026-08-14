@@ -349,3 +349,26 @@ def test_applystatici18n_dependencies_are_declared_before_the_controller_calls_i
         "applyStaticI18n() reads module-level bindings declared after the "
         f"zone-search controller calls it (temporal dead zone): {late}"
     )
+
+
+GENOMIC = REPO / "Scripts" / "assets" / "genomic.js"
+
+
+def test_zone_click_emitter_threads_options():
+    """The search needs a non-toggling select; map clicks keep toggling."""
+    engine = ENGINE.read_text(encoding="utf-8")
+    assert "_emitZoneClick: function (nom, opts)" in engine
+    assert "onZoneClickCb(nom, opts)" in engine
+
+
+def test_genomic_select_zone_honours_the_toggle_option():
+    genomic = GENOMIC.read_text(encoding="utf-8")
+    assert "function selectZone(nom, opts)" in genomic
+    assert "opts.toggle === false" in genomic
+
+
+def test_genomic_publishes_its_panel_width():
+    """The CSS rail clamp reads --genomic-panel-width; applyWidth() is the
+    single writer of the inline px width, so it must publish it too."""
+    genomic = GENOMIC.read_text(encoding="utf-8")
+    assert "--genomic-panel-width" in genomic

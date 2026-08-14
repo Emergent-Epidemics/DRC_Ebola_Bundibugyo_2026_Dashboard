@@ -237,6 +237,10 @@
     width:min(240px, calc(100% - var(--genomic-panel-width, 70vw) - 24px));
   }
   body.stub-view #zone-search { display:none !important; }
+  /* Genomic only: revealed by genomicMapHooks.onZoneClick() once the tree
+     coordinator has registered -- see that hook in engine.js for why. */
+  body.view-genomic-epidemiology #zone-search { display:none; }
+  body.view-genomic-epidemiology #zone-search.zone-search-ready { display:block; }
   /* ── Band B — 701px … 999.98px ─────────────────────────────────────────
      The beside-the-panel layout of band A collides with the opposite corner
      here: on map the search would span 362–602px while #info (right:12px,

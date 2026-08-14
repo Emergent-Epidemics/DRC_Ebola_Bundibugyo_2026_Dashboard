@@ -629,10 +629,14 @@
       programmatic = false;
     }
 
-    // marker OR polygon → select that zone's tips; click the same source again → clear
-    function selectZone(nom) {
+    // marker OR polygon → select that zone's tips; click the same source again → clear.
+    // opts.toggle === false suppresses that clear: the search box empties after
+    // every pick, so a user searching the same zone twice would otherwise
+    // DEselect it while the map still zoomed straight to it.
+    function selectZone(nom, opts) {
       var key = "zone:" + up(nom);
-      if (key === activeKey) { clearAll(); return; }
+      var toggle = !(opts && opts.toggle === false);
+      if (toggle && key === activeKey) { clearAll(); return; }
       activeKey = key;
       var names = zoneToTips[up(nom)] || [];
       zoneSelecting = true;
@@ -647,8 +651,8 @@
       if (distPanel && distPanel.setZones) distPanel.setZones([zoneNom(nom)]);
     }
 
-    hooks.onMarkerClick(function (nom) { selectZone(nom); });
-    hooks.onZoneClick(function (nom) { selectZone(nom); });
+    hooks.onMarkerClick(function (nom, opts) { selectZone(nom, opts); });
+    hooks.onZoneClick(function (nom, opts) { selectZone(nom, opts); });
     hooks.onBackgroundClick(function () { clearAll(); });
 
     // tree selection → (1) date markers on Ne/distribution (any selection source),
@@ -747,12 +751,25 @@
     if (!panel) return;
     px = Math.max(MIN_W, Math.min(maxW(), px));
     panel.style.width = px + "px";
+    publishPanelWidth(px);
     window.dispatchEvent(new Event("resize"));
+  }
+  // #genomic-panel OVERLAYS a full-width #map (unlike the Trends and Spatial
+  // Risk rails, which narrow #map itself), so dashboard.css needs its width to
+  // clamp #zone-search to the visible map strip. The width is an inline px
+  // style, unreachable from CSS, so the single writer publishes it as a custom
+  // property in the same breath -- the two cannot drift.
+  function publishPanelWidth(px) {
+    document.documentElement.style.setProperty("--genomic-panel-width", px + "px");
   }
   function initResize() {
     var panel = document.getElementById("genomic-panel");
     var handle = document.getElementById("genomic-resize");
     if (!panel || !handle) return;
+
+    // The starting width comes from the stylesheet (min(634px, 70vw)), not
+    // from applyWidth(), so seed the custom property from the live geometry.
+    publishPanelWidth(panel.offsetWidth);
 
     var dragging = false;
     function onMove(e) {
