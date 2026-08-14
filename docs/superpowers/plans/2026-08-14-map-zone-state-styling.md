@@ -456,7 +456,7 @@ Expected: `map.createPane("flow-arcs")` … `const epiLinkLayer = L.layerGroup()
 // stroke: a dark casing underneath, then the amber ring. The casing's visible
 // part is the half that sticks out, (casingMult - innerMult) / 2 of the resting
 // weight on each side.
-function SelectionRing(paneName, zIndex, opts) {
+function SelectionRing(paneName, zIndex, weights) {
   map.createPane(paneName);
   const pane = map.getPane(paneName);
   pane.style.zIndex = String(zIndex);
@@ -479,18 +479,23 @@ function SelectionRing(paneName, zIndex, opts) {
   function draw() {
     group.clearLayers();
     if (!current.length) return;
-    const base = opts.baseWeight();
+    // The caller resolves its own weights, so every token is read with literal
+    // arguments at the call site. Passing token NAMES in here instead would
+    // hide them from tests/test_zone_state_styling.py, whose regex only sees
+    // literal zoneNum()/themeVar() calls -- the guard would silently stop
+    // covering exactly the tokens that draw the selection.
+    const w = weights();
     group.addLayer(ring(
       current,
       themeVar("--zone-selected-casing", "#5c3a12"),
       zoneNum("--zone-selected-casing-opacity", "0.9"),
-      base * zoneNum(opts.casingMult, opts.casingMultFallback)
+      w.casing
     ));
     group.addLayer(ring(
       current,
       themeVar("--zone-selected-stroke", "#ffae42"),
       zoneNum("--zone-selected-stroke-opacity", "1"),
-      base * zoneNum(opts.innerMult, opts.innerMultFallback)
+      w.inner
     ));
   }
 
@@ -509,10 +514,12 @@ function SelectionRing(paneName, zIndex, opts) {
 // its arcs, so a ring above them would occlude every arc terminus at the
 // selected zone. Markers (600) and tooltips (650) still draw over the ring --
 // requirement 4 is a guarantee against zones, not against everything.
-const zoneRings = SelectionRing("zone-selection", 445, {
-  baseWeight: function () { return zoneWeight(map.getZoom()); },
-  innerMult: "--zone-selected-weight-mult", innerMultFallback: "2.2",
-  casingMult: "--zone-selected-casing-mult", casingMultFallback: "3.6"
+const zoneRings = SelectionRing("zone-selection", 445, function () {
+  const base = zoneWeight(map.getZoom());
+  return {
+    inner: base * zoneNum("--zone-selected-weight-mult", "2.2"),
+    casing: base * zoneNum("--zone-selected-casing-mult", "3.6")
+  };
 });
 ```
 
@@ -1118,10 +1125,12 @@ The `provinceOutlineLayer` block sits at `2146-2154`. Insert after it:
 ```js
 // 560: above the province outlines (550). Province rings are NOT zoom-scaled --
 // they multiply the province resting weight, which is fixed.
-const provinceRings = SelectionRing("province-selection", 560, {
-  baseWeight: provinceBaseWeight,
-  innerMult: "--province-selected-weight-mult", innerMultFallback: "2.2",
-  casingMult: "--province-selected-casing-mult", casingMultFallback: "3.6"
+const provinceRings = SelectionRing("province-selection", 560, function () {
+  const base = provinceBaseWeight();
+  return {
+    inner: base * zoneNum("--province-selected-weight-mult", "2.2"),
+    casing: base * zoneNum("--province-selected-casing-mult", "3.6")
+  };
 });
 
 function provinceFeaturesFor(name) {
