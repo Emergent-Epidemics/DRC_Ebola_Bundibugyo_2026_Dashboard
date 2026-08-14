@@ -204,6 +204,33 @@ function featureByNom(nom) {
   return null;
 }
 
+// One derived read of "what is selected right now". The five per-view
+// selection variables stay where they are -- merging them would touch every
+// view's logic -- but this is the only function that answers the question, so
+// the five tabs paint selection through one path instead of five.
+//
+// That is a convention, not an encapsulation: nothing stops a new view from
+// painting its own highlight inline, and a sixth activeView added without a
+// branch here falls through to [] silently rather than failing. Keep new views
+// in step by adding them here.
+function currentSelectedNoms() {
+  if (activeView === "map") return mapSelectedNom ? [mapSelectedNom] : [];
+  if (activeView === "epi-trends") return epiSelectedNom ? [epiSelectedNom] : [];
+  if (activeView === "context") return contextSelectedNom ? [contextSelectedNom] : [];
+  if (activeView === "genomic-epidemiology") return genomicHighlightNoms.slice();
+  if (activeView === "trends") {
+    // Province scope selects a province, not a zone; that ring is drawn by
+    // applyProvinceOutlineStyles() into the province-selection pane.
+    if (trendsScope === "health_zone" && trendsSelectedKey) return [trendsSelectedKey];
+    return [];
+  }
+  return [];
+}
+
+function refreshZoneSelection() {
+  zoneRings.set(currentSelectedNoms().map(featureByNom).filter(Boolean));
+}
+
 // The snapshot view's single focused zone. Drives the info box, the persistent
 // highlight, and — where the active layer cares — the flow-arc origin and the
 // matrix travel origin. Passing the already-focused nom (or null) clears focus.
@@ -218,6 +245,7 @@ function setMapSelection(nom) {
   recompute();
   syncMatrixUi();
   renderMapInfoBox();
+  refreshZoneSelection();
 }
 
 function renderMapInfoBox() {
@@ -581,12 +609,92 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
 }).addTo(map);
 
 // Zone borders read as hairlines at the national default zoom (many small
-// zones packed together) and gain a little presence as you zoom into the
-// outbreak. Scale a resting stroke weight by the current zoom; emphasized
-// strokes (hover, selection, travel origin) keep their fixed weight.
-function zoomWeight(base) {
-  const f = Math.max(0.5, Math.min(2.1, 0.5 + (map.getZoom() - 5) * 0.28));
-  return base * f;
+// zones packed together) and gain presence as you zoom into the outbreak.
+// One ramp drives the resting stroke; every other state is a multiple of it,
+// so the hierarchy (resting < focus < hover < selected) holds at every zoom.
+//
+// ramp-min is both the z5 intercept and the clamp floor on purpose: the map
+// sets no minZoom, so below z5 the border stops thinning rather than vanishing.
+function zoneWeight(zoom) {
+  const base = zoneNum("--zone-stroke-weight-base", "1.7");
+  const lo = zoneNum("--zone-stroke-ramp-min", "0.6");
+  const hi = zoneNum("--zone-stroke-ramp-max", "1.15");
+  const slope = zoneNum("--zone-stroke-ramp-slope", "0.1");
+  return base * Math.max(lo, Math.min(hi, lo + (zoom - 5) * slope));
+}
+
+// themeVar() returns strings; this is the numeric read. The fallback is parsed
+// too, so a malformed theme value degrades to the documented default rather
+// than to NaN (a NaN weight silently drops the stroke entirely in Leaflet).
+//
+// Reads a token directly rather than taking a resolved value, so each token
+// appears exactly once in the source, with exactly one fallback literal.
+// tests/test_zone_state_styling.py treats zoneNum() as a token reader
+// alongside themeVar() for that reason.
+function zoneNum(name, fallback) {
+  const v = parseFloat(themeVar(name, fallback));
+  return isFinite(v) ? v : parseFloat(fallback);
+}
+
+// Stroke half of a zone's style, by state. Weight is already resolved for the
+// current zoom. Callers Object.assign() this onto the fill half, so nothing
+// hardcodes a colour or a weight.
+//
+// "hidden"  -- zone not visible for the active spatial-risk layer
+// "failloud" -- active zone with no count; should never happen, must stay loud
+// "focus"   -- spatial-risk flow-connected neighbour of the selected zone
+// "dim"     -- spatial-risk non-focus zone while something is selected
+function zoneStroke(state) {
+  const w = zoneWeight(map.getZoom());
+  const rest = themeVar("--zone-stroke", "#fdfaf4");
+  const restOp = zoneNum("--zone-stroke-opacity", "0.7");
+  switch (state) {
+    case "hover":
+      return {
+        color: themeVar("--zone-hover-stroke", "#ffffff"),
+        opacity: zoneNum("--zone-hover-stroke-opacity", "0.98"),
+        weight: w * zoneNum("--zone-hover-weight-mult", "1.7")
+      };
+    case "nodata":
+      return {
+        color: themeVar("--zone-nodata-stroke", "#6b635a"),
+        opacity: zoneNum("--zone-nodata-stroke-opacity", "0.45"),
+        weight: w * zoneNum("--zone-nodata-weight-mult", "1")
+      };
+    case "hidden":
+      return {
+        color: themeVar("--zone-nodata-stroke", "#6b635a"),
+        opacity: zoneNum("--zone-nodata-stroke-opacity", "0.45"),
+        weight: w * zoneNum("--zone-hidden-weight-mult", "0.7")
+      };
+    case "failloud":
+      return {
+        color: themeVar("--zone-failloud-stroke", "#111"),
+        opacity: zoneNum("--zone-failloud-stroke-opacity", "1"),
+        weight: w * zoneNum("--zone-failloud-weight-mult", "1")
+      };
+    case "focus":
+      return {color: rest, opacity: restOp, weight: w * zoneNum("--zone-focus-weight-mult", "1.35")};
+    case "dim":
+      return {color: rest, opacity: zoneNum("--zone-dim-stroke-opacity", "0.25"), weight: w};
+    // Role markers are the one place opacity is not tokenised. They are the
+    // only strokes left at full black, and there is no intent to fade them --
+    // a --zone-role-stroke-opacity token would be a knob nobody turns.
+    case "epicenter":
+      return {
+        color: themeVar("--zone-role-stroke", "#111"),
+        opacity: 1,
+        weight: w * zoneNum("--zone-role-weight-mult-epicenter", "1.35")
+      };
+    case "origin":
+      return {
+        color: themeVar("--zone-role-stroke", "#111"),
+        opacity: 1,
+        weight: w * zoneNum("--zone-role-weight-mult-origin", "1.6")
+      };
+    default:   // "rest"
+      return {color: rest, opacity: restOp, weight: w};
+  }
 }
 
 map.createPane("flow-arcs");
@@ -595,6 +703,82 @@ map.createPane("epi-links");
 map.getPane("epi-links").style.zIndex = "455";
 const flowArcLayer = L.layerGroup();
 const epiLinkLayer = L.layerGroup();
+
+// A selected zone's highlight is drawn OUTSIDE the polygon layer, in its own
+// pane. Inside the polygon layer, every hover handler calls bringToFront() on
+// the zone under the cursor, so a hovered neighbour's border paints over the
+// selected zone's shared edge -- and no amount of re-fronting survives the next
+// restyle. A higher pane makes the guarantee structural instead.
+//
+// The ring is two stacked paths because a single Leaflet path carries one
+// stroke: a dark casing underneath, then the amber ring. The casing's visible
+// part is the half that sticks out, (casingMult - innerMult) / 2 of the resting
+// weight on each side.
+function SelectionRing(paneName, zIndex, weights) {
+  map.createPane(paneName);
+  const pane = map.getPane(paneName);
+  pane.style.zIndex = String(zIndex);
+  // Clicks must reach the polygon underneath, or click-to-deselect dies the
+  // moment a zone is selected.
+  pane.style.pointerEvents = "none";
+  const group = L.layerGroup().addTo(map);
+  let current = [];
+
+  function ring(features, color, opacity, weight) {
+    return L.geoJSON({type: "FeatureCollection", features: features}, {
+      pane: paneName,
+      interactive: false,
+      style: function () {
+        return {color: color, opacity: opacity, weight: weight, fill: false};
+      }
+    });
+  }
+
+  function draw() {
+    group.clearLayers();
+    if (!current.length) return;
+    // The caller resolves its own weights, so every token is read with literal
+    // arguments at the call site. Passing token NAMES in here instead would
+    // hide them from tests/test_zone_state_styling.py, whose regex only sees
+    // literal zoneNum()/themeVar() calls -- the guard would silently stop
+    // covering exactly the tokens that draw the selection.
+    const w = weights();
+    group.addLayer(ring(
+      current,
+      themeVar("--zone-selected-casing", "#5c3a12"),
+      zoneNum("--zone-selected-casing-opacity", "0.9"),
+      w.casing
+    ));
+    group.addLayer(ring(
+      current,
+      themeVar("--zone-selected-stroke", "#ffae42"),
+      zoneNum("--zone-selected-stroke-opacity", "1"),
+      w.inner
+    ));
+  }
+
+  return {
+    // Takes GeoJSON features, not keys: one factory serves both the zone (nom)
+    // and province (province name) key spaces, and each caller already knows
+    // how to resolve its own keys.
+    set: function (features) { current = (features || []).filter(Boolean); draw(); },
+    clear: function () { current = []; draw(); },
+    redraw: draw
+  };
+}
+
+// 445: above the zone polygons (overlayPane, 400), below the flow arcs (450)
+// and epi-links (455). Selecting a zone on the spatial-risk tab is what draws
+// its arcs, so a ring above them would occlude every arc terminus at the
+// selected zone. Markers (600) and tooltips (650) still draw over the ring --
+// requirement 4 is a guarantee against zones, not against everything.
+const zoneRings = SelectionRing("zone-selection", 445, function () {
+  const base = zoneWeight(map.getZoom());
+  return {
+    inner: base * zoneNum("--zone-selected-weight-mult", "2.2"),
+    casing: base * zoneNum("--zone-selected-casing-mult", "3.6")
+  };
+});
 
 function zoneCentroid(nom) {
   const z = ZONE_DATA[nom];
@@ -755,6 +939,7 @@ function renderFlowArcs(hubNom, layer) {
         to: hubDisplayName(dest),
         count: fmt(count),
       }), {direction: "top", sticky: true});
+      line.on("click", forwardArcClickToZone);
       line.addTo(flowArcLayer);
       addFlowWingMarker(pts, FLOW_OUT_COLOR);
     });
@@ -789,6 +974,7 @@ function renderFlowArcs(hubNom, layer) {
         foi: e.foi.toPrecision(2),
         share: (e.share != null ? (e.share * 100).toFixed(1) + "%" : "—"),
       }), {direction: "top", sticky: true});
+      line.on("click", forwardArcClickToZone);
       line.addTo(flowArcLayer);
       addFlowWingMarker(pts, FLOW_OUT_COLOR, {nearEnd: true});
     });
@@ -836,6 +1022,7 @@ function renderFlowArcs(hubNom, layer) {
         count: fmt(count),
       }), {direction: "top", sticky: true});
     }
+    line.on("click", forwardArcClickToZone);
     line.addTo(flowArcLayer);
     addFlowWingMarker(pts, color, useImportPressure ? {nearEnd: true} : null);
   });
@@ -1143,6 +1330,7 @@ function setEpiSelected(nom) {
   }
   renderEpiTrendsTable();
   recomputeEpiTrends();
+  refreshZoneSelection();
 }
 
 // Extracts the value used to sort a given column -- shared by the click
@@ -1321,7 +1509,7 @@ function epiTrendsStyleFn(feature) {
   const ref = feature.properties.nom;
   const row = INVASION_ZONES[ref];
   if (!row || !epiZoneVisible(row)) {
-    return {color: "#111", weight: zoomWeight(0.25), fillOpacity: 0.04, fillColor: "#222"};
+    return Object.assign({}, zoneStroke("hidden"), {fillColor: "#222", fillOpacity: 0.04});
   }
   let fill = ZERO_FILL;
   let has = false;
@@ -1349,28 +1537,27 @@ function epiTrendsStyleFn(feature) {
     fill = rgb(lerpColor(epiInvasionDomain.palette, t));
   }
   if (!has) {
-    return {color: "#111", weight: zoomWeight(0.35), fillColor: NODATA_FILL, fillOpacity: 0.55};
+    // Fail-loud: an active zone with no count. Sits on a solid mid-grey fill,
+    // so it keeps a black stroke where every other state went off-white.
+    return Object.assign({}, zoneStroke("failloud"), {fillColor: NODATA_FILL, fillOpacity: 0.55});
   }
-  let opacity = 0.82;
-  let weight = zoomWeight(0.35);
+  let fillOpacity = 0.82;
+  let stroke = zoneStroke("rest");
   if (epiSelectedNom) {
     const focus = epiFocusNoms && epiFocusNoms.has(ref);
     if (ref === epiSelectedNom) {
-      opacity = 0.95;
-      weight = 1.8;
+      fillOpacity = 0.95;          // ring comes from the zone-selection pane
     } else if (focus) {
-      opacity = 0.78;
-      weight = 0.8;
+      fillOpacity = 0.78;
+      stroke = zoneStroke("focus");
     } else {
-      opacity = 0.12;
+      // Dimming is the focus signal: drop the stroke too, or a bright mesh of
+      // full-strength borders reads straight through the dimmed fills.
+      fillOpacity = 0.12;
+      stroke = zoneStroke("dim");
     }
   }
-  return {
-    color: ref === epiSelectedNom ? "#ffae42" : "#111",
-    weight: weight,
-    fillColor: fill,
-    fillOpacity: opacity,
-  };
+  return Object.assign({}, stroke, {fillColor: fill, fillOpacity: fillOpacity});
 }
 
 function enterEpiTrendsView() {
@@ -1400,6 +1587,7 @@ function leaveEpiTrendsView() {
   clearEpiLinks();
   clearFlowArcs();
   document.body.classList.remove("view-epi-trends", "epi-splitting");
+  refreshZoneSelection();
 }
 
 const ZERO_FILL    = "#c4bfb6";
@@ -1450,6 +1638,7 @@ function recompute() {
   } else {
     clearFlowArcs();
   }
+  restoreRoleZoneOrder();
   updateLegend(layer);
   updateLayerMeta(layer);
 }
@@ -1467,67 +1656,62 @@ function valueToColor(v, ref, layer) {
   return rgb(lerpColor(d.palette, t));
 }
 
+// Fill half of a zone's style. The stroke half comes from zoneStroke().
+// `bump` is the selected/highlighted variant: it keeps the layer's fill (so the
+// value stays readable under the ring) and lifts the opacity slightly. Both the
+// snapshot and genomic branches used to carry their own copy of this.
+function zoneFillStyle(v, has, ref, layer, bump) {
+  if (!has) return {fillOpacity: 0};
+  const isZero = currentDomain.isLog ? v <= 0 : v === 0;
+  if (bump) {
+    return {fillColor: valueToColor(v, ref, layer), fillOpacity: isZero ? 0.55 : 0.85};
+  }
+  const isOutbreak = layer && layer.palette === "outbreak";
+  return {
+    fillColor: valueToColor(v, ref, layer),
+    fillOpacity: isZero ? (isOutbreak ? 0.48 : 0.55) : (isOutbreak ? 0.72 : 0.85)
+  };
+}
+
 function styleFn(feature) {
   if (activeView === "epi-trends") return epiTrendsStyleFn(feature);
   const ref = feature.properties.nom;
   const v = currentValues.get(ref);
   const has = v != null && !Number.isNaN(v);
   const layer = getLayer(layerSelect.value);
+  // Checked BEFORE the role markers, as it was before this refactor: on the
+  // genomic tab the coordinator's highlight must keep the choropleth fill even
+  // when the active layer would paint this zone as an epicentre or a travel
+  // origin. The epicentre zones are the highest-sequence-count zones, so they
+  // are the ones most likely to be highlighted -- this collision is the normal
+  // case, not an edge case.
   if (activeView === "genomic-epidemiology" && genomicHighlightNoms.indexOf(ref) !== -1) {
-    // Coordinator-selected zone(s): KEEP the choropleth fill (so the layer value
-    // stays readable -- do NOT blank it to fillOpacity:0) and add a heavy warm
-    // terracotta outline. Mirrors the snapshot view's focus-highlight fill logic.
-    const base = has ? {
-      fillColor: valueToColor(v, ref, layer),
-      fillOpacity: (currentDomain.isLog ? v <= 0 : v === 0) ? 0.55 : 0.85
-    } : { fillOpacity: 0 };
-    return Object.assign({ color: "#9a7a16", weight: 2.4 }, base);
+    return Object.assign({}, zoneStroke("rest"), zoneFillStyle(v, has, ref, layer, true));
   }
   // In Provincial scope, suppress ALL zone-level strokes so the province
-  // outlines (drawn in the province-outline pane) are the only line work. Fills
-  // are untouched, so the choropleth (incl. zero-case muted fills) still reads;
-  // the no-data branch never fires in trends (recomputeTrendsMap coalesces
-  // missing values to 0), so no zone goes fill-less/invisible.
+  // outlines are the only line work. Fills are untouched.
   const prov = function (s) {
     if (activeView === "trends" && trendsScope === "province") s.weight = 0;
     return s;
   };
   if (isHubZone(ref, layer)) {
-    return prov({
-      color: "#111", weight: 1.6,
-      fillColor: MATRIX_ORIGIN_FILL,
-      fillOpacity: 0.92
-    });
+    return prov(Object.assign({}, zoneStroke("origin"), {
+      fillColor: MATRIX_ORIGIN_FILL, fillOpacity: 0.92
+    }));
   }
   if (isEpicenterZone(ref, layer)) {
-    return prov({
-      color: "#111", weight: zoomWeight(0.5),
-      fillColor: EPICENTER_FILL,
-      fillOpacity: 0.88
-    });
+    return prov(Object.assign({}, zoneStroke("epicenter"), {
+      fillColor: EPICENTER_FILL, fillOpacity: 0.88
+    }));
   }
+  // Map focus stays BELOW the role markers, where it has always been.
   if (activeView === "map" && ref === mapSelectedNom) {
-    // Focus highlight: a heavy dark border, distinct from the amber (#ffae42)
-    // hover. Keep whatever fill the layer would give, so the border is the
-    // focus signal and the fill still conveys the layer value/role.
-    const base = has ? {
-      fillColor: valueToColor(v, ref, layer),
-      fillOpacity: (currentDomain.isLog ? v <= 0 : v === 0) ? 0.55 : 0.85
-    } : { fillOpacity: 0 };
-    return Object.assign({ color: "#1a1a1a", weight: 2.4 }, base);
+    return prov(Object.assign({}, zoneStroke("rest"), zoneFillStyle(v, has, ref, layer, true)));
   }
   if (!has) {
-    return prov({ color: "#111", weight: zoomWeight(0.35), fillOpacity: 0 });
+    return prov(Object.assign({}, zoneStroke("nodata"), {fillOpacity: 0}));
   }
-  const isOutbreak = layer && layer.palette === "outbreak";
-  const dataOpacity = isOutbreak ? 0.72 : 0.85;
-  const mutedOpacity = isOutbreak ? 0.48 : 0.55;
-  const isZero = currentDomain.isLog ? v <= 0 : v === 0;
-  return prov({
-    color: "#111", weight: zoomWeight(0.35),
-    fillColor: valueToColor(v, ref, layer),
-    fillOpacity: isZero ? mutedOpacity : dataOpacity
-  });
+  return prov(Object.assign({}, zoneStroke("rest"), zoneFillStyle(v, has, ref, layer, false)));
 }
 
 function fmtLegend(v, round) {
@@ -1711,6 +1895,85 @@ function layerHoverTooltipHTML(feature) {
   return "<strong>" + name + "</strong><br/>" + body;
 }
 
+// Hover calls bringToFront() on the zone under the cursor, and resetStyle() on
+// mouseout restores that zone's STYLE but not its DOM order -- so it stays in
+// front and clips the heavier border of any role-marker zone (epicentre /
+// travel origin) it shares an edge with. Selection is immune because its ring
+// is drawn in a pane above the polygons; role markers still live in the polygon
+// layer, where order is all they have. Re-assert it whenever a hover ends or
+// the layer is re-styled.
+function restoreRoleZoneOrder() {
+  const layer = getLayer(layerSelect.value);
+  const wantsEpicenter = layerEpicenterHighlight(layer);
+  const wantsOrigin = layerUsesMatrix(layer) && layerOriginHighlight(layer);
+  if (!wantsEpicenter && !wantsOrigin) return;
+  geoLayer.eachLayer(function (l) {
+    if (!l.feature) return;
+    const ref = l.feature.properties.nom;
+    if (isHubZone(ref, layer) || isEpicenterZone(ref, layer)) l.bringToFront();
+  });
+}
+
+// What a click on a zone means, per view. Factored out of the polygon click
+// handler so a click landing on a flow arc can be forwarded to the polygon
+// underneath (see forwardArcClickToZone) and behave identically -- the two
+// paths cannot drift into different selection behaviour.
+function handleZoneClick(feature) {
+  if (activeView === "trends") {
+    if (trendsScope === "province") {
+      setTrendsSelection(feature.properties.province || null);
+    } else if (trendsScope === "health_zone") {
+      setTrendsSelection(feature.properties.nom || null);
+    }
+    return;   // national scope has no zone selection
+  }
+  if (activeView === "context") {
+    // Re-clicking the selected zone toggles it off (empty-map click also
+    // clears -- see the map "click" handler below).
+    if (feature.properties.nom === contextSelectedNom) clearContextSelection();
+    else selectContextZone(feature.properties.nom);
+    return;
+  }
+  if (activeView === "epi-trends") {
+    // Re-clicking the already-selected zone toggles it off. Any other zone
+    // switches the selection to it.
+    const nom = feature.properties.nom;
+    setEpiSelected(nom === epiSelectedNom ? null : nom);
+    return;
+  }
+  if (activeView === "genomic-epidemiology") {
+    // Ownership rule (R7): on the genomic view the genomic coordinator drives
+    // selection, not setMapSelection. Route the zone click to the generic hook
+    // (genomic.js maps the zone to its tip-set and highlights the tree).
+    if (genomicMapHooks) genomicMapHooks._emitZoneClick(feature.properties.nom);
+    return;
+  }
+  if (activeView === "map") {
+    // One "focused zone" for the snapshot view: click to focus, click the
+    // focused zone again to clear. Focus drives the info box, the flow-arc
+    // origin, and the matrix travel origin. No click-to-zoom.
+    setMapSelection(feature.properties.nom);
+  }
+}
+
+// Arrows annotate the selected zone rather than acting as controls, and they
+// sit in a pane above the zones -- so a click landing on one used to be
+// swallowed outright, making every arrow a dead stripe across an otherwise
+// clickable polygon. Forward it to the polygon underneath instead.
+//
+// bubblingMouseEvents stays false on the arcs: with no zone under the cursor
+// the click must still NOT reach the map handler, which would clear the
+// selection and take the arrows with it.
+function forwardArcClickToZone(ev) {
+  L.DomEvent.stop(ev);
+  const src = ev.originalEvent;
+  const pt = (src && src.clientX != null)
+    ? {x: src.clientX, y: src.clientY}
+    : lastPointerClient;
+  const layer = zoneLayerAtClientPoint(pt);
+  if (layer && layer.feature) handleZoneClick(layer.feature);
+}
+
 const geoLayer = L.geoJSON(PAYLOAD.geometry, {
   style: styleFn,
   onEachFeature: function (feature, layer) {
@@ -1722,13 +1985,25 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         // not what a mid-move mouseover creates). Suppress it entirely while
         // moving -- a real hover after the map settles re-fires mouseover.
         if (mapMoving) return;
-        // The genomic tab uses the map only as a backdrop; it must NOT open the
-        // snapshot's layer-value zone tooltips (the default fall-through below).
-        // Without this guard, hovering zones opens per-hover tooltips that the
-        // "tooltipopen" sweep never closes (it only covers marker/arc layers), so
-        // dropped mouseouts on fast motion strand them. Genomic zone interaction
-        // arrives with the coordinator in a later phase.
-        if (activeView === "genomic-epidemiology") return;
+        // Requirement: a selected zone does not react to hover. That is about
+        // STYLING only -- it keeps its tooltip, its floating readout and its
+        // province-hover behaviour. Guard the setStyle/bringToFront pairs
+        // below, never the whole handler.
+        const isSelected = currentSelectedNoms().indexOf(feature.properties.nom) !== -1;
+        if (activeView === "genomic-epidemiology") {
+          // Zones are clickable here -- the click routes to the genomic
+          // coordinator -- so they get the same hover lift as everywhere else.
+          // What they must NOT get is the snapshot's layer-value tooltip (the
+          // default fall-through below): those are bound per-hover, and the
+          // "tooltipopen" sweep only covers marker/arc layers, so a dropped
+          // mouseout on fast motion strands one open. Lift the border, bind
+          // nothing.
+          if (!isSelected) {
+            e.target.setStyle(zoneStroke("hover"));
+            e.target.bringToFront();
+          }
+          return;
+        }
         if (activeView === "trends") {
           if (trendsScope === "national") return;
           if (trendsScope === "province") {
@@ -1738,27 +2013,43 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
             setTrendsProvinceHover(feature.properties.province);
             return;
           }
-          e.target.setStyle({weight: 1.6, color: "#ffae42"});
-          e.target.bringToFront();
+          if (!isSelected) {
+            e.target.setStyle(zoneStroke("hover"));
+            e.target.bringToFront();
+          }
           return;
         }
         if (activeView === "context") {
+          if (!isSelected) {
+            e.target.setStyle(zoneStroke("hover"));
+            e.target.bringToFront();
+          }
           return;
         }
         if (activeView === "epi-trends") {
-          e.target.setStyle({weight: 1.6, color: "#ffae42"});
-          e.target.bringToFront();
-          updateEpiFloat(feature.properties.nom, e.latlng);
+          if (!isSelected) {
+            e.target.setStyle(zoneStroke("hover"));
+            e.target.bringToFront();
+          }
+          updateEpiFloat(feature.properties.nom, e.latlng);   // fires for selected zones too
           return;
         }
-        e.target.setStyle({weight: 1.6, color: "#ffae42"});
-        e.target.bringToFront();
+        if (!isSelected) {
+          e.target.setStyle(zoneStroke("hover"));
+          e.target.bringToFront();
+        }
         // Hover no longer fills the info box (that follows the focused zone).
         // Show a lightweight, layer-aware tooltip instead.
         e.target.bindTooltip(layerHoverTooltipHTML(feature), {sticky: true, direction: "top"}).openTooltip(e.latlng);
       },
       mouseout: function(e) {
-        if (activeView === "genomic-epidemiology") return;   // no zone hover decoration on the genomic tab
+        if (activeView === "genomic-epidemiology") {
+          // Mirror of the mouseover lift. No tooltip was bound, so nothing to
+          // unbind; resetStyle cannot disturb a selected zone's ring, which
+          // lives in the zone-selection pane.
+          geoLayer.resetStyle(e.target);
+          return;
+        }
         if (activeView === "trends") {
           if (trendsScope === "province") {
             // Zone was never restyled on hover in province scope; just clear the
@@ -1767,16 +2058,10 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
             return;
           }
           geoLayer.resetStyle(e.target);
-          if (trendsScope === "health_zone" && trendsSelectedKey &&
-              feature.properties.nom === trendsSelectedKey) {
-            e.target.setStyle({weight: 2, color: "#ffae42"});
-          }
           return;
         }
         if (activeView === "context") {
-          if (e.target !== contextSelectedLayer) {
-            geoLayer.resetStyle(e.target);
-          }
+          geoLayer.resetStyle(e.target);
           return;
         }
         if (activeView === "epi-trends") {
@@ -1786,56 +2071,12 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         }
         if (e.target.getTooltip()) e.target.unbindTooltip();
         geoLayer.resetStyle(e.target);
-        // resetStyle re-applies styleFn, which already paints the focus border
-        // for the focused zone, so leaving a focused zone keeps its highlight.
+        // Selection is drawn in the zone-selection pane, so resetStyle here
+        // cannot disturb it -- there is no focus border left in styleFn to lose.
       },
       click: function(e) {
-        if (activeView === "trends") {
-          L.DomEvent.stop(e);
-          if (trendsScope === "national") return;
-          if (trendsScope === "province") {
-            setTrendsSelection(feature.properties.province || null);
-            return;
-          }
-          if (trendsScope === "health_zone") {
-            setTrendsSelection(feature.properties.nom || null);
-            return;
-          }
-          return;
-        }
-        if (activeView === "context") {
-          L.DomEvent.stop(e);
-          // Re-clicking the selected zone toggles it off (empty-map click also
-          // clears -- see the map "click" handler below).
-          if (feature.properties.nom === contextSelectedNom) clearContextSelection();
-          else selectContextZone(feature.properties.nom, e.target);
-          return;
-        }
-        if (activeView === "epi-trends") {
-          L.DomEvent.stop(e);
-          // Re-clicking the already-selected zone toggles it off. Any other
-          // zone switches the selection to it. (Clicking empty map also
-          // clears -- see the map "click" handler below.)
-          const nom = feature.properties.nom;
-          setEpiSelected(nom === epiSelectedNom ? null : nom);
-          return;
-        }
-        if (activeView === "genomic-epidemiology") {
-          // Ownership rule (R7): on the genomic view the genomic coordinator drives
-          // selection, not setMapSelection. Route the zone click to the generic hook
-          // (genomic.js maps the zone to its tip-set and highlights the tree).
-          L.DomEvent.stop(e);
-          if (genomicMapHooks) genomicMapHooks._emitZoneClick(feature.properties.nom);
-          return;
-        }
-        if (activeView === "map") {
-          L.DomEvent.stop(e);
-          // One "focused zone" for the snapshot view: click to focus, click the
-          // focused zone again to clear. Focus drives the info box, the flow-arc
-          // origin, and the matrix travel origin. No click-to-zoom.
-          setMapSelection(feature.properties.nom);
-          return;
-        }
+        L.DomEvent.stop(e);
+        handleZoneClick(feature);
       },
       dblclick: function(e) {
         if (activeView === "context") return;
@@ -1847,34 +2088,20 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         map.fitBounds(e.target.getBounds(), {padding:[40,40]});
       }
     });
+    // Registered separately from the handler map above so it runs whichever
+    // branch that mouseout took (several return early).
+    layer.on("mouseout", restoreRoleZoneOrder);
   }
 }).addTo(map);
 
-// Re-apply zone borders (e.g. after a zoom so zoomWeight() picks up the new
-// zoom). styleFn already encodes the map/epi-trends selection, so re-styling the
-// whole layer preserves those; the trends/context selection highlight lives
-// outside styleFn, so re-apply it.
+// Re-apply zone borders (e.g. after a zoom, so the weight ramp picks up the new
+// zoom). styleFn encodes every resting/tier style; selection lives in its own
+// pane and is rebuilt here rather than re-fronted, which is what the old
+// per-view bringToFront() blocks were doing.
 function restyleZonesForActiveView() {
   geoLayer.setStyle(styleFn);
-  if (activeView === "trends" && trendsScope === "health_zone" && trendsSelectedKey) {
-    geoLayer.eachLayer(function (layer) {
-      if (layer.feature && layer.feature.properties.nom === trendsSelectedKey) {
-        layer.setStyle({weight: 2, color: "#ffae42"});
-        layer.bringToFront();
-      }
-    });
-  } else if (activeView === "context" && contextSelectedLayer) {
-    contextSelectedLayer.setStyle({weight: 1.6, color: "#ffae42"});
-    contextSelectedLayer.bringToFront();
-  } else if (activeView === "genomic-epidemiology" && genomicHighlightNoms.length) {
-    // styleFn already paints the outline, but bring the selected zones to front so
-    // their border isn't hidden under neighbours after a restyle.
-    geoLayer.eachLayer(function (layer) {
-      if (layer.feature && genomicHighlightNoms.indexOf(layer.feature.properties.nom) !== -1) {
-        layer.bringToFront();
-      }
-    });
-  }
+  restoreRoleZoneOrder();
+  refreshZoneSelection();
 }
 
 map.on("zoomend", restyleZonesForActiveView);
@@ -1919,9 +2146,57 @@ map.on("movestart", function () {
 // The mapMoving guard on mouseover means nothing should have accumulated during
 // the move, but tear down once more as a safety net (e.g. a mouseover that
 // raced the movestart, or a marker/arc tooltip Leaflet opened mid-drag).
+// A pan that starts ON a zone leaves the cursor inside that same zone when it
+// ends. The hover lift was torn down at movestart, and Leaflet fires no fresh
+// mouseover because the pointer never left -- so the border stays un-lifted
+// until you move out and back in. Track the pointer and restore the lift for
+// whatever zone sits under it once the map settles.
+//
+// Border only, deliberately: re-opening a tooltip here is the stranding hazard
+// tearDownHoverDecoration() exists to prevent, and the spatial-risk float
+// readout needs a latlng this path does not have. Both come back on the next
+// real mouseover.
+let lastPointerClient = null;
+document.addEventListener("mousemove", function (e) {
+  lastPointerClient = {x: e.clientX, y: e.clientY};
+}, {passive: true});
+
+function zoneLayerAtClientPoint(pt) {
+  if (!pt) return null;
+  // Scan the whole stack rather than just the topmost element: flow arcs and
+  // epi-links sit in panes above the zones, and what we want is the polygon
+  // underneath them. Elements with pointer-events:none (the selection rings)
+  // are already excluded by the browser.
+  const els = document.elementsFromPoint
+    ? document.elementsFromPoint(pt.x, pt.y)
+    : [document.elementFromPoint(pt.x, pt.y)];
+  let found = null;
+  for (let i = 0; i < els.length && !found; i++) {
+    const el = els[i];
+    if (!el) continue;
+    geoLayer.eachLayer(function (layer) {
+      if (!found && layer._path === el) found = layer;
+    });
+  }
+  return found;
+}
+
+function restoreHoverUnderCursor() {
+  // Mirrors which views lift a zone border on hover (see the mouseover
+  // handler): national scope has no zone hover, and province scope hovers the
+  // parent province outline rather than the zone.
+  if (activeView === "trends" && trendsScope !== "health_zone") return;
+  const layer = zoneLayerAtClientPoint(lastPointerClient);
+  if (!layer || !layer.feature) return;
+  if (currentSelectedNoms().indexOf(layer.feature.properties.nom) !== -1) return;
+  layer.setStyle(zoneStroke("hover"));
+  layer.bringToFront();
+}
+
 map.on("moveend", function () {
   mapMoving = false;
   tearDownHoverDecoration();
+  restoreHoverUnderCursor();
 });
 
 map.on("click", function() {
@@ -1977,8 +2252,6 @@ const zoneSearchResults = document.getElementById("zone-search-results");
 const zoneSearchWrap = document.getElementById("zone-search-wrap");
 let zoneSearchMatches = [];
 let zoneSearchActiveIdx = -1;
-let searchHighlightLayer = null;
-let searchHighlightTimer = null;
 
 function findGeoLayerByNom(nom) {
   let found = null;
@@ -1988,17 +2261,6 @@ function findGeoLayerByNom(nom) {
     }
   });
   return found;
-}
-
-function clearSearchHighlight() {
-  if (searchHighlightTimer) {
-    clearTimeout(searchHighlightTimer);
-    searchHighlightTimer = null;
-  }
-  if (searchHighlightLayer && searchHighlightLayer !== contextSelectedLayer) {
-    geoLayer.resetStyle(searchHighlightLayer);
-  }
-  searchHighlightLayer = null;
 }
 
 function closeZoneSearchResults() {
@@ -2056,10 +2318,9 @@ function selectHealthZone(nom) {
   const displayName = feature.properties.name || nom;
 
   if (activeView === "context") {
-    selectContextZone(nom, layer);
+    selectContextZone(nom);
     map.fitBounds(layer.getBounds(), {padding: [40, 40], maxZoom: 10});
   } else if (activeView === "map") {
-    clearSearchHighlight();
     // Searching focuses the zone (persistent highlight + info box come from the
     // focus state itself, not a transient overlay). Keep the zoom-to-frame: a
     // searched zone may be offscreen, unlike an already-visible clicked one.
@@ -2125,20 +2386,32 @@ function themeVar(name, fallback) {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || fallback;
 }
-function provinceOutlineStyle(selected) {
+function provinceBaseWeight() {
   const provinceMode = activeView === "trends" && trendsScope === "province";
-  const baseWeight = provinceMode
-    ? parseFloat(themeVar("--province-outline-weight-wide", "1.4"))
-    : parseFloat(themeVar("--province-outline-weight", "1"));
-  const selWeight = provinceMode
-    ? parseFloat(themeVar("--province-outline-weight-wide-hover", "2"))
-    : parseFloat(themeVar("--province-outline-weight-hover", "1.5"));
+  return provinceMode
+    ? zoneNum("--province-outline-weight-wide", "1.4")
+    : zoneNum("--province-outline-weight", "1");
+}
+
+// Provinces keep their gold resting colour -- that is what makes the province
+// layer read as a different layer from the zones -- but adopt the same state
+// grammar: hover is a white lift, selection is the cased amber ring drawn in
+// the province-selection pane. A SELECTED province draws its RESTING outline;
+// without that it would show a red base line under an amber ring.
+function provinceOutlineStyle(state) {
+  const provinceMode = activeView === "trends" && trendsScope === "province";
+  if (state === "hover") {
+    return {
+      color: themeVar("--province-hover-stroke", "#ffffff"),
+      opacity: zoneNum("--province-hover-stroke-opacity", "0.98"),
+      weight: provinceBaseWeight() * zoneNum("--province-hover-weight-mult", "1.7"),
+      fillOpacity: 0,
+    };
+  }
   return {
-    color: selected
-      ? themeVar("--province-outline-hover", "#b23b2e")
-      : themeVar("--province-outline", "#9b7d4e"),
-    weight: selected ? selWeight : baseWeight,
-    opacity: selected ? 1 : (provinceMode ? 0.95 : 0.88),
+    color: themeVar("--province-outline", "#9b7d4e"),
+    weight: provinceBaseWeight(),
+    opacity: provinceMode ? 0.95 : 0.88,
     fillOpacity: 0,
   };
 }
@@ -2149,19 +2422,43 @@ const provinceOutlineLayer = L.geoJSON(PAYLOAD.province_boundaries || {type:"Fea
   pane: "province-outline",
   interactive: false,
   style: function() {
-    return provinceOutlineStyle(false);
+    return provinceOutlineStyle("rest");
   },
 });
 
-function applyProvinceOutlineStyles(selectedProvince) {
-  trendsHoveredProvince = selectedProvince || null;
-  document.body.classList.toggle("trends-province-hovered", !!trendsHoveredProvince);
-  provinceOutlineLayer.eachLayer(function(layer) {
-    const match = trendsHoveredProvince &&
-      layer.feature.properties.province === trendsHoveredProvince;
-    layer.setStyle(provinceOutlineStyle(!!match));
-    if (match) layer.bringToFront();
+// 560: above the province outlines (550). Province rings are NOT zoom-scaled --
+// they multiply the province resting weight, which is fixed.
+const provinceRings = SelectionRing("province-selection", 560, function () {
+  const base = provinceBaseWeight();
+  return {
+    inner: base * zoneNum("--province-selected-weight-mult", "2.2"),
+    casing: base * zoneNum("--province-selected-casing-mult", "3.6")
+  };
+});
+
+function provinceFeaturesFor(name) {
+  if (!name) return [];
+  const fc = PAYLOAD.province_boundaries || {features: []};
+  return (fc.features || []).filter(function (f) {
+    return f.properties && f.properties.province === name;
   });
+}
+
+// Hover and selection were a single variable: whichever province was passed in
+// got the red style, and hover was suppressed entirely once anything was
+// selected. They are now distinct states -- hovering a non-selected province
+// still lifts it while another is selected, and the selected one ignores hover.
+function applyProvinceOutlineStyles(hoveredProvince) {
+  trendsHoveredProvince = hoveredProvince || null;
+  const selected = (activeView === "trends" && trendsScope === "province")
+    ? trendsSelectedKey : null;
+  provinceOutlineLayer.eachLayer(function (layer) {
+    const name = layer.feature.properties.province;
+    const isHover = !!trendsHoveredProvince && name === trendsHoveredProvince && name !== selected;
+    layer.setStyle(provinceOutlineStyle(isHover ? "hover" : "rest"));
+    if (isHover) layer.bringToFront();
+  });
+  provinceRings.set(provinceFeaturesFor(selected));
 }
 
 function escHtml(s) {
@@ -2177,8 +2474,9 @@ function renderTrendsPanel(_unused) {
 }
 
 function setTrendsProvinceHover(province) {
-  // Kept for compatibility; selection-driven plots replace hover plots.
-  if (activeView === "trends" && trendsScope === "province" && !trendsSelectedKey) {
+  // No longer gated on "nothing selected": a selected province ignores hover,
+  // but its neighbours still respond.
+  if (activeView === "trends" && trendsScope === "province") {
     applyProvinceOutlineStyles(province || null);
   }
 }
@@ -2523,26 +2821,12 @@ function renderTrendsPlots() {
 function setTrendsSelection(key, opts) {
   opts = opts || {};
   trendsSelectedKey = key || null;
-  if (trendsScope === "province") {
-    applyProvinceOutlineStyles(trendsSelectedKey);
-  } else if (trendsScope === "health_zone") {
-    applyProvinceOutlineStyles(null);
-  } else {
-    applyProvinceOutlineStyles(null);
-  }
+  // Repaint outlines and the province ring for the new selection. All three
+  // scopes want the same call now that the ring reads trendsSelectedKey itself;
+  // the branches only survived from when this passed the selection in.
+  applyProvinceOutlineStyles(null);
   renderTrendsPlots();
-  if (activeView === "trends") {
-    // Restyle health-zone polygons to emphasize selection.
-    geoLayer.setStyle(styleFn);
-    if (trendsScope === "health_zone" && trendsSelectedKey) {
-      geoLayer.eachLayer(function(layer) {
-        if (layer.feature && layer.feature.properties.nom === trendsSelectedKey) {
-          layer.setStyle({weight: 2, color: "#ffae42"});
-          layer.bringToFront();
-        }
-      });
-    }
-  }
+  if (activeView === "trends") geoLayer.setStyle(styleFn);
   if (opts.fromSearch) {
     const input = document.getElementById("trends-search-input");
     const results = document.getElementById("trends-search-results");
@@ -2552,6 +2836,7 @@ function setTrendsSelection(key, opts) {
       results.innerHTML = "";
     }
   }
+  refreshZoneSelection();
 }
 
 function setTrendsScope(scope) {
@@ -2563,6 +2848,7 @@ function setTrendsScope(scope) {
     geoLayer.setStyle(styleFn);
     showProvinceOutlines();
   }
+  refreshZoneSelection();
 }
 
 function renderTrendsSearchResults(query) {
@@ -2792,27 +3078,18 @@ function renderNationalContextPanel(nom) {
 }
 
 let contextSelectedNom = null;
-let contextSelectedLayer = null;
 
 function clearContextSelection() {
-  if (contextSelectedLayer) {
-    geoLayer.resetStyle(contextSelectedLayer);
-    contextSelectedLayer = null;
-  }
   contextSelectedNom = null;
   renderContextPanel(null);
+  refreshZoneSelection();
 }
 
-function selectContextZone(nom, layer) {
-  if (!nom || !layer) return;
-  if (contextSelectedLayer && contextSelectedLayer !== layer) {
-    geoLayer.resetStyle(contextSelectedLayer);
-  }
+function selectContextZone(nom) {
+  if (!nom) return;
   contextSelectedNom = nom;
-  contextSelectedLayer = layer;
-  layer.setStyle({weight: 1.6, color: "#ffae42"});
-  layer.bringToFront();
   renderContextPanel(nom);
+  refreshZoneSelection();
 }
 
 function renderContextPanel(nom) {
@@ -2854,6 +3131,14 @@ function hideProvinceOutlines() {
   if (map.hasLayer(provinceOutlineLayer)) {
     map.removeLayer(provinceOutlineLayer);
   }
+  // Clear the ring explicitly rather than letting applyProvinceOutlineStyles()
+  // infer it from state. Callers reach here BEFORE clearing trendsSelectedKey
+  // and before activeView moves off "trends" (see leaveTrendsView), so the
+  // inference would re-draw the ring instead of removing it -- and the ring
+  // lives in its own pane, so dropping provinceOutlineLayer does not take it
+  // with us. Unreachable today (tab switches are full page loads), but live
+  // the moment soft navigation lands.
+  provinceRings.clear();
   applyProvinceOutlineStyles(null);
 }
 
@@ -2980,15 +3265,9 @@ function recomputeTrendsMap() {
     isLog: true,
     palette: PALETTES[layer.palette] || REDS,
   };
+  // No selection re-paint needed: the ring lives in its own pane and survives
+  // this restyle untouched. This fires on every time-slider tick.
   geoLayer.setStyle(styleFn);
-  if (activeView === "trends" && trendsScope === "health_zone" && trendsSelectedKey) {
-    geoLayer.eachLayer(function(layer) {
-      if (layer.feature && layer.feature.properties.nom === trendsSelectedKey) {
-        layer.setStyle({weight: 2, color: "#ffae42"});
-        layer.bringToFront();
-      }
-    });
-  }
 }
 
 function restoreCaseMarkersForView(view) {
@@ -3063,6 +3342,7 @@ function leaveTrendsView() {
     layerSelect.value = savedMapLayerId;
     recompute();
   }
+  refreshZoneSelection();
 }
 
 function setActiveView(view) {
@@ -3094,6 +3374,7 @@ function setActiveView(view) {
     }
   }
   activeView = view;
+  refreshZoneSelection();
   restoreCaseMarkersForView(view);
   restoreFlowArcsForView(view);
   document.body.classList.toggle("view-map", view === "map");
@@ -3465,7 +3746,7 @@ function handleCaseMarkerClick(nom) {
     if (nom === contextSelectedNom) clearContextSelection();
     else {
       const lyr = findGeoLayerByNom(nom);
-      if (lyr) selectContextZone(nom, lyr);
+      if (lyr) selectContextZone(nom);
     }
     return true;
   }
@@ -3534,15 +3815,13 @@ genomicMapHooks = (function () {
     highlightZones: function (noms) {
       genomicHighlightNoms = (noms || []).slice();
       geoLayer.setStyle(styleFn);
-      geoLayer.eachLayer(function (layer) {
-        if (layer.feature && genomicHighlightNoms.indexOf(layer.feature.properties.nom) !== -1) layer.bringToFront();
-      });
       const sel = {};
       genomicHighlightNoms.forEach(function (n) { sel[n] = true; });
       genomeLayer.eachLayer(function (m) {
         const el = m.getElement && m.getElement();
         if (el && m._bdbvGenome) el.classList.toggle("genome-marker-sel", !!sel[m._bdbvGenome.nom]);
       });
+      refreshZoneSelection();
     },
   };
 })();
