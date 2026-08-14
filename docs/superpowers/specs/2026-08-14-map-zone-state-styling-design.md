@@ -346,12 +346,10 @@ already has for zone borders, and acceptable for the same reason.
 | Trends — health zone | token | white lift | cased amber |
 | Spatial risk | token, tiered (focus / dim) | white lift | cased amber |
 | Context | token | white lift (new) | cased amber |
-| Genomic | token | — (unchanged) | cased amber, multi-zone |
+| Genomic | token | white lift | cased amber, multi-zone |
 
-Two deliberate asymmetries:
+One deliberate asymmetry:
 
-- **Genomic keeps no zone hover.** Its zone interaction stays minimal until the coordinator work
-  lands, matching the existing comment at `engine.js:1725-1731`. Its selection still unifies.
 - **Trends province scope keeps zone strokes suppressed.** Province outlines are the line work in
   that scope; 519 off-white zone borders underneath would fight them. Hovering a zone there
   continues to highlight its parent province rather than the zone, as it does today — the
@@ -416,8 +414,8 @@ On a real build (`python3.9`, sibling `../BDBV2026-Data/build`, served over HTTP
 
 ## Out of scope
 
-Case markers, flow arcs, genome-count circles, and the epi-links overlay. Genomic zone hover is
-covered under §Per-view behaviour as a deliberate asymmetry rather than repeated here.
+Case markers, genome-count circles, and the epi-links overlay. Flow arcs are unchanged visually,
+but their click handling was revised — see §Revisions after manual testing.
 
 ## Files touched
 
@@ -434,6 +432,42 @@ by hand.
 (`applyProvinceOutlineStyles` at `6097`, and the trends/context handlers below it). It does not
 reference `engine.js` and predates the assets split, so it is the legacy monolith and **is not
 updated** by this work. The divergence is intentional, not a bug.
+
+## Revisions after manual testing
+
+Four behaviours were changed after walking the built dashboard. Each is implemented and verified;
+this section records them so the spec does not assert decisions that were later reversed.
+
+**Genomic zones gain the hover lift** — reversing this spec's original "genomic keeps no zone
+hover" asymmetry. The guard that suppressed it dated from before the genomic coordinator existed,
+and its stated reason was specifically the layer-value tooltip: those are bound per hover, and the
+`tooltipopen` sweep covers marker and arc layers but not zones, so a dropped mouseout on fast
+motion strands one open. Zones on that tab are clickable — the click routes to the coordinator — so
+they now take the same white lift as every other tab while still binding no tooltip.
+
+**The hover lift survives a pan.** `movestart` tears hover decoration down and restyles. If a drag
+starts and ends inside the same polygon the pointer never leaves it, so Leaflet fires no fresh
+`mouseover` and the lift stayed gone until the cursor left and re-entered. The pointer position is
+now tracked, and on `moveend` the lift is re-applied to whichever zone sits under it. Border only:
+re-opening a tooltip on `moveend` is the exact stranding hazard `tearDownHoverDecoration()` exists
+to prevent, and the spatial-risk float readout needs a `latlng` that path does not have. Both
+return on the next real mouseover. Province outlines have the same gap and are not covered.
+
+**Flow-arc clicks forward to the polygon underneath.** Arcs are annotations, not controls, but they
+sit in a pane above the zones with `bubblingMouseEvents: false`, so a click landing on one was
+swallowed — making every arc a dead stripe across an otherwise clickable polygon. The per-view
+click logic is now a shared `handleZoneClick(feature)` called by both the polygon handler and the
+arc forwarder, so the two paths cannot drift. `bubblingMouseEvents` stays `false`: with no zone
+beneath the cursor the click must still not reach the map handler, which would clear the selection
+and take the arcs with it. Chevron wing markers were already `interactive: false`.
+
+**Role-marker draw order is re-asserted.** Hover calls `bringToFront()`, and `resetStyle()` on
+mouseout restores a zone's style but not its DOM order — so a hovered neighbour stayed in front and
+clipped the heavier border of an adjacent epicentre or travel-origin zone. Selection is immune
+because its ring is in a higher pane; role markers live in the polygon layer, where draw order is
+all they have. Order is now re-asserted when a hover ends, after any full restyle, and on layer
+change — the last also fixing a pre-existing case where role zones were in front only by accident
+of feature order. During a hover the hovered zone still outranks role markers, which is intended.
 
 ## Review dispositions
 
