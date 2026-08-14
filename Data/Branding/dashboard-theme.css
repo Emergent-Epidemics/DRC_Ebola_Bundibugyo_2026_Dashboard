@@ -18,15 +18,68 @@
   --link: #7c4a12;
   --link-hover: var(--maroon);
   --province-outline: #9b7d4e;
-  --province-outline-hover: #b23b2e;
   --province-outline-weight: 1;
-  --province-outline-weight-hover: 1.5;
   /* Slightly heavier when the Trends tab is in Provincial scope, but nowhere
      near as thick as the old 2.4/3.6 defaults -- those made the boundaries
      look like they'd been drawn with a marker, especially now that the
      province shapefile has more detail (more vertices per km of coastline). */
   --province-outline-weight-wide: 1.4;
-  --province-outline-weight-wide-hover: 2;
+  /* ── Health-zone state styling ──────────────────────────────────────────
+     One resting / hover / selected grammar for zone polygons, shared by every
+     tab. See docs/superpowers/specs/2026-08-14-map-zone-state-styling-design.md.
+
+     Every tier's weight is a MULTIPLIER on zoneWeight(zoom), never a fixed px.
+     Fixed weights were the old bug: a 1.6px hub stroke or a 0.8px focus stroke
+     renders thinner than the resting border at some zooms and thicker at
+     others. Multipliers hold the hierarchy at every zoom.
+
+     This whole layer is optional -- build_dashboard.py only appends it when
+     non-empty -- so engine.js carries each value below as its themeVar()
+     fallback, and tests/test_zone_state_styling.py fails the build if the two
+     ever drift apart. */
+  --zone-stroke: #fdfaf4;
+  --zone-stroke-opacity: 0.7;
+  --zone-stroke-weight-base: 1.7;
+  /* ramp-min is both the z5 intercept and the clamp floor, deliberately: the
+     map sets no minZoom, so below z5 the border simply stops thinning. */
+  --zone-stroke-ramp-min: 0.6;
+  --zone-stroke-ramp-max: 1.15;
+  --zone-stroke-ramp-slope: 0.1;
+  --zone-hover-stroke: #ffffff;
+  --zone-hover-stroke-opacity: 0.98;
+  --zone-hover-weight-mult: 1.7;
+  --zone-selected-stroke: #ffae42;
+  --zone-selected-stroke-opacity: 1;
+  --zone-selected-weight-mult: 2.2;
+  --zone-selected-casing: #5c3a12;
+  --zone-selected-casing-opacity: 0.9;
+  --zone-selected-casing-mult: 3.6;
+  /* Fill-less zones: an off-white stroke over the CARTO light basemap is
+     invisible, so these keep a warm grey. */
+  --zone-nodata-stroke: #6b635a;
+  --zone-nodata-stroke-opacity: 0.45;
+  --zone-nodata-weight-mult: 1;
+  --zone-hidden-weight-mult: 0.7;
+  /* "Active zone with no count" is a should-never-happen state sitting on a
+     solid mid-grey fill. It stays loud and stays black. */
+  --zone-failloud-stroke: #111;
+  --zone-failloud-stroke-opacity: 1;
+  --zone-failloud-weight-mult: 1;
+  --zone-focus-weight-mult: 1.35;
+  /* Spatial risk dims non-focus zones by fill; without this their borders stay
+     at full strength and a bright mesh fights the dimming. */
+  --zone-dim-stroke-opacity: 0.25;
+  --zone-role-stroke: #111;
+  --zone-role-weight-mult-origin: 1.6;
+  --zone-role-weight-mult-epicenter: 1.35;
+  /* Provinces get their own multipliers: zone rings are zoom-scaled and
+     province rings are not, so sharing multipliers would make which ring reads
+     as "heavier" flip mid-zoom. */
+  --province-hover-stroke: #ffffff;
+  --province-hover-stroke-opacity: 0.98;
+  --province-hover-weight-mult: 1.7;
+  --province-selected-weight-mult: 2.2;
+  --province-selected-casing-mult: 3.6;
   --case-marker: #5b86b3;
   --case-marker-opacity: 0.85;
   --green: #285943;
