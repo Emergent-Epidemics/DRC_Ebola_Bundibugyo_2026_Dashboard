@@ -27,6 +27,12 @@ let activeView = "map";
 // module init -- leaving the declaration next to its users put it in the
 // temporal dead zone at that point and threw on every page load.
 let contextSelectedNom = null;
+// Assigned by wirePanelToggles() far below; lets the zone search open a
+// collapsed detail panel on narrow screens without duplicating
+// setCollapsed()'s glyph handling. Declared up here rather than beside that
+// IIFE so the binding exists before any earlier code can reach it -- the same
+// precaution contextSelectedNom above needed.
+let expandPanel = function() {};
 // Genomic tab (see genomic.js): the shared engine exposes only GENERIC, tip-
 // agnostic map hooks. `genomicMapHooks` is assigned once the map/layers exist
 // (below) and drives zone-level selection subscribe/emit + zone highlighting;
@@ -2267,12 +2273,16 @@ const ZONE_SEARCH_VIEWS = {
     kinds: ["health_zone"],
     placeholder: "ui.zone_search_placeholder",
     aria: "ui.zone_search",
+    // Collapsible detail panel to open after a narrow-screen selection; absent
+    // on views that have none. See pick() in wireZoneSearch().
+    panel: "info",
     select: function(entry) { setMapSelection(entry.id); },
   },
   "context": {
     kinds: ["health_zone"],
     placeholder: "ui.zone_search_placeholder",
     aria: "ui.zone_search",
+    panel: "context",
     select: function(entry) { selectContextZone(entry.id); },
   },
   "trends": {
@@ -2478,7 +2488,15 @@ function findGeoLayerByNom(nom) {
     close();
     // Desktop: stay focused so the next search starts immediately. Narrow:
     // the on-screen keyboard would cover half the map we just zoomed.
-    if (isNarrow()) input.blur();
+    if (isNarrow()) {
+      input.blur();
+      // wirePanelToggles() auto-collapses every panel on load at this width,
+      // so without this the only feedback from a search is a zoom and a
+      // highlight on a map the user may not recognise. #context-national is
+      // deliberately left collapsed: the search selects a ZONE, and #context
+      // is where zone context appears.
+      if (view.panel) expandPanel(view.panel);
+    }
   }
 
   input.addEventListener("input", function() { render(input.value); });
@@ -4209,6 +4227,14 @@ wireModal("terms-modal", ["terms-btn", "header-terms-btn"], "terms-close");
       btn.textContent = "−";
     }
   }
+  expandPanel = function(panelId) {
+    const panel = document.getElementById(panelId);
+    if (!panel || !panel.classList.contains("collapsed")) return;
+    const btn = panelId === "info"
+      ? document.getElementById("info-toggle")
+      : document.querySelector('.panel-toggle[data-target="' + panelId + '"]');
+    if (btn) setCollapsed(panel, btn, false);
+  };
   const infoPanel = document.getElementById("info");
   const infoBtn = document.getElementById("info-toggle");
   if (infoPanel && infoBtn) {

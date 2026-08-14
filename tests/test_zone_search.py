@@ -372,3 +372,17 @@ def test_genomic_publishes_its_panel_width():
     single writer of the inline px width, so it must publish it too."""
     genomic = GENOMIC.read_text(encoding="utf-8")
     assert "--genomic-panel-width" in genomic
+
+
+def test_zone_search_view_panels_name_real_elements():
+    """ZONE_SEARCH_VIEWS[...].panel is passed straight to getElementById().
+    A typo would fail silently -- expandPanel() would find nothing and simply
+    not expand, with no error anywhere."""
+    engine = _engine()
+    start = engine.index("const ZONE_SEARCH_VIEWS = {")
+    block = engine[start:engine.index("\n};", start)]
+    panels = re.findall(r'panel:\s*"([a-z-]+)"', block)
+    assert panels, "no panel fields found -- did the field get renamed?"
+    chrome = _chrome()
+    for pid in panels:
+        assert f'id="{pid}"' in chrome, f'ZONE_SEARCH_VIEWS names panel #{pid}, absent from chrome.py'
