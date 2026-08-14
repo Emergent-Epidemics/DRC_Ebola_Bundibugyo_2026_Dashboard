@@ -2,7 +2,7 @@
 
 Date: 2026-08-14
 Branch: `unified-zone-search`
-Revision: 2 — incorporates the review in
+Revision: 3 — incorporates both passes of
 `2026-08-14-unified-zone-search-design-review.md` (see §Review dispositions).
 
 ## Problem
@@ -27,7 +27,8 @@ branch (`engine.js:2320-2322`) that no visible control can reach.
 ## Goals
 
 1. One search component, one behaviour, one visual treatment, across all five
-   non-stub tabs.
+   non-stub tabs — with one deliberate exception: the search is hidden on the
+   Genomic tab below 700px (see §Known gaps).
 2. It stands alone over the map rather than being embedded in a panel or rail.
 3. Full keyboard operation: type, `↑`/`↓` through matches, `Enter` to lock in.
 4. Selecting a location always zooms the map to it, on every tab.
@@ -42,8 +43,14 @@ branch (`engine.js:2320-2322`) that no visible control can reach.
   clicking empty map (or the tab's own affordance).
 - Making the Genomic tab responsive. `#genomic-panel` has no `max-width:700px`
   rule at all, so at 360px it is `70vw = 252px` and the map is a ~108px strip.
-  Pre-existing; this spec works around it (see §Placement, band C) rather than
-  fixing it.
+  Pre-existing; this spec works around it rather than fixing it.
+
+## Known gaps
+
+- **No search on the Genomic tab below 700px.** The map strip is ~108px wide
+  there, so any usable box would float over the phylogeny and any zone selected
+  from it would be framed in that strip. Blocked on the non-goal above; a
+  phone-sized Genomic tab without a search box is intended, not a regression.
 
 ## Standing assumption
 
@@ -83,7 +90,8 @@ Markup moves out of `#controls` into `#viewport-area`, as a sibling of `#map`:
          placeholder="Type a health zone name…"
          data-i18n-aria="ui.zone_search" aria-label="Search health zone" />
   <div id="zone-search-results" role="listbox" hidden></div>
-  <div id="zone-search-status" role="status" aria-live="polite"></div>
+  <div id="zone-search-empty" hidden></div>
+  <div id="zone-search-live" role="status" aria-live="polite" class="visually-hidden"></div>
 </div>
 ```
 
@@ -91,13 +99,23 @@ The input and results ids are unchanged, so `ui.zone_search`,
 `ui.zone_search_placeholder` and `ui.zone_search_no_matches` carry over as-is.
 No new locale keys are needed.
 
-**The empty state moves out of the listbox.** Today `.zone-search-empty` is a
-bare `<div>` child of `#zone-search-results[role=listbox]`
-(`engine.js:2287-2288`), which is invalid — a listbox may contain only options
-and groups — and is ignored or mis-announced. `#zone-search-status` is a sibling
-`role="status"` region carrying both the no-matches message and a live match
-count. When there is nothing selectable the listbox stays hidden and
-`aria-expanded` stays `"false"`.
+**Three elements, three jobs.** Today `.zone-search-empty` is a bare `<div>`
+child of `#zone-search-results[role=listbox]` (`engine.js:2287-2288`), which is
+invalid — a listbox may contain only options and groups — and is ignored or
+mis-announced. Splitting it:
+
+- `#zone-search-results` — the listbox. Options only.
+- `#zone-search-empty` — the **visible** no-matches panel, absolutely positioned
+  exactly like `#zone-search-results` and shown *in its place*, never below it.
+  This is the position today's message occupies; only its parentage changes.
+- `#zone-search-live` — **visually hidden**, announcement only: the match count
+  on each render, and the no-matches text. A visible per-keystroke count would
+  be a new UI element no existing search has, sitting between the input and the
+  list; it belongs to assistive tech alone.
+
+Exactly one of the results panel and the empty panel is ever visible.
+`aria-expanded` tracks the listbox only, so it stays `"false"` when there is
+nothing selectable.
 
 Each option gets a real id (`zone-search-opt-<i>`) and `aria-selected`, and the
 input's `aria-activedescendant` tracks the active one. Today's code moves an
@@ -106,10 +124,10 @@ input's `aria-activedescendant` tracks the active one. Today's code moves an
 **No `L.DomEvent.disableClickPropagation` / `disableScrollPropagation`.**
 `#zone-search` is a *sibling* of `#map`, not a descendant of the Leaflet
 container, so its events never reach Leaflet's container-bound handlers and
-there is nothing to suppress. Today's calls on `#zone-search-wrap` are already
-no-ops for the same reason (`#controls` is likewise outside the container); they
-are dropped rather than carried forward with a corrected comment, and the CSS
-carries a note saying why none are needed.
+there is nothing to suppress. Today's calls on `#zone-search-wrap`
+(`engine.js:2336-2339`) are already no-ops for the same reason (`#controls` is
+likewise outside the container); they are dropped rather than carried forward
+with a corrected comment, and the CSS carries a note saying why none are needed.
 
 ## Styling
 
@@ -120,14 +138,17 @@ into the component itself:
 - input: `#ffffff` on `1px solid #e7e3db`, radius 4, 12px, `#2a2a27` text,
   `min-height: var(--zone-search-height)`; focus is `border-color:#9b7d4e` plus
   a `0 0 0 1px rgba(155,125,78,0.35)` ring.
-- results: white panel, `1px solid #e7e3db`, radius 4,
-  `max-height: min(calc(5 * 32px), 30vh)` with `overflow-y:auto`. The `30vh` arm
-  matters on narrow Trends/Spatial Risk, where the map is `height:40vh`
-  (`dashboard.css:806`, `852`) — an unclamped 160px list opens over essentially
-  the entire map.
+- results **and** empty panel share one positioning rule: `position:absolute;
+  left:0; right:0; top:100%`, white, `1px solid #e7e3db`, radius 4, drop shadow.
+  Results additionally take `max-height: min(calc(5 * 32px), 30vh)` with
+  `overflow-y:auto`. The `30vh` arm matters on narrow Trends/Spatial Risk, where
+  the map is `height:40vh` (`dashboard.css:808`, `852`) — an unclamped 160px
+  list opens over essentially the entire map.
 - option: full-width left-aligned button, `min-height:32px`, hairline separators.
 - active option (keyboard *or* pointer): `background:#f3f1ec; color:#9b7d4e`.
-- status region: italic `#9c968b`, styled as today's `.zone-search-empty`.
+- empty panel text: italic `#9c968b`, as today's `.zone-search-empty`.
+- `.visually-hidden`: the standard 1px-clip idiom. New utility class; nothing in
+  the stylesheet has one yet.
 
 Because the component now floats over a basemap rather than sitting inside a
 light rail, the input gains the drop shadow the dropdown already carries, so it
@@ -136,12 +157,15 @@ reads as map chrome.
 **Stacking.** `#zone-search` takes `z-index:1200` on the wrapper. Without one it
 would paint under every panel: `.panel` is `z-index:1000` (`dashboard.css:94`),
 as are `#trends-panel` and `#epi-trends-panel`, and `#zone-search` is declared
-before them in `BODY_TEMPLATE`. 1200 clears the panels and the split handles
-without reaching the header (1300). A positioned element with a z-index forms a
-stacking context, so the dropdown's own `z-index` is resolved *inside* the
-component — which is what settles the otherwise-ambiguous tie with `#epi-float`
-(also 1100, `dashboard.css:442`): the whole component paints at 1200, so an open
-list is above a Spatial Risk hover readout regardless of source order.
+before them in `BODY_TEMPLATE`. 1200 clears the panels without reaching the
+header (1300). A positioned element with a z-index forms a stacking context, so
+the dropdown's own `z-index` is resolved *inside* the component — which settles
+the otherwise-ambiguous tie with `#epi-float` (also 1100, `dashboard.css:442`):
+the whole component paints at 1200, so an open list is above a Spatial Risk
+hover readout regardless of source order. 1200 also ties with
+`#epi-split-handle` / `#trends-split-handle` (`172`, `247`); they sit at the rail
+edge, spatially disjoint from the top-left corner, so the tie never surfaces and
+source order (handles later, therefore on top) is harmless.
 
 `body.epi-map-exporting` gains `#zone-search` alongside the overlays it already
 hides (`dashboard.css:407-416`). Not for the JPG — that is scoped to
@@ -155,10 +179,17 @@ Deleted: the dark `#zone-search-input` / `#zone-search-results` /
 
 ## Placement
 
-Three bands, not two. The `max-width:700px` media query is inclusive, so 700px
-itself takes the narrow branch.
+Three bands. **Band A is the unqualified default; bands B and C are carved out
+with `max-width` queries only**, in that order, so no viewport width can fall
+between two rules. (A `max-width:999px` / `min-width:1000px` pair would leave a
+999.5px viewport — browser zoom, fractional DPR — matching neither.) This is
+also how the file already handles its 700px boundary, which is inclusive: 700px
+itself is band C.
 
 ### Tokens
+
+All three are declared once in `:root`, alongside `--epi-panel-width: 50%` and
+`--trends-panel-width: 40%` (`dashboard.css:3-7`):
 
 ```css
 --layer-panel-width: min(340px, calc(100vw - 24px));   /* #controls, dashboard.css:101-105 */
@@ -166,17 +197,17 @@ itself takes the narrow branch.
 --zone-search-height: 32px;
 ```
 
-The first two describe **band A only**. The narrow rules deliberately use
-different numbers — `#context-national` becomes `left:6px; width:min(260px, calc(50vw - 12px))`
-(`875-880`) and `#controls.collapsed` overrides width entirely (`907`) — so
-these tokens must not be read outside band A.
+`--layer-panel-width` and `--context-panel-width` are read by two consumers
+each: the panel's own width rule, which is unconditional and applies in all
+three bands, and the **search-offset rule, which may read them only inside band
+A**. The constraint is on the search, not on the panel — see test 6.
 
 `--zone-search-height` is not a description of the input, it *sets* it: the
 input takes `min-height: var(--zone-search-height)`, and every displacement rule
 in bands B and C offsets by `calc(var(--zone-search-height) + 8px)`. One value,
 so the gap cannot drift open or closed.
 
-### Band A — ≥ 1000px
+### Band A — default (≳1000px)
 
 | View | `#zone-search` |
 |---|---|
@@ -185,23 +216,27 @@ so the gap cannot drift open or closed.
 | `trends`, `epi-trends`, `genomic-epidemiology` | `top:12px; left:12px` |
 | `clinical-symptoms`, `surveillance-testing` | hidden via `body.stub-view` |
 
-Width `min(240px, calc(100vw - 24px))`. No displacement in this band.
+Base width `min(240px, calc(100vw - 24px))`, further clamped on the rail tabs —
+see §Rail clamp. No displacement in this band.
 
-### Band B — 701px … 999px
+### Band B — `@media (max-width: 999.98px)`
 
 The beside-the-panel layout cannot be used here. On `map` the search would span
 362–602px while `#info` (`right:12px; max-width:340px`, `dashboard.css:144`)
 starts at `100vw − 352`, so they meet at ~954px; on `context` the figures are
-302–542px against `#context` at `100vw − 292`, meeting at ~834px. Both `#info`
-and `#context` are content-sized under a `max-width`, so the space actually
-available is not derivable in CSS — clamping would need JS measurement on every
-resize, and a "below the panel" placement would need panel heights, which are
-content-driven. A third breakpoint costs one media query and reuses the
-displacement machinery band C needs anyway.
+302–542px against `#context` at `100vw − 292`, meeting at ~834px.
 
-So in band B the search takes the corner on **every** tab, width
-`min(240px, calc(100vw - 24px))`, and the two views with something already at
-`top:12px; left:12px` displace it downward:
+`#info` is content-sized under a bare `max-width`, so on `map` the space
+actually available is not derivable in CSS — clamping there would need JS
+measurement on every resize, and a "below the panel" placement would need panel
+heights, which are content-driven. `#context` *does* carry a definite
+`width:min(280px, calc(50vw - 24px))` (`647-655`), so the Context tab alone
+could be clamped in pure CSS; it follows `map` anyway so the two tabs do not
+diverge. A third breakpoint costs one media query and reuses the displacement
+machinery band C needs regardless.
+
+So in band B the search takes the corner on **every** tab, and the two views
+with something already at `top:12px; left:12px` displace it downward:
 
 | View | Displaced |
 |---|---|
@@ -212,10 +247,11 @@ So in band B the search takes the corner on **every** tab, width
 `#info` needs no displacement here: at ≥701px it starts at `100vw − 352 ≥ 349`,
 clear of the search's 252px right edge.
 
-### Band C — ≤ 700px
+### Band C — `@media (max-width: 700px)`
 
-The search owns the whole top row: `top:12px; left:12px; width:calc(100vw - 24px)`.
-Everything positioned at `top:12px` in this band drops by
+The search owns the whole top row: `top:12px; left:12px; width:calc(100vw - 24px)`,
+and the rail clamp is switched off (the rails stack below a full-width map at
+this width). Everything positioned at `top:12px` in this band drops by
 `calc(var(--zone-search-height) + 8px)`:
 
 | View | Displaced | Currently at |
@@ -224,7 +260,7 @@ Everything positioned at `top:12px` in this band drops by
 | `trends` | `#trends-legend` | `top:12px; right:12px` (`832-838`) |
 | `epi-trends` | `#epi-trends-legend` | `top:12px; left:12px` (`868-874`) |
 | `context` | nothing | `#context-national` / `#context` already at `top:clamp(128px, 24vh, 200px)` (`875-886`) |
-| `genomic-epidemiology` | — | search is hidden, see below |
+| `genomic-epidemiology` | — | search is hidden here (§Known gaps) |
 
 A full-width search removes the clamp problem entirely. The earlier draft tried
 to size the search to clear a collapsed `#info`, citing a
@@ -234,11 +270,42 @@ and `wirePanelToggles()` collapses it *on load* (`engine.js:4223-4224`), so the
 user can expand it back to 60vw at any moment. No static clamp derived from a
 collapsed width could have been correct.
 
-**`#zone-search` is hidden on `body.view-genomic-epidemiology` in band C.**
-`#genomic-panel` has no narrow rule, so the map is a ~108px strip at 360px: a
-search box would either be unusably narrow or float over the phylogeny, and a
-zone selected from it would be framed in that strip. Recorded as blocked on
-making the Genomic tab responsive, which is out of scope here.
+**Displacement costs height.** Where a displaced panel carries a `max-height`,
+the same rule reduces it by the same offset, so the panel's bottom edge does not
+move toward the footer chrome. That is `#context-national` in band B and `#info`
+in band C (both `max-height:80vh`, tightened again under `@media (max-height:500px)`
+at `923` — a landscape phone is band C). `#controls`, `#trends-legend` and
+`#epi-trends-legend` carry none and need no adjustment.
+
+### Rail clamp
+
+Band B fixes collisions with *floating panels*; the rail tabs need a separate
+clamp, because a rail can be narrower than the search and `#zone-search` at
+z-index 1200 floats over it rather than being clipped. `TRENDS_SPLIT_MAX` and
+`EPI_SPLIT_MAX` are both 72 (`engine.js:3544`, `3861`), so the visible map can
+be 28% — 196px at 701px against a 252px right edge — and the widths persist in
+`localStorage`, so a user who once dragged the split wide meets it on every
+later visit. Genomic needs no user action at all: `min(634px, 70vw)` leaves a
+210px strip at 701px, and the search overflows from 701px until `30vw` reaches
+252px at ~840px.
+
+`#zone-search` is positioned within `#viewport-area`, and the rail widths are
+percentages, so the clamp is pure CSS and tracks a live drag for free:
+
+```css
+body.view-trends     #zone-search { width: min(240px, calc(100% - var(--trends-panel-width) - 24px)); }
+body.view-epi-trends #zone-search { width: min(240px, calc(100% - var(--epi-panel-width) - 24px)); }
+body.view-genomic-epidemiology #zone-search { width: min(240px, calc(100% - var(--genomic-panel-width, 70vw) - 24px)); }
+```
+
+`--genomic-panel-width` is new and is published by `genomic.js`: `applyWidth()`
+(`genomic.js:745-751`) is already the single writer of `panel.style.width`, so
+it also sets the custom property on `:root`, and the module sets it once at init
+for the CSS default. They cannot drift, being one assignment apart. Without it
+the genomic clamp would fall back to the `70vw` default and stop tracking drags
+(`maxW()` is `0.7 * innerWidth`, `genomic.js:739`).
+
+The clamp applies in bands A and B and is disabled in band C.
 
 ### Visible-map framing
 
@@ -246,8 +313,7 @@ On Trends and Spatial Risk the rails narrow `#map` itself
 (`dashboard.css:162`, `223-225`), so `left:12px` is the corner of the *visible*
 map and `fitBounds` needs no offset. **The Genomic tab is the exception**: there
 is no `body.view-genomic-epidemiology #map { right: … }` rule, so
-`#genomic-panel` (`1167-1174`) overlays a full-width map. See §Behaviour for the
-inset the shared zoom applies there.
+`#genomic-panel` (`1167-1174`) overlays a full-width map. See §The shared zoom.
 
 ## Behaviour
 
@@ -330,17 +396,36 @@ Toggling stays the default, so real map clicks are unchanged.
 `_emitZoneClick` no-ops until then (`engine.js:3810`). A search issued during
 load would zoom the map and silently select nothing — and would do so
 permanently if the genomic payload is absent or the tree fails to mount. So
-**registration is the readiness signal**: `onZoneClick(cb)` enables the search
-input, which starts `disabled` on this view. A queue-and-replay would hide the
-never-mounts case; disabling states it.
+**registration is the readiness signal**: on this view `#zone-search` starts
+hidden, and `onZoneClick(cb)` reveals it. Hiding rather than disabling covers
+the never-mounts case with no timer and without leaving a permanently disabled
+box that reads as broken. `_emitMarkerClick` shares the same coordinator, so
+this one gate covers every genomic entry point.
+
+This is the single place the design reaches back into `genomicMapHooks`, whose
+own comment calls it "deliberately tip-agnostic" (`engine.js:3798-3807`). It is
+one call from `onZoneClick(cb)` into the search controller, and it is recorded
+here so it is a decision rather than a smell.
 
 ### The shared zoom
 
 After `select()`, on every tab:
 
 ```js
-map.fitBounds(bounds, {padding: pad, paddingBottomRight: inset});
+map.fitBounds(bounds, {
+  paddingTopLeft: pad,
+  paddingBottomRight: [pad[0] + insetX, pad[1]],
+  maxZoom: 10,
+});
 ```
+
+**Never pass `padding` alongside either directional key.** Leaflet 1.9.4 —
+the build `chrome.py:47` pins — resolves them as
+`options.paddingBottomRight || options.padding || [0, 0]`, so a directional key
+*replaces* `padding` on that side rather than adding to it, and `[0, 0]` is an
+array and therefore truthy. `{padding: pad, paddingBottomRight: [0,0]}` silently
+yields zero bottom-right padding on every tab, which is invisible in a
+screenshot unless the zone happens to sit near an edge. Test 9 guards it.
 
 - **Zone bounds** come from the matching `geoLayer` layer (`findGeoLayerByNom`).
 - **Province bounds** come from the matching `provinceOutlineLayer` layer
@@ -349,14 +434,16 @@ map.fitBounds(bounds, {padding: pad, paddingBottomRight: inset});
 - **`pad`** is `[40, 40]` on wide screens and `[16, 16]` at ≤700px, where the
   Trends and Spatial Risk maps are `height:40vh` — ~192px on a 480px viewport,
   of which `[40,40]` would consume 80px.
-- **`inset`** is `[0, 0]` everywhere except `genomic-epidemiology`, where it is
-  `[panel.offsetWidth, 0]` measured at select time. `applyWidth()`
-  (`genomic.js:745-751`) writes `panel.style.width` in px on drag and arrow-key
-  resize, so no CSS token can track it; it must be read from the element.
-- `maxZoom: 10` is kept. It binds only when a geometry is small enough that
-  fitting it would zoom past z10 — a large province fits at z6–7 and never
-  reaches the cap — so it is a floor on zooming into small units, not a ceiling
-  that distorts large ones.
+- **`insetX`** is `0` everywhere except `genomic-epidemiology`, where it is
+  `panel.offsetWidth` measured at select time. The panel width is an inline
+  style written by `applyWidth()`, so it is read from the element rather than
+  parsed back out of the CSS custom property the same function publishes for the
+  rail clamp — one quantity, two consumers, each reading it the way its own
+  language can.
+- `maxZoom: 10` binds only when a geometry is small enough that fitting it would
+  zoom past z10 — a large province fits at z6–7 and never reaches the cap — so
+  it is a floor on zooming into small units, not a ceiling that distorts large
+  ones.
 - If no geometry is found, the selection still applies and the zoom is skipped.
 
 **This reverses a documented decision on two tabs.** `engine.js:2813-2819`
@@ -371,8 +458,8 @@ to say so, or the next reader deletes one side for consistency.
 
 ### After a selection
 
-The input clears, the dropdown closes, and the status region is emptied — on
-every tab. The box is a query field, not a state indicator; the selection stays
+The input clears, both panels close, and the live region is emptied — on every
+tab. The box is a query field, not a state indicator; the selection stays
 visible where it already is (zone highlight, info/context panel, highlighted
 table row, plot titles). This is today's Trends and Spatial Risk behaviour,
 generalised.
@@ -387,6 +474,16 @@ panel** — `#info` on `map`, `#context` on `context`. `wirePanelToggles()`
 auto-collapses every `.panel-toggle` panel on load at that width
 (`engine.js:4223-4224`), so without this the only feedback from a narrow search
 is a zoom and a highlight on a map the user may not recognise.
+
+This must go through the toggle, not the class. `setCollapsed()`
+(`engine.js:4200-4208`) is private to the `wirePanelToggles()` IIFE and owns
+both the `.collapsed` class **and** the `+`/`−` glyph on the button; stripping
+the class alone leaves an open panel showing `+`, whose next tap collapses
+nothing. `wirePanelToggles()` exports a module-level `expandPanel(panelId)` —
+the same discipline the `#epi-trends-tbody` re-query applies above.
+`#context-national` is also auto-collapsed at that width and is deliberately
+left collapsed; the search selects a *zone*, and `#context` is where zone
+context appears.
 
 ### Keyboard
 
@@ -415,15 +512,28 @@ odd one out and is the tightest, so it goes).
 
 ## Removals
 
-- markup: `#trends-search-wrap`, `#trends-search-slot`, `#epi-search-wrap`, and
-  the `.epi-controls` wrapper left empty by the last of these.
-- `engine.js`: `wireTrendsSearchSlot()`, `renderTrendsSearchResults()`,
-  `renderEpiSearchResults()`, `epiClearSearchUi()`, the `opts.fromSearch`
-  branch and parameter of `setTrendsSelection()`, and both duplicate
-  input/results/outside-click wiring blocks.
-- `dashboard.css`: the dark `#zone-search-*` / `.zone-search-option` block, the
-  `.location-search-*` block, `#trends-search-slot`'s base and narrow-screen
-  positioning, and `.epi-controls`.
+Markup:
+
+- `#trends-search-wrap`, `#trends-search-slot`, `#epi-search-wrap`, and the
+  `.epi-controls` wrapper left empty by the last of these.
+
+`engine.js` — the Snapshot controller is replaced just as fully as the other two,
+and is named here because §Removals is the checklist the diff gets read against:
+
+- Snapshot: `closeZoneSearchResults()` (`2266`), `renderZoneSearchResults()`
+  (`2275`), `setZoneSearchActive()` (`2303`), `selectHealthZone()` (`2314`), the
+  `zoneSearchMatches` / `zoneSearchActiveIdx` / `zoneSearchWrap` module state
+  (`2252-2254`), the wiring block (`2341-2378`), and the two
+  `L.DomEvent.disable*Propagation` calls (`2336-2339`).
+- Trends: `wireTrendsSearchSlot()`, `renderTrendsSearchResults()`, the
+  `opts.fromSearch` branch and parameter of `setTrendsSelection()`, and the
+  search half of `wireTrendsPanelUi()`.
+- Spatial Risk: `renderEpiSearchResults()`, `epiClearSearchUi()`,
+  `epiApplyHealthZone()`, and the search half of `wireEpiTrendsUi()`.
+
+`dashboard.css`: the dark `#zone-search-*` / `.zone-search-option` block, the
+`.location-search-*` block, `#trends-search-slot`'s base and narrow-screen
+positioning, and `.epi-controls`.
 
 Two layout consequences to decide rather than discover:
 
@@ -452,64 +562,86 @@ Net effect is negative lines in both `engine.js` and `dashboard.css`.
 4. No `.location-search-wrap`, `.location-search-results`, or
    `.zone-search-option` selector survives in `dashboard.css`, and none is
    referenced from `engine.js`.
-5. `dashboard.css` positions `#zone-search` for every non-stub `body.view-*`,
-   and hides it for `body.stub-view` and for band-C genomic.
-6. `--layer-panel-width` and `--context-panel-width` are each declared once and
-   read by both the panel's own width rule and the band-A search offset — and
-   are read nowhere outside band A.
-7. `--zone-search-height` is declared once and read by the input's `min-height`
-   and by every displacement rule (`#controls`, `#info`, `#trends-legend`,
+5. `dashboard.css` carries a `#zone-search` rule for every non-stub
+   `body.view-*` **in every band it is meant to appear in** — a view positioned
+   in band A only must fail. It is hidden for `body.stub-view`, and for
+   `body.view-genomic-epidemiology` in band C.
+6. `--layer-panel-width`, `--context-panel-width` and `--zone-search-height` are
+   each declared exactly once, in `:root`. The **search-offset** rules that read
+   `--layer-panel-width` / `--context-panel-width` appear only outside any
+   `max-width` media query (band A). The panels' own width rules are
+   unconditional by design and are not constrained by this test.
+7. `--zone-search-height` is read by the input's `min-height` and by every
+   displacement rule (`#controls`, `#info`, `#trends-legend`,
    `#epi-trends-legend`, `#context-national`).
 8. Every locale key named in `ZONE_SEARCH_VIEWS` exists in both
    `locales/en.yaml` and `locales/fr.yaml`. No locale-parity test exists
    anywhere in `tests/` today, and this is the first place JS names locale keys
    from a data table — nothing else would catch the drift.
+9. No `fitBounds` call in `engine.js` passes `padding` together with
+   `paddingTopLeft` or `paddingBottomRight`. This is the guard for the silent
+   Leaflet override described in §The shared zoom.
 
 Manual pass, after a build, served over HTTP (see the build/serve notes in the
-repo memory). Two viewports would not have found B1 or B3, so:
+repo memory):
 
 1. **Mid width (~760px and ~900px)** on Snapshot and Context, with `#info` /
    `#context` expanded — the band that motivated band B.
-2. **Genomic: search the same zone twice.** Expected: still selected, still
+2. **Drag the Trends and Spatial Risk splits to maximum (72%)** at ~760px and
+   confirm the search stays inside the visible map; repeat on Genomic by
+   dragging `#genomic-resize`.
+3. **Genomic: search the same zone twice.** Expected: still selected, still
    zoomed.
-3. **Genomic: search during load**, before the phylogeny renders — the input
-   should be disabled, not silently inert.
-4. **Genomic: search a zone on the far right of the map**, confirm it is not
-   framed behind the panel; repeat after dragging `#genomic-resize`.
-5. **EN → FR → EN on Trends**: placeholder is still the location one, accessible
+4. **Genomic: search during load** — the box should be absent, then appear.
+5. **Genomic: search a zone on the far right of the map**, confirm it is not
+   framed behind the panel; repeat after a resize drag.
+6. **Zoom to a zone in the bottom-right corner** of the map on Snapshot and on
+   Trends — the visual check for the padding bug behind test 9.
+7. **EN → FR → EN on Trends**: placeholder is still the location one, accessible
    name is still "Search".
-6. **Narrow Snapshot: expand `#info`**, then open the dropdown.
-7. **Spatial Risk: hover a zone with the list open** — dropdown must sit above
+8. **Narrow Snapshot: expand `#info`**, then open the dropdown; and confirm a
+   search-driven selection expands it with a `−` on the toggle, not a `+`.
+9. **Spatial Risk: hover a zone with the list open** — dropdown must sit above
    `#epi-float`.
-8. **Narrow Trends/Spatial Risk: select from the search** — padding must not
-   over-zoom the 40vh map, and the dropdown must not swallow it.
-9. **Keyboard-only pass** on one tab: Tab in, type, `↓`/`↑`, `Enter`, `Esc`,
-   `Esc`; plus a screen-reader check of the empty state.
-10. **All five tabs** at a wide and a narrow viewport, confirming each tab's own
+10. **Narrow Trends/Spatial Risk: select from the search** — padding must not
+    over-zoom the 40vh map, and the dropdown must not swallow it.
+11. **Landscape phone (≤500px tall)**: displaced `#info` must not run under the
+    footer chrome.
+12. **Keyboard-only pass** on one tab: Tab in, type, `↓`/`↑`, `Enter`, `Esc`,
+    `Esc`; plus a screen-reader check of the empty state and the live count.
+13. **All five tabs** at a wide and a narrow viewport, confirming each tab's own
     selection state updates and nothing overlaps in the top-left corner.
 
 ## Risks
 
-- **Corner collisions.** Four were found by reading the CSS and are handled by
-  the band tables. Others may only appear on a rendered page; the ten-case
-  manual pass is the check.
+- **Corner collisions.** Those found by reading the CSS are handled by the band
+  tables and the rail clamp. Others may only appear on a rendered page; the
+  thirteen-case manual pass is the check.
 - **Band-B threshold.** 1000px is chosen to clear the worst case (~954px on
   Snapshot with a full-width `#info`). If `#info`'s content grows, the threshold
   needs revisiting — it is a single number in one media query.
-- **Genomic coupling.** The `{toggle:false}` option and the enable-on-registration
-  signal both touch `genomic.js`, which is page-scoped and otherwise independent
-  of the search. Kept to three lines and no new hook names.
+- **Genomic coupling.** The `{toggle:false}` option, the reveal-on-registration
+  signal, and the `--genomic-panel-width` publication all touch `genomic.js`,
+  which is page-scoped and otherwise independent of the search. Kept to a
+  handful of lines and no new hook names.
 
 ## Review dispositions
 
-Every item in `2026-08-14-unified-zone-search-design-review.md` is folded in
-above except one, recorded here so the question does not recur:
+Both review passes are folded in above, with these exceptions and corrections,
+recorded so the questions do not recur:
 
-- **`maxZoom:10` on provinces — no change.** The review asks to confirm the
-  zone-derived cap on the widest province. `fitBounds`' `maxZoom` binds only
-  when fitting a geometry would zoom *past* the cap, which happens for small
-  geometries; a large province fits well below z10 and never reaches it. It is a
-  floor on zooming into small units, not a ceiling applied to large ones.
+- **`maxZoom:10` on provinces — no change** (pass 1). `fitBounds`' `maxZoom`
+  binds only when fitting a geometry would zoom *past* the cap, which happens
+  for small geometries; a large province fits well below z10 and never reaches
+  it. Withdrawn by the reviewer in pass 2.
+- **Genomic overflow band** (pass 2, B2′). The review gives 701–905px; `30vw`
+  reaches the search's 252px right edge at 840px, so the actual band is
+  701–840px. The fix is unaffected.
+- **Sub-pixel band gap** (pass 2, N6′) described a defect in media queries this
+  spec had not yet written. Adopted as guidance: band A is the unqualified
+  default and B/C are carved with `max-width` only.
+- **Mirroring §Standing assumption into the zone-styling spec** (pass 2, nit) is
+  a change to a different document and is left as optional follow-up.
 
 Follow-up, not in scope: `#context-hint` still reads "Click a health zone to see
 response context" on a tab that now also has a search box. Not wrong, but

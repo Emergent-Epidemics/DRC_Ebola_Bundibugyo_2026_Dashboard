@@ -6,6 +6,10 @@
 `Scripts/assets/genomic.js`, `Scripts/assets/dashboard.css`, `Scripts/common/chrome.py`
 @ `unified-zone-search`)
 
+**Pass 1** (below) reviews revision 1. **Pass 2** (§Second pass, at the end) reviews revision 2 —
+the rewrite that answers pass 1. Pass-1 findings are kept for the record; all of them are
+dispositioned in revision 2.
+
 ---
 
 ## Verdict
@@ -354,3 +358,264 @@ The manual pass ("five tabs at a wide and a narrow viewport") will not find B3 o
 | N8 | Note the `#trends-controls` / `#epi-trends-panel` spacing fallout of the removals | should fix |
 | N9 | Blur after selection on touch/narrow | should fix |
 | N10 | Expand `#info` on a search selection on narrow Snapshot, or accept it explicitly | should fix |
+
+---
+
+# Second pass — revision 2
+
+**Reviewing:** revision 2 of the spec (516 lines, commit `4192073`)
+**Date:** 2026-08-14
+**Method:** every new citation re-checked against the source, plus Leaflet 1.9.4's
+`_getBoundsCenterZoom` (fetched from the pinned `unpkg.com/leaflet@1.9.4` the pages load).
+
+## Verdict
+
+The revision is a genuine improvement, not a patch. All four blocking items are properly
+resolved rather than deflected: the three-band placement is the right answer to B3 and it
+subsumes the narrow-clamp guess as a side effect; `{toggle:false}` threaded through the existing
+`_emitZoneClick` path is the minimal fix for B1; enable-on-registration is a better readiness
+signal than the queue-and-replay I suggested, and the spec says why. The `maxZoom:10` disposition
+is correct and I withdraw that item. The citations are accurate — I spot-checked the
+`zoomControl:false` comment (`engine.js:602-604`), the `fitMapToTrendsSelection()` comment
+(`2812-2819`), `#genomic-panel` (`dashboard.css:1167-1174`), `.panel`/`#epi-float` z-indices, and
+the stacking-context reasoning, which is right.
+
+Three things are wrong or unimplementable as written. **The `fitBounds` call silently drops
+bottom/right padding on four of the five tabs (B1′)** — `[0,0]` is truthy, so `paddingBottomRight`
+overrides `padding` rather than adding to it. **The rail tabs can still leave the search wider
+than the visible map (B2′)**, which is the same class of collision band B was introduced to
+prevent, and on genomic it is the default state throughout band B. And **test 6 forbids what the
+implementation must do (B3′)** — `#controls`' own width rule is unconditional, so
+`--layer-panel-width` is necessarily read outside band A. That is structurally the same defect as
+pass 1's B5 in the zone-styling spec: a guard test asserting against a correct implementation.
+
+## What revision 2 gets right (verified)
+
+- **The `zoomControl:false` quote is verbatim and load-bearing.** `engine.js:602-604` really does
+  say the corner was freed because "every view either relocates a search box into that corner or
+  expects touch users to pinch-zoom". Promoting it to a standing assumption is exactly right — the
+  placement section is downstream of it.
+- **The band-B arithmetic checks out.** `#info` at `100vw − 352` meets a 602px right edge at 954px;
+  `#context` at `100vw − 292` meets 542px at 834px. 1000px clears both with margin.
+- **`#info` needs no band-B displacement.** At ≥701px it starts at ≥349px against a 252px right
+  edge. Confirmed.
+- **The stacking argument is correct.** A positioned element with a z-index forms a stacking
+  context, so the dropdown's 1100 resolves inside the component and the `#epi-float` tie
+  (`dashboard.css:442`) genuinely disappears. 1200 clears `.panel` (94) and stays under the header
+  (1300).
+- **Dropping `disableClickPropagation` is right, and for the right reason now.** Leaflet binds to
+  `_container`; a sibling never reaches it.
+- **The empty-state move out of `role="listbox"`** and the per-view `aria` key are both correctly
+  specified, and the `ui.trends_search` reuse keeps the no-new-keys claim true
+  (`locales/en.yaml:131`, `fr.yaml:131`).
+- **The `maxZoom:10` disposition is correct.** `fitBounds`' `maxZoom` caps a computed zoom, so it
+  binds only on small geometries. Withdrawn.
+- **The `Esc`/native-✕ analysis is right**, including that the ✕ fires `input` and needs no
+  special case.
+- **§Review dispositions** is a good addition — recording the one rejected item stops it recurring.
+
+## Blocking
+
+### B1′ — `{padding, paddingBottomRight}` cancels bottom/right padding on every non-genomic tab
+
+> §The shared zoom: `map.fitBounds(bounds, {padding: pad, paddingBottomRight: inset});`
+> … "**`inset`** is `[0, 0]` everywhere except `genomic-epidemiology`"
+
+Leaflet 1.9.4, `leaflet-src.js:3370-3371` (the exact build `chrome.py:47` pins):
+
+```js
+var paddingTL = toPoint(options.paddingTopLeft || options.padding || [0, 0]),
+    paddingBR = toPoint(options.paddingBottomRight || options.padding || [0, 0]),
+```
+
+`paddingBottomRight` **replaces** `padding` on that side; it does not add to it. And `[0, 0]` is an
+array, hence truthy, so it wins the `||`. As written, every tab except genomic gets 40px of
+top/left padding and **zero** bottom/right padding — a zone fitted flush against the bottom-right
+edge of the map, on Snapshot, Context, Trends and Spatial Risk. Genomic gets `[panelWidth, 0]`,
+i.e. no vertical padding at all.
+
+The snippet also drops `maxZoom: 10`, which §The shared zoom's own bullet list keeps.
+
+```js
+map.fitBounds(bounds, {
+  paddingTopLeft: pad,
+  paddingBottomRight: [pad[0] + insetX, pad[1]],
+  maxZoom: 10,
+});
+```
+
+with `insetX` = 0 off genomic. Worth stating the rule explicitly in the spec — "never pass
+`padding` alongside either directional key" — because the failure is silent and invisible in a
+screenshot unless the zone happens to sit near an edge.
+
+### B2′ — On the three rail tabs the search can be wider than the visible map, and on genomic that is the default in band B
+
+Band B fixes the collisions with *floating panels* and leaves the collisions with *rails* unfixed.
+`#zone-search` is `z-index:1200`, above every rail (1000) and `#genomic-panel` (500), so the
+overflow floats over the rail's content rather than being clipped:
+
+| Tab | Visible map at 701px | Search right edge | Overflow |
+|---|---|---|---|
+| `genomic-epidemiology` | `100vw − min(634px, 70vw)` = **210px** (default) | 252px | **42px, by default** |
+| `epi-trends` | `100vw − var(--epi-panel-width)`; 50% default = 350px, but the split drags to 72% → **196px** | 252px | 56px at max drag |
+| `trends` | 40% default → 421px; drags to 72% → **196px** | 252px | 56px at max drag |
+
+The genomic case needs no user action: `#genomic-panel` is `min(634px, 70vw)`, so from 701px to
+905px it is 70vw and the strip is 30vw — under the search's 252px right edge for the whole band.
+The rail widths are persisted (`bdbv_epi_panel_width_pct` / `bdbv_trends_panel_width_pct`), so a
+user who once dragged the split wide meets this on every later visit.
+
+Fix, and it is cheap on two of the three: `--epi-panel-width` / `--trends-panel-width` are
+percentages (`dashboard.css:5-6`) and `#zone-search` is positioned in `#viewport-area`, so
+
+```css
+body.view-epi-trends #zone-search { width: min(240px, calc(100% - var(--epi-panel-width) - 24px)); }
+```
+
+clamps to the visible map for free, in every band, including live during a split drag. Genomic
+needs the same JS measurement B2 already requires for the zoom inset — set the width from
+`panel.offsetWidth` in `applyWidth()`, or reuse the band-C decision and hide the search on genomic
+below 1000px rather than 700px.
+
+### B3′ — Test 6 asserts against a correct implementation
+
+> 6. `--layer-panel-width` and `--context-panel-width` are each declared once and read by both the
+>    panel's own width rule and the band-A search offset — **and are read nowhere outside band A**.
+
+The two halves contradict each other. `#controls`' width rule (`dashboard.css:101-105`) is
+unconditional — it applies in all three bands, and the narrow branch overrides only `top` and
+`.collapsed`'s max-width. Same for `#context-national` (`638-646`). So "the panel's own width rule"
+*is* a read outside band A, and any implementation that satisfies clause one fails clause two.
+
+What the design actually needs is a constraint on the *consumer*: the **search-offset** rule may
+read these tokens only inside the band-A media query. Reword the test to that, and note the
+tokens' declaration site — the spec never says where the three live (`:root`, presumably, next to
+`--epi-panel-width` / `--trends-panel-width` at `dashboard.css:5-6`), which tests 6 and 7 both
+depend on to check "declared once".
+
+## Should fix
+
+### N1′ — `#zone-search-status` is under-specified where it matters: on screen
+
+The status region is a new *visible* element (§Styling gives it italic `#9c968b`) that carries both
+the no-matches message and "a live match count". Three things are unresolved:
+
+- **Where does it sit?** The dropdown is `position:absolute; top:100%`. If the status is in normal
+  flow it renders *behind* the dropdown; if it is absolutely positioned too, they stack.
+- **A visible match count on every keystroke** is a new UI element that no existing search has, and
+  it will sit between the input and the list. Almost certainly it should be visually hidden
+  (`clip-path` / 1px trick) and exist only for assistive tech.
+- **The no-matches message** should stay visible, in the position today's `.zone-search-empty`
+  occupies — i.e. it wants to *replace* the listbox panel, not sit under it.
+
+The clean split is two elements: a visible `#zone-search-empty` panel absolutely positioned exactly
+like `#zone-search-results` and shown in its place, plus a visually-hidden `role="status"` for the
+count and the no-matches text. Say which, or the implementer will guess.
+
+### N2′ — The new "expand the collapsed detail panel" step hits the closure problem the revision just fixed elsewhere
+
+§After a selection now says a narrow search-driven selection expands `#info` (map) / `#context`
+(context). `setCollapsed()` is private to the `wirePanelToggles()` IIFE (`engine.js:4200-4208`) and
+owns both the `.collapsed` class **and** the `+`/`−` glyph on the toggle button. A controller that
+just removes the class leaves a panel that is open with a `+` on it, and the next tap collapses…
+nothing. Either click the toggle button programmatically (`#info-toggle`,
+`.panel-toggle[data-target="context"]`) when the panel is collapsed, or export a small
+`expandPanel(id)` from that IIFE. This is the same finding as pass-1 N4, which the revision handled
+well for `epiApplyHealthZone` — apply the same discipline here.
+
+While there: `#context-national` is also auto-collapsed at that width and is not mentioned. Fine to
+leave it collapsed, but say so.
+
+### N3′ — Band B's stated justification does not hold for `context`
+
+> "Both `#info` and `#context` are content-sized under a `max-width`, so the space actually
+> available is not derivable in CSS."
+
+`#info` is (`max-width:340px`, no width — `dashboard.css:144`). `#context` is **not**: it has a
+definite `width:min(280px, calc(50vw - 24px))` (`647-655`), the mirror of `#context-national`. So on
+the Context tab a pure-CSS clamp *is* derivable, and a reader checking this claim will find it and
+be tempted to undo the band. Band B is still right — uniformity across tabs, and the displacement
+machinery is needed for band C anyway — so keep the decision and fix the reason: the clamp is
+underivable on `map`, and Context follows `map` so the two tabs do not diverge.
+
+### N4′ — The readiness signal puts a search side effect inside the tip-agnostic hooks object
+
+Enabling the input from `onZoneClick(cb)` means `engine.js:3807` — inside an object whose own
+comment calls it "deliberately tip-agnostic" — gains a call into the search controller. That is
+fine and it is the smallest hook, but it should be written down as such, because it is the one
+place this design reaches back into the generic seam.
+
+Two loose ends on the same mechanism:
+
+- **If the genomic payload is absent or the tree never mounts, the input stays disabled forever.**
+  The spec chooses that deliberately over a silent queue, which I agree with — but a permanently
+  disabled search box with a placeholder reads as broken. Hide it in that case (the tab already
+  hides `#controls`/`#legend`/`#info`), or give it a disabled-state hint.
+- `_emitMarkerClick` shares the same coordinator, so nothing else needs a readiness gate. Worth one
+  clause so it is clear the gate is complete.
+
+### N5′ — §Removals no longer matches what the change removes
+
+The list is the checklist the diff gets read against, and it still names only the Trends/Spatial
+Risk halves plus "both duplicate input/results/outside-click wiring blocks". The Snapshot
+controller is equally replaced: `renderZoneSearchResults()` (`engine.js:2275`),
+`setZoneSearchActive()` (`2303`), `closeZoneSearchResults()` (`2266`), `selectHealthZone()`
+(`2314`), the `zoneSearchMatches` / `zoneSearchActiveIdx` / `zoneSearchWrap` module state
+(`2252-2254`), and the two `L.DomEvent.disable*Propagation` calls (`2336-2339`) the revision now
+drops on purpose. Name them.
+
+### N6′ — Integer band boundaries leave a sub-pixel gap
+
+`max-width:999px` and `min-width:1000px` do not partition the range: a viewport reported as
+999.5px (browser zoom, fractional DPR, some Windows setups) matches neither, and `#zone-search`
+falls back to whatever the unqualified rule says. Use `max-width:999.98px`, or — simpler — make
+band A the unqualified default and carve bands B and C out with `max-width` queries only, which is
+also how the file already works for the 700px boundary.
+
+### N7′ — Goal 1 now has an exception and does not say so
+
+"One search component, one behaviour, one visual treatment, across all five non-stub tabs" is
+contradicted by band C hiding the search on genomic. The non-goal explains *why*, but the goal is
+what a reader checks a build against. Add the caveat to goal 1, or add a one-line "known gaps"
+entry, so a phone-sized genomic tab without a search box is recognisably intended.
+
+### N8′ — Displacement costs vertical space, on panels that are already height-constrained
+
+Bands B and C push panels down by 40px. `#controls` has no `max-height` in the wide branch;
+`#context-national` and `#context` carry `max-height:80vh` (`dashboard.css:638-655`), tightened
+again under `@media (max-height:500px)` (`923`). On a landscape phone (≤500px tall, which is band C)
+a 40px push moves those bottoms 40px closer to the footer chrome. Either subtract the offset from
+their `max-height` in the same rule, or state that the loss is accepted.
+
+## Nits
+
+- **`dashboard.css:806`** — the Trends 40vh map rule is at **808**; the Spatial Risk one at 852 is
+  exact.
+- **Test 5** should assert a `#zone-search` rule per **band** per view, not just per view;
+  otherwise a view that is positioned in band A only still passes.
+- **`#zone-search` at 1200 ties with `#epi-split-handle` / `#trends-split-handle`** (also 1200,
+  `dashboard.css:172`, `247`). They are spatially disjoint from the top-left corner so it never
+  shows, and source order puts the handles on top — half a line, since the section reasons about
+  1200 explicitly.
+- **Where the three tokens are declared** is never stated (see B3′). `:root`, alongside
+  `--epi-panel-width` / `--trends-panel-width`, is the obvious home.
+- **§Standing assumption** is a good pattern; consider mirroring it in the zone-styling spec, which
+  has the same kind of load-bearing precondition.
+
+## Summary
+
+| # | Change | Severity |
+|---|---|---|
+| B1′ | Use `paddingTopLeft`/`paddingBottomRight` and fold the inset into the BR value; restore `maxZoom:10` in the snippet | blocking |
+| B2′ | Clamp the search width to the visible map on `trends`/`epi-trends` (CSS) and `genomic` (JS) | blocking |
+| B3′ | Rewrite test 6 to constrain the *search-offset* rule, not the panel's own width rule; state where the tokens are declared | blocking |
+| N1′ | Specify the status region's position and visibility; split visible empty-state from hidden live count | should fix |
+| N2′ | Expand the detail panel through the toggle button or an exported helper, not the class alone | should fix |
+| N3′ | Fix band B's rationale — `#context` has a definite width; the clamp is underivable on `map` only | should fix |
+| N4′ | Record the hooks-object side effect; hide (not just disable) the search when genomic never mounts | should fix |
+| N5′ | Add the Snapshot controller and the dropped Leaflet calls to §Removals | should fix |
+| N6′ | Close the sub-pixel gap between bands A and B | should fix |
+| N7′ | Caveat goal 1 for band-C genomic | should fix |
+| N8′ | Account for the 40px displacement in the displaced panels' `max-height` | should fix |
+
+Withdrawn from pass 1: the `maxZoom:10` query — §Review dispositions answers it correctly.
