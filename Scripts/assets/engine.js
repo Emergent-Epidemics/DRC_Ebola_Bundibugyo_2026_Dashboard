@@ -584,6 +584,13 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
 // zones packed together) and gain a little presence as you zoom into the
 // outbreak. Scale a resting stroke weight by the current zoom; emphasized
 // strokes (hover, selection, travel origin) keep their fixed weight.
+//
+// SUPERSEDED by zoneWeight() below, and being removed as call sites migrate.
+// Mind the signatures while both exist -- they are NOT interchangeable:
+// zoomWeight(base) takes a multiplier and reads the zoom itself, whereas
+// zoneWeight(zoom) takes the zoom and reads its multipliers from tokens.
+// zoneWeight(0.35) does not error; the clamp swallows 0.35 as a zoom level and
+// returns a plausible-looking wrong number.
 function zoomWeight(base) {
   const f = Math.max(0.5, Math.min(2.1, 0.5 + (map.getZoom() - 5) * 0.28));
   return base * f;
@@ -658,6 +665,9 @@ function zoneStroke(state) {
       return {color: rest, opacity: restOp, weight: w * zoneNum("--zone-focus-weight-mult", "1.35")};
     case "dim":
       return {color: rest, opacity: zoneNum("--zone-dim-stroke-opacity", "0.25"), weight: w};
+    // Role markers are the one place opacity is not tokenised. They are the
+    // only strokes left at full black, and there is no intent to fade them --
+    // a --zone-role-stroke-opacity token would be a knob nobody turns.
     case "epicenter":
       return {
         color: themeVar("--zone-role-stroke", "#111"),
