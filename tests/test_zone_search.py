@@ -327,3 +327,25 @@ def test_no_fitbounds_mixes_padding_with_a_directional_key():
         assert not (has_plain and has_directional), (
             f"fitBounds mixes padding with a directional key:\n{call}"
         )
+
+
+def test_applystatici18n_dependencies_are_declared_before_the_controller_calls_it():
+    """wireZoneSearch() calls applyStaticI18n() during module init. Any
+    module-level `let`/`const` that applyStaticI18n() reads must therefore be
+    declared ABOVE that call, or it is in its temporal dead zone and throws a
+    ReferenceError at page load -- killing the rest of engine.js. The other
+    guards here read the file as text and cannot see this; node --check only
+    validates syntax. This one pins the ordering."""
+    engine = _engine()
+    start = engine.index("function applyStaticI18n() {")
+    body = engine[start:engine.index("\n}", start)]
+    call_at = engine.index("applyStaticI18n();", engine.index("(function wireZoneSearch()"))
+    late = []
+    for m in re.finditer(r"^(?:let|const)\s+([A-Za-z_$][\w$]*)", engine, flags=re.MULTILINE):
+        name = m.group(1)
+        if m.start() > call_at and re.search(rf"\b{re.escape(name)}\b", body):
+            late.append((name, engine[:m.start()].count("\n") + 1))
+    assert not late, (
+        "applyStaticI18n() reads module-level bindings declared after the "
+        f"zone-search controller calls it (temporal dead zone): {late}"
+    )

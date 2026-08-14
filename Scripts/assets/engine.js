@@ -22,6 +22,11 @@ let flowHubUserSelected = false;
 let mapSelectedNom = null;          // the single "focused zone" for the snapshot view
 let flowArcStats = null;
 let activeView = "map";
+// Declared up here, far from the context-view code that owns it, because
+// applyStaticI18n() reads it and the zone-search controller calls that during
+// module init -- leaving the declaration next to its users put it in the
+// temporal dead zone at that point and threw on every page load.
+let contextSelectedNom = null;
 // Genomic tab (see genomic.js): the shared engine exposes only GENERIC, tip-
 // agnostic map hooks. `genomicMapHooks` is assigned once the map/layers exist
 // (below) and drives zone-level selection subscribe/emit + zone highlighting;
@@ -2409,6 +2414,7 @@ function findGeoLayerByNom(nom) {
     activeIdx = -1;
     input.setAttribute("aria-expanded", "false");
     input.setAttribute("aria-activedescendant", "");
+    live.textContent = "";
   }
 
   function setActive(idx) {
@@ -2431,7 +2437,6 @@ function findGeoLayerByNom(nom) {
     const q = String(query || "").trim().toLowerCase();
     if (!q) {
       close();
-      live.textContent = "";
       return;
     }
     matches = LOCATION_INDEX.filter(function(it) {
@@ -2452,7 +2457,7 @@ function findGeoLayerByNom(nom) {
     }
     empty.hidden = true;
     results.innerHTML = matches.map(function(it, i) {
-      return "<button type='button' role='option' class='zone-search-option'" +
+      return "<button type='button' role='option' class='zone-search-option' tabindex='-1'" +
         " id='zone-search-opt-" + i + "' aria-selected='false' data-idx='" + i + "'>" +
         escHtml(it.label) + "</button>";
     }).join("");
@@ -2471,7 +2476,6 @@ function findGeoLayerByNom(nom) {
     // visible in the map highlight / info panel / table row / plot titles.
     input.value = "";
     close();
-    live.textContent = "";
     // Desktop: stay focused so the next search starts immediately. Narrow:
     // the on-screen keyboard would cover half the map we just zoomed.
     if (isNarrow()) input.blur();
@@ -2518,7 +2522,12 @@ function findGeoLayerByNom(nom) {
   results.addEventListener("pointermove", function(e) {
     const btn = e.target.closest(".zone-search-option");
     if (!btn) return;
-    setActive(parseInt(btn.getAttribute("data-idx"), 10));
+    const idx = parseInt(btn.getAttribute("data-idx"), 10);
+    // Only on an actual row change: setActive() also calls scrollIntoView(),
+    // and re-running it on every pixel of movement within one row is wasted
+    // work that can nudge the list under a stationary cursor.
+    if (idx === activeIdx) return;
+    setActive(idx);
   });
 
   document.addEventListener("click", function(e) {
@@ -3191,8 +3200,6 @@ function renderNationalContextPanel(nom) {
     return renderContextPillarHtml(p);
   }).join("");
 }
-
-let contextSelectedNom = null;
 
 function clearContextSelection() {
   contextSelectedNom = null;
