@@ -110,32 +110,69 @@
     max-width:100%;
     box-sizing:border-box;
   }
-  #zone-search-wrap { position:relative; margin-top:2px; }
+  /* ── Standalone health-zone search ──────────────────────────────────────
+     One node (see common/chrome.py), sibling of #map, serving every view.
+     Placement per body.view-* lives further down, in the three band blocks.
+
+     No L.DomEvent.disableClickPropagation/disableScrollPropagation is used or
+     needed: #zone-search is a SIBLING of #map, not a descendant of the Leaflet
+     container, so its events never reach Leaflet's container-bound handlers in
+     the first place. Do not "fix" this by moving the node into the map pane. */
+  #zone-search {
+    position:absolute; z-index:1200;
+    width:min(240px, calc(100vw - 24px));
+  }
   #zone-search-input {
-    display:block; width:100%; max-width:100%; box-sizing:border-box;
-    background:#222; color:#eee; border:1px solid #444; padding:5px 8px;
-    border-radius:4px; font-size:12px;
+    display:block; width:100%; box-sizing:border-box;
+    min-height:var(--zone-search-height);
+    background:#ffffff; color:#2a2a27;
+    border:1px solid #e7e3db; border-radius:4px;
+    padding:6px 8px; font-size:12px;
+    /* Floats over a basemap rather than sitting in a light rail, so the input
+       carries the same lift the dropdown does. */
+    box-shadow:0 2px 8px rgba(42,42,39,0.18);
   }
   #zone-search-input:focus {
     outline:none; border-color:#9b7d4e; box-shadow:0 0 0 1px rgba(155,125,78,0.35);
   }
-  #zone-search-results {
+  /* Results and the no-matches panel share one position: exactly one of them
+     is ever visible, and the empty panel takes the results panel's place
+     rather than stacking under it. */
+  #zone-search-results,
+  #zone-search-empty {
     position:absolute; left:0; right:0; top:100%;
-    margin-top:2px; max-height:220px; overflow-y:auto;
-    background:#1a1a1a; border:1px solid #444; border-radius:4px;
-    box-shadow:0 4px 14px rgba(0,0,0,0.45); z-index:1100;
+    margin-top:6px;
+    background:#ffffff; border:1px solid #e7e3db; border-radius:4px;
+    box-shadow:0 4px 14px rgba(0,0,0,0.14);
+    z-index:1100;
   }
-  #zone-search-results[hidden] { display:none !important; }
+  #zone-search-results {
+    /* The 30vh arm matters on narrow Trends/Spatial Risk, where the map is
+       height:40vh -- an unclamped five-row list opens over the whole map. */
+    max-height:min(calc(5 * 32px), 30vh);
+    overflow-y:auto;
+  }
+  #zone-search-results[hidden],
+  #zone-search-empty[hidden] { display:none !important; }
+  #zone-search-empty {
+    padding:8px; font-size:12px; color:#9c968b; font-style:italic;
+  }
+  /* No :hover rule on purpose -- the controller moves .active on pointermove
+     so keyboard and mouse can never highlight two different rows at once. */
   .zone-search-option {
     display:block; width:100%; text-align:left;
-    background:transparent; color:#eee; border:none; border-bottom:1px solid #2a2a2a;
-    padding:7px 8px; font-size:12px; cursor:pointer; border-radius:0;
+    background:#ffffff; color:#2a2a27;
+    border:none; border-bottom:1px solid #e7e3db; border-radius:0;
+    padding:7px 8px; font-size:12px; line-height:1.35;
+    min-height:32px; box-sizing:border-box; cursor:pointer;
   }
   .zone-search-option:last-child { border-bottom:none; }
-  .zone-search-option:hover,
-  .zone-search-option.active { background:#2a2a2a; color:#ffd28a; }
-  .zone-search-empty {
-    padding:8px; font-size:12px; color:#888; font-style:italic;
+  .zone-search-option.active { background:#f3f1ec; color:#9b7d4e; }
+  /* Announcement-only region (#zone-search-live). */
+  .visually-hidden {
+    position:absolute; width:1px; height:1px;
+    margin:-1px; padding:0; border:0;
+    clip-path:inset(50%); overflow:hidden; white-space:nowrap;
   }
   #legend       { bottom:calc(var(--view-chrome-height) + 12px); left:12px; width:max-content; max-width:min(360px, calc(100vw - 24px)); }
   /* Size the legend to its widest line so the (sometimes long) layer title
@@ -160,11 +197,6 @@
   }
   body.view-trends #trends-panel { display:flex; flex-direction:column; gap:10px; }
   body.view-trends #map { right: var(--trends-panel-width); }
-  /* Sibling of #map (see chrome.py) -- engine.js relocates #trends-search-wrap
-     in here on narrow screens (see @media max-width:700px below), out of
-     #trends-controls, so search stays reachable next to the map instead of
-     being buried in the stacked bottom panel. Hidden/inert otherwise. */
-  #trends-search-slot { display:none; }
   #trends-split-handle {
     display:none;
     position:absolute;
@@ -273,11 +305,12 @@
   body.view-trends #epi-split-handle,
   body.view-trends #epi-trends-legend,
   body.view-trends #epi-float { display:none !important; }
-  /* #trends-controls: scope buttons + location search side by side, no
-     panel/card chrome around them -- they sit directly in the #trends-panel
-     rail, above the plots column. */
+  /* #trends-controls: just the scope buttons now (location search moved to
+     the standalone #zone-search component over the map). Kept as a flex row
+     so a second control can be added back beside the scope buttons without
+     re-deriving the layout; no justify-content, since one child needs none. */
   #trends-controls {
-    display:flex; align-items:center; justify-content:space-between;
+    display:flex; align-items:center;
     gap:10px; flex-wrap:wrap;
   }
   /* Scope is a row of buttons (National / Provincial / Health Zone) rather
@@ -295,52 +328,8 @@
   .trends-scope-btn.active {
     background:rgba(155,125,78,0.16); color:#7c4a12; border-color:#9b7d4e;
   }
-  /* Shared by #trends-search-wrap (Trends tab) and #epi-search-wrap (Spatial
-     Risk tab) so both tabs' location search looks/behaves identically.
-     Scoped to the class itself (not the parent controls row) so the input
-     keeps its styling when engine.js relocates #trends-search-wrap into
-     #trends-search-slot on narrow screens -- see wireTrendsSearchSlot(). */
-  .location-search-wrap input[type="search"] {
-    background:#ffffff; color:#2a2a27; border:1px solid #e7e3db; border-radius:4px;
-    padding:6px 8px; font-size:12px; width:100%; box-sizing:border-box;
-  }
-  .location-search-wrap input[type="search"]:focus {
-    outline:none; border-color:#9b7d4e; box-shadow:0 0 0 1px rgba(155,125,78,0.35);
-  }
-  /* Location search sits on the right side of the row (wide screens; see
-     #trends-search-slot for the Trends-tab narrow-screen position). */
-  .location-search-wrap { position:relative; flex:0 1 200px; min-width:140px; }
-  /* Floats over the content below rather than pushing it down. Tall enough
-     for ≥5 hits. */
-  .location-search-results {
-    display:none;
-    position:absolute; left:0; right:0; top:100%;
-    margin-top:6px;
-    max-height:calc(5 * 32px);
-    overflow-y:auto;
-    background:#ffffff; border:1px solid #e7e3db; border-radius:4px;
-    box-shadow:0 4px 14px rgba(0,0,0,0.14);
-    z-index:1100;
-  }
-  .location-search-results.open { display:block; }
-  .location-search-results button {
-    display:block; width:100%; text-align:left; border:none; border-bottom:1px solid #e7e3db;
-    background:#ffffff; color:#2a2a27; padding:7px 8px; font-size:12px; line-height:1.35;
-    min-height:32px; box-sizing:border-box; cursor:pointer;
-  }
-  .location-search-results button:hover,
-  .location-search-results button.active { background:#f3f1ec; color:#9b7d4e; }
-  .location-search-results .zone-search-empty {
-    padding:8px; font-size:12px; color:#9c968b; font-style:italic;
-  }
   #epi-trends-panel h2 {
     margin:0; font-size:14px; color:#2a2a27; font-weight:700;
-  }
-  /* Holds just the location search now (the National/Provincial scope buttons
-     were removed) -- same row layout as #trends-controls on the Trends tab. */
-  .epi-controls {
-    display:flex; align-items:center; justify-content:space-between;
-    gap:10px; flex-wrap:wrap;
   }
   #epi-trends-table-wrap {
     flex:1 1 auto; overflow:auto; border:1px solid #e7e3db; border-radius:6px;
@@ -815,15 +804,6 @@
       box-shadow:0 -2px 12px rgba(42,42,39,0.06);
     }
     #trends-split-handle { display:none !important; }
-    /* Location search moves to the map's top-left corner (where the zoom
-       control used to be) instead of staying buried in #trends-controls,
-       now down in the stacked bottom panel -- engine.js does the actual
-       DOM move (wireTrendsSearchSlot()), this just positions the slot. */
-    body.view-trends #trends-search-slot {
-      display:block; position:absolute; z-index:1000;
-      top:12px; left:12px;
-      width:min(220px, calc(100vw - 24px));
-    }
     /* Trends tab: replace the full legend (title/description/colour bar/
        ticks/scale/date-slider) with just a small play-button panel,
        top-right -- not enough room for all of that, and autoplay already

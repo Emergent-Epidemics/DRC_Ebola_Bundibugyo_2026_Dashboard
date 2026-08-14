@@ -22,9 +22,11 @@ NON_STUB_VIEWS = ["map", "trends", "epi-trends", "context", "genomic-epidemiolog
 RETIRED_IDS = [
     "zone-search-wrap",
     "trends-search-input",
+    "trends-search-results",
     "trends-search-wrap",
     "trends-search-slot",
     "epi-search-input",
+    "epi-search-results",
     "epi-search-wrap",
 ]
 
@@ -71,3 +73,61 @@ def test_zone_search_is_a_sibling_of_map():
     search_at = text.index('<div id="zone-search">')
     controls_at = text.index('<div id="controls"')
     assert map_at < search_at < controls_at
+
+
+def test_retired_css_vocabulary_is_gone():
+    """.location-search-* was the light rail vocabulary; it is now the
+    component's own styling and the class names go away. .zone-search-option
+    is NOT in this list -- it is retained as the new option class."""
+    css, engine = _css(), _engine()
+    for selector in (".location-search-wrap", ".location-search-results"):
+        assert selector not in css, f"{selector} still styled in dashboard.css"
+        assert selector not in engine, f"{selector} still referenced in engine.js"
+
+
+def test_component_has_a_visually_hidden_utility():
+    assert ".visually-hidden" in _css()
+
+
+# --- CSS structure helpers -------------------------------------------------
+# The repo has no CSS parser dependency and this stylesheet nests at most one
+# level (@media > rule), so brace-balance walks are enough.
+
+def _media_blocks(css):
+    """[(query, body)] for every @media block."""
+    blocks = []
+    for m in re.finditer(r"(@media[^{]*)\{", css):
+        depth, i = 1, m.end()
+        while depth and i < len(css):
+            if css[i] == "{":
+                depth += 1
+            elif css[i] == "}":
+                depth -= 1
+            i += 1
+        blocks.append((m.group(1).strip(), css[m.end():i - 1]))
+    return blocks
+
+
+def _band_c(css):
+    """The narrow branch. There is more than one max-width:700px block in the
+    file, so concatenate them all."""
+    return "\n".join(
+        body for query, body in _media_blocks(css)
+        if query == "@media (max-width: 700px)"
+    )
+
+
+def _rules(text):
+    """[(selector, body)] for every flat rule. @media headers do not match --
+    their bodies contain braces, which the body pattern forbids."""
+    return [(m.group(1).strip(), m.group(2)) for m in re.finditer(r"([^{}]*)\{([^{}]*)\}", text)]
+
+
+def _rules_for(text, target):
+    """Rules whose selector list contains exactly `target` as a whole selector
+    (so #info matches "#info" and "body.view-x #info", not "#info-body")."""
+    out = []
+    for selector, body in _rules(text):
+        if re.search(rf"(^|[\s,]){re.escape(target)}\s*(,|$)", selector):
+            out.append((selector, body))
+    return out
