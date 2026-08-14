@@ -10,6 +10,23 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-14-unified-zone-search-design.md` (revision 3). Read it before starting — this plan implements it and does not restate its reasoning.
 
+**Executor note.** Two things drifted during execution and are corrected in place:
+
+- The singular `ZONE_SEARCH_VIEW` (the active view id) was renamed to
+  `ZONE_SEARCH_VIEW_ID` in Task 6, because it differed from the table
+  `ZONE_SEARCH_VIEWS` by one character and both matched a single grep. Every
+  occurrence below already uses the new name. `wireZoneSearch()` is an IIFE
+  that runs at load, so a stale reference here would throw a `ReferenceError`
+  at page load — and the pytest guards read `engine.js` as *text*, so they
+  would not catch it. `node --check` only validates syntax, not resolution.
+  After any task that touches these identifiers, run
+  `grep -n "ZONE_SEARCH_VIEW\b" Scripts/assets/engine.js` and expect silence.
+- The per-task "Expected: N passed" counts are lower than reality from Task 3
+  onward, because code review added tests beyond the plan text (a CSS nesting
+  canary in Task 3; a band-aware displacement pair in Task 4). Treat the counts
+  as a lower bound and reconcile against the previous task's actual total
+  rather than adjusting anything to match a stale number.
+
 ---
 
 ## Environment
@@ -894,7 +911,7 @@ def test_view_is_read_from_the_body_dataset_not_active_view():
     search block, so activeView is still its "map" default there."""
     engine = _engine()
     assert "document.body.dataset.initialView" in engine
-    start = engine.index("const ZONE_SEARCH_VIEW =")
+    start = engine.index("const ZONE_SEARCH_VIEW_ID =")
     assert "dataset.initialView" in engine[start:start + 200]
 ```
 
@@ -961,7 +978,7 @@ Then, immediately after the `LOCATION_INDEX` declaration, add:
 // is still its "map" default here. Every page is a single view (the nav is
 // real cross-page links, and setActiveView() is called once, from that
 // bootstrap), so one read at init is enough.
-const ZONE_SEARCH_VIEW = document.body.dataset.initialView || "map";
+const ZONE_SEARCH_VIEW_ID = document.body.dataset.initialView || "map";
 
 const ZONE_SEARCH_VIEWS = {
   "map": {
@@ -1111,7 +1128,7 @@ function zoneSearchPad() {
 // of a full-width #map. Its width is an inline px style written by
 // applyWidth() in genomic.js, so it is read from the element.
 function zoneSearchInsetX() {
-  if (ZONE_SEARCH_VIEW !== "genomic-epidemiology") return 0;
+  if (ZONE_SEARCH_VIEW_ID !== "genomic-epidemiology") return 0;
   const panel = document.getElementById("genomic-panel");
   return panel ? panel.offsetWidth : 0;
 }
@@ -1215,7 +1232,7 @@ function findGeoLayerByNom(nom) {
 }
 
 (function wireZoneSearch() {
-  const view = ZONE_SEARCH_VIEWS[ZONE_SEARCH_VIEW];
+  const view = ZONE_SEARCH_VIEWS[ZONE_SEARCH_VIEW_ID];
   const root = document.getElementById("zone-search");
   const input = document.getElementById("zone-search-input");
   const results = document.getElementById("zone-search-results");
@@ -1678,8 +1695,8 @@ with:
       // highlight on a map the user may not recognise. #context-national is
       // deliberately left collapsed: the search selects a ZONE, and #context
       // is where zone context appears.
-      if (ZONE_SEARCH_VIEW === "map") expandPanel("info");
-      else if (ZONE_SEARCH_VIEW === "context") expandPanel("context");
+      if (ZONE_SEARCH_VIEW_ID === "map") expandPanel("info");
+      else if (ZONE_SEARCH_VIEW_ID === "context") expandPanel("context");
     }
 ```
 
