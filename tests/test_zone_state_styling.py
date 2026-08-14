@@ -134,8 +134,20 @@ def test_selection_colours_appear_only_as_theme_fallbacks():
 
     problems = []
     for literal in ("#ffae42", "#1a1a1a", "#9a7a16"):
-        for m in re.finditer(re.escape(literal), source):
+        for m in re.finditer(re.escape(literal), source, re.IGNORECASE):
             if not inside_token_read(m.start()):
                 line = source.count("\n", 0, m.start()) + 1
                 problems.append(f"{literal} at engine.js:{line}")
     assert not problems, "hardcoded zone state colours:\n" + "\n".join(problems)
+
+
+def test_dead_search_highlight_machinery_is_gone():
+    """Removed in the zone-state harmonisation: never assigned, never rendered.
+
+    Guarded because the obvious "fix" for a future search-highlight request is
+    to resurrect these, which would reintroduce a sixth zone-highlight state
+    outside the shared grammar.
+    """
+    source = _engine_source()
+    for name in ("searchHighlightLayer", "searchHighlightTimer", "clearSearchHighlight"):
+        assert name not in source, f"{name} should have been deleted"

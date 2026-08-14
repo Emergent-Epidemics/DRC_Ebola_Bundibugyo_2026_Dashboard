@@ -2148,8 +2148,6 @@ const zoneSearchResults = document.getElementById("zone-search-results");
 const zoneSearchWrap = document.getElementById("zone-search-wrap");
 let zoneSearchMatches = [];
 let zoneSearchActiveIdx = -1;
-let searchHighlightLayer = null;
-let searchHighlightTimer = null;
 
 function findGeoLayerByNom(nom) {
   let found = null;
@@ -2159,17 +2157,6 @@ function findGeoLayerByNom(nom) {
     }
   });
   return found;
-}
-
-function clearSearchHighlight() {
-  if (searchHighlightTimer) {
-    clearTimeout(searchHighlightTimer);
-    searchHighlightTimer = null;
-  }
-  if (searchHighlightLayer && searchHighlightLayer !== contextSelectedLayer) {
-    geoLayer.resetStyle(searchHighlightLayer);
-  }
-  searchHighlightLayer = null;
 }
 
 function closeZoneSearchResults() {
@@ -2230,7 +2217,6 @@ function selectHealthZone(nom) {
     selectContextZone(nom);
     map.fitBounds(layer.getBounds(), {padding: [40, 40], maxZoom: 10});
   } else if (activeView === "map") {
-    clearSearchHighlight();
     // Searching focuses the zone (persistent highlight + info box come from the
     // focus state itself, not a transient overlay). Keep the zoom-to-frame: a
     // searched zone may be offscreen, unlike an already-visible clicked one.
@@ -2988,7 +2974,6 @@ function renderNationalContextPanel(nom) {
 }
 
 let contextSelectedNom = null;
-let contextSelectedLayer = null;
 
 function clearContextSelection() {
   contextSelectedNom = null;
