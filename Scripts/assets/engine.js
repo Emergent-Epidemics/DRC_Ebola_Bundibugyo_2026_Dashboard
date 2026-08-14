@@ -2258,7 +2258,7 @@ const LOCATION_INDEX = (function() {
 // is still its "map" default here. Every page is a single view (the nav is
 // real cross-page links, and setActiveView() is called once, from that
 // bootstrap), so one read at init is enough.
-const ZONE_SEARCH_VIEW = document.body.dataset.initialView || "map";
+const ZONE_SEARCH_VIEW_ID = document.body.dataset.initialView || "map";
 
 const ZONE_SEARCH_VIEWS = {
   "map": {
@@ -2324,6 +2324,51 @@ const ZONE_SEARCH_VIEWS = {
     },
   },
 };
+
+// Zoom padding as Leaflet [x, y]. Narrow Trends/Spatial Risk maps are
+// height:40vh -- ~192px on a 480px viewport -- so [40,40] would eat 80px of it.
+function zoneSearchPad() {
+  return window.matchMedia("(max-width: 700px)").matches ? [16, 16] : [40, 40];
+}
+
+// Width of map hidden behind an OVERLAYING panel. Zero everywhere except
+// Genomic: the Trends and Spatial Risk rails narrow #map itself, so Leaflet
+// already fits inside the visible area there, but #genomic-panel sits on top
+// of a full-width #map. Its width is an inline px style written by
+// applyWidth() in genomic.js, so it is read from the element.
+function zoneSearchInsetX() {
+  if (ZONE_SEARCH_VIEW_ID !== "genomic-epidemiology") return 0;
+  const panel = document.getElementById("genomic-panel");
+  return panel ? panel.offsetWidth : 0;
+}
+
+// NEVER pass `padding` alongside paddingTopLeft/paddingBottomRight: Leaflet
+// resolves each side as `paddingBottomRight || padding || [0,0]`, so a
+// directional key REPLACES padding on that side rather than adding to it, and
+// [0,0] is truthy. tests/test_zone_search.py guards this.
+function zoneSearchZoomTo(entry) {
+  let bounds = null;
+  if (entry.kind === "province") {
+    provinceOutlineLayer.eachLayer(function(layer) {
+      const props = layer.feature && layer.feature.properties;
+      if (!bounds && props && props.province === entry.id) bounds = layer.getBounds();
+    });
+  } else {
+    const layer = findGeoLayerByNom(entry.id);
+    if (layer) bounds = layer.getBounds();
+  }
+  // No geometry (a zone in the index but absent from the drawn layer): the
+  // selection still applies, the zoom is simply skipped.
+  if (!bounds || !bounds.isValid()) return;
+  const pad = zoneSearchPad();
+  map.fitBounds(bounds, {
+    paddingTopLeft: pad,
+    paddingBottomRight: [pad[0] + zoneSearchInsetX(), pad[1]],
+    // Caps how far we zoom INTO a small unit; a large province fits well below
+    // z10 and never reaches it.
+    maxZoom: 10,
+  });
+}
 
 const zoneSearchInput = document.getElementById("zone-search-input");
 const zoneSearchResults = document.getElementById("zone-search-results");
@@ -2893,8 +2938,12 @@ function renderTrendsPlots() {
 // the old floating trends panel that used to sit on top of the map. Now
 // that the map and plots panel are two separate fixed columns (nothing
 // overlaps), that auto-pan just made the map jump around distractingly on
-// every click, so it's been removed -- selecting a zone/province no longer
-// moves the map at all.
+// every click, so it's been removed -- CLICKING a zone/province still does
+// not move the map.
+//
+// SEARCHING one does, via zoneSearchZoomTo(). The asymmetry is deliberate:
+// a searched location can be offscreen, a clicked one cannot. Do not
+// "restore consistency" by deleting one side -- they answer different needs.
 
 function setTrendsSelection(key, opts) {
   opts = opts || {};

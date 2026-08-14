@@ -309,5 +309,21 @@ def test_view_is_read_from_the_body_dataset_not_active_view():
     search block, so activeView is still its "map" default there."""
     engine = _engine()
     assert "document.body.dataset.initialView" in engine
-    start = engine.index("const ZONE_SEARCH_VIEW =")
+    start = engine.index("const ZONE_SEARCH_VIEW_ID =")
     assert "dataset.initialView" in engine[start:start + 200]
+
+
+def test_no_fitbounds_mixes_padding_with_a_directional_key():
+    """Leaflet resolves `paddingBottomRight || padding || [0,0]`, so a
+    directional key REPLACES padding on that side instead of adding to it --
+    and [0,0] is an array, hence truthy. Mixing them silently drops padding on
+    one side, which is invisible in a screenshot unless the fitted geometry
+    happens to sit near an edge.
+    """
+    engine = _engine()
+    for call in re.findall(r"fitBounds\((.*?)\n?\s*\}\);", engine, flags=re.DOTALL):
+        has_plain = re.search(r"\bpadding\s*:", call)
+        has_directional = re.search(r"\bpadding(TopLeft|BottomRight)\s*:", call)
+        assert not (has_plain and has_directional), (
+            f"fitBounds mixes padding with a directional key:\n{call}"
+        )
