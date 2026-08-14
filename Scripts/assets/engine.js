@@ -1909,6 +1909,11 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         // dropped mouseouts on fast motion strand them. Genomic zone interaction
         // arrives with the coordinator in a later phase.
         if (activeView === "genomic-epidemiology") return;
+        // Requirement: a selected zone does not react to hover. That is about
+        // STYLING only -- it keeps its tooltip, its floating readout and its
+        // province-hover behaviour. Guard the setStyle/bringToFront pairs
+        // below, never the whole handler.
+        const isSelected = currentSelectedNoms().indexOf(feature.properties.nom) !== -1;
         if (activeView === "trends") {
           if (trendsScope === "national") return;
           if (trendsScope === "province") {
@@ -1918,21 +1923,31 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
             setTrendsProvinceHover(feature.properties.province);
             return;
           }
-          e.target.setStyle({weight: 1.6, color: "#ffae42"});
-          e.target.bringToFront();
+          if (!isSelected) {
+            e.target.setStyle(zoneStroke("hover"));
+            e.target.bringToFront();
+          }
           return;
         }
         if (activeView === "context") {
+          if (!isSelected) {
+            e.target.setStyle(zoneStroke("hover"));
+            e.target.bringToFront();
+          }
           return;
         }
         if (activeView === "epi-trends") {
-          e.target.setStyle({weight: 1.6, color: "#ffae42"});
-          e.target.bringToFront();
-          updateEpiFloat(feature.properties.nom, e.latlng);
+          if (!isSelected) {
+            e.target.setStyle(zoneStroke("hover"));
+            e.target.bringToFront();
+          }
+          updateEpiFloat(feature.properties.nom, e.latlng);   // fires for selected zones too
           return;
         }
-        e.target.setStyle({weight: 1.6, color: "#ffae42"});
-        e.target.bringToFront();
+        if (!isSelected) {
+          e.target.setStyle(zoneStroke("hover"));
+          e.target.bringToFront();
+        }
         // Hover no longer fills the info box (that follows the focused zone).
         // Show a lightweight, layer-aware tooltip instead.
         e.target.bindTooltip(layerHoverTooltipHTML(feature), {sticky: true, direction: "top"}).openTooltip(e.latlng);
@@ -1947,16 +1962,10 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
             return;
           }
           geoLayer.resetStyle(e.target);
-          if (trendsScope === "health_zone" && trendsSelectedKey &&
-              feature.properties.nom === trendsSelectedKey) {
-            e.target.setStyle({weight: 2, color: "#ffae42"});
-          }
           return;
         }
         if (activeView === "context") {
-          if (e.target !== contextSelectedLayer) {
-            geoLayer.resetStyle(e.target);
-          }
+          geoLayer.resetStyle(e.target);
           return;
         }
         if (activeView === "epi-trends") {
@@ -1966,8 +1975,8 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
         }
         if (e.target.getTooltip()) e.target.unbindTooltip();
         geoLayer.resetStyle(e.target);
-        // resetStyle re-applies styleFn, which already paints the focus border
-        // for the focused zone, so leaving a focused zone keeps its highlight.
+        // Selection is drawn in the zone-selection pane, so resetStyle here
+        // cannot disturb it -- there is no focus border left in styleFn to lose.
       },
       click: function(e) {
         if (activeView === "trends") {

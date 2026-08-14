@@ -117,3 +117,25 @@ def test_ramp_produces_the_documented_weights():
     assert round(weight(9), 2) == 1.70, "z9 resting weight changed"
     assert round(weight(12), 3) == 1.955, "ramp ceiling changed"
     assert weight(3) == weight(5), "ramp must not keep thinning below z5"
+
+
+def test_selection_colours_appear_only_as_theme_fallbacks():
+    """The five tabs must not be able to hardcode their own selection colour.
+
+    Scoped to occurrences rather than banned outright, because the token system
+    itself requires themeVar("--zone-selected-stroke", "#ffae42") -- an outright
+    ban would fail a correct implementation.
+    """
+    source = _engine_source()
+    allowed = [(m.start(), m.end()) for m in THEMEVAR.finditer(source)]
+
+    def inside_token_read(pos):
+        return any(start <= pos < end for start, end in allowed)
+
+    problems = []
+    for literal in ("#ffae42", "#1a1a1a", "#9a7a16"):
+        for m in re.finditer(re.escape(literal), source):
+            if not inside_token_read(m.start()):
+                line = source.count("\n", 0, m.start()) + 1
+                problems.append(f"{literal} at engine.js:{line}")
+    assert not problems, "hardcoded zone state colours:\n" + "\n".join(problems)
