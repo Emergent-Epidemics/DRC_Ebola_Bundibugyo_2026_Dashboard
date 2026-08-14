@@ -221,3 +221,42 @@ def test_zone_search_positioned_for_every_non_stub_view():
     for view in NON_STUB_VIEWS:
         assert f"body.view-{view} #zone-search" in css, f"no #zone-search rule for view-{view}"
     assert "body.stub-view #zone-search" in css
+
+
+# Panels displaced downward by the search in band B or band C. Each must offset
+# by --zone-search-height so the gap cannot drift.
+DISPLACED = ["#controls", "#info", "#trends-legend", "#epi-trends-legend", "#context-national"]
+
+
+def test_every_displaced_panel_offsets_by_the_search_height():
+    """Each panel the search pushes down must offset by the token, not by a
+    literal, so the gap between search and panel cannot drift."""
+    offset = "calc(12px + var(--zone-search-height) + 8px)"
+    css = _css()
+    for panel in DISPLACED:
+        rules = _rules_for(css, panel)
+        assert rules, f"{panel} has no rule at all -- did a selector get renamed?"
+        assert any(offset in body for _sel, body in rules), (
+            f"{panel} is displaced by the search but no rule offsets by {offset}"
+        )
+
+
+def test_zone_search_input_reads_the_height_token():
+    assert "min-height:var(--zone-search-height)" in _css().replace(" ", "")
+
+
+def test_zone_search_repositioned_in_band_c():
+    """Test 5's per-BAND half: a view positioned only in band A must fail."""
+    band_c = _band_c(_css())
+    for view in ["map", "context", "trends", "epi-trends"]:
+        assert f"body.view-{view} #zone-search" in band_c, (
+            f"view-{view} has no band-C #zone-search rule"
+        )
+
+
+def test_genomic_search_hidden_in_band_c():
+    band_c = _band_c(_css())
+    rules = _rules_for(band_c, "#zone-search")
+    genomic = [b for s, b in rules if "genomic-epidemiology" in s]
+    assert genomic, "no band-C #zone-search rule for the genomic view"
+    assert any("display:none" in b.replace(" ", "") for b in genomic)

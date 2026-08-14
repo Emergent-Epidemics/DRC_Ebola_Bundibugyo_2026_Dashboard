@@ -232,6 +232,29 @@
     width:min(240px, calc(100% - var(--genomic-panel-width, 70vw) - 24px));
   }
   body.stub-view #zone-search { display:none !important; }
+  /* ── Band B — 701px … 999.98px ─────────────────────────────────────────
+     The beside-the-panel layout of band A collides with the opposite corner
+     here: on map the search would span 362–602px while #info (right:12px,
+     max-width:340px) starts at 100vw − 352, meeting at ~954px; on context the
+     figures are 302–542px against #context at 100vw − 292, meeting at ~834px.
+     #info is content-sized under a bare max-width, so the space actually left
+     is not derivable in CSS; context could be clamped (it has a definite
+     width) but follows map so the two tabs do not diverge.
+
+     So: corner on every tab, and the two views with something already at
+     12px/12px displace it downward. #info needs no displacement -- at ≥701px
+     it starts at ≥349px, clear of the search's 252px right edge. */
+  @media (max-width: 999.98px) {
+    body.view-map #zone-search,
+    body.view-context #zone-search { top:12px; left:12px; }
+    body.view-map #controls { top:calc(12px + var(--zone-search-height) + 8px); }
+    body.view-context #context-national {
+      top:calc(12px + var(--zone-search-height) + 8px);
+      /* Displacement must not push the panel's bottom edge toward the footer:
+         give back exactly what the top took. */
+      max-height:calc(80vh - var(--zone-search-height) - 8px);
+    }
+  }
   #legend       { bottom:calc(var(--view-chrome-height) + 12px); left:12px; width:max-content; max-width:min(360px, calc(100vw - 24px)); }
   /* Size the legend to its widest line so the (sometimes long) layer title
      stays on one line instead of wrapping. */
@@ -872,7 +895,7 @@
       /* Map is full-width in its own top section on narrow screens (see
          "map and plots column stack" rules below), so no panel-width
          offset is needed here the way there is on wider screens. */
-      top:12px; bottom:auto; right:12px;
+      top:calc(12px + var(--zone-search-height) + 8px); bottom:auto; right:12px;
       max-width:none; width:auto; padding:6px;
     }
     #trends-legend-title,
@@ -908,7 +931,7 @@
       /* Cancel the wide-screen right:calc(...) offset -- the map is
          full-width in its own top section here (see the map/table stacking
          rules above), so this just needs to sit in its own top-left corner. */
-      top:12px; left:12px; right:auto; bottom:auto;
+      top:calc(12px + var(--zone-search-height) + 8px); left:12px; right:auto; bottom:auto;
       max-width:min(240px, calc(100vw - 24px));
     }
     body.view-context #context-national {
@@ -934,8 +957,28 @@
        collapsed to just their title bar by default here (see
        wirePanelToggles()'s narrow-screen auto-collapse in engine.js), so
        this mostly affects where that collapsed title bar sits. */
-    #controls       { top:12px; }
-    #info           { top:12px; }
+    /* ── Band C: the search owns the whole top row ──────────────────────
+       Full width, so no clamp has to reason about the opposite corner --
+       #info can be re-expanded to 60vw by the user at any time, so no static
+       clamp derived from its collapsed width could have been correct. The
+       rail clamp is switched off here: the rails stack BELOW a full-width
+       map at this width. Everything else at top:12px drops below the search
+       by exactly its height. */
+    body.view-map #zone-search,
+    body.view-context #zone-search,
+    body.view-trends #zone-search,
+    body.view-epi-trends #zone-search {
+      top:12px; left:12px; width:calc(100vw - 24px);
+    }
+    /* No search on Genomic here: #genomic-panel has no narrow rule, so the
+       map is a ~108px strip and any usable box would float over the
+       phylogeny. See "Known gaps" in the design spec. */
+    body.view-genomic-epidemiology #zone-search { display:none !important; }
+    #controls       { top:calc(12px + var(--zone-search-height) + 8px); }
+    #info {
+      top:calc(12px + var(--zone-search-height) + 8px);
+      max-height:calc(80vh - var(--zone-search-height) - 8px);
+    }
     /* #controls' wide-screen width (min(340px, 100vw-24px) -- needed when
        expanded, to fit the search box/select/checkboxes) makes its
        collapsed-by-default title bar stretch almost the full screen width,
@@ -969,6 +1012,13 @@
       max-width:min(12vmin, 72px);
     }
     .view-tab { padding:3px 8px; font-size:11px; }
+  }
+  /* A landscape phone is band C AND max-height:500px; the 70vh cap above wins
+     over band C's, so re-apply the displacement give-back here. Deliberately
+     NOT folded into the max-height:500px block: a wide, short window (e.g.
+     1200x450) is band A, where nothing is displaced. */
+  @media (max-width: 700px) and (max-height: 500px) {
+    #info { max-height:calc(70vh - var(--zone-search-height) - 8px); }
   }
   /* Tracker stack ("outbreak size summary", top-right of #site-header;
      rows are right-aligned to hug the header's right edge). */
