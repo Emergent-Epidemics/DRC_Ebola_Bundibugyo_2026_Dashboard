@@ -206,8 +206,13 @@ function featureByNom(nom) {
 
 // One derived read of "what is selected right now". The five per-view
 // selection variables stay where they are -- merging them would touch every
-// view's logic -- but only this function is allowed to answer the question, so
-// the tabs cannot drift apart into five different selection treatments again.
+// view's logic -- but this is the only function that answers the question, so
+// the five tabs paint selection through one path instead of five.
+//
+// That is a convention, not an encapsulation: nothing stops a new view from
+// painting its own highlight inline, and a sixth activeView added without a
+// branch here falls through to [] silently rather than failing. Keep new views
+// in step by adding them here.
 function currentSelectedNoms() {
   if (activeView === "map") return mapSelectedNom ? [mapSelectedNom] : [];
   if (activeView === "epi-trends") return epiSelectedNom ? [epiSelectedNom] : [];
@@ -2047,10 +2052,6 @@ const geoLayer = L.geoJSON(PAYLOAD.geometry, {
   }
 }).addTo(map);
 
-// Re-apply zone borders (e.g. after a zoom so zoomWeight() picks up the new
-// zoom). styleFn already encodes the map/epi-trends selection, so re-styling the
-// whole layer preserves those; the trends/context selection highlight lives
-// outside styleFn, so re-apply it.
 // Re-apply zone borders (e.g. after a zoom, so the weight ramp picks up the new
 // zoom). styleFn encodes every resting/tier style; selection lives in its own
 // pane and is rebuilt here rather than re-fronted, which is what the old
