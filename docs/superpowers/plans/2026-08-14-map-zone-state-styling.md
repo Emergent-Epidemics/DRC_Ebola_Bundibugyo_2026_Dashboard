@@ -646,40 +646,7 @@ This is the task that removes the five divergent selection treatments.
   `2983-2991` (`recomputeTrendsMap`), `2534-2545` (`setTrendsSelection`)
 - Modify: `tests/test_zone_state_styling.py` (add the literal-containment guard)
 
-- [ ] **Step 1: Add the failing literal-containment test**
-
-Append to `tests/test_zone_state_styling.py`:
-
-```python
-def test_selection_colours_appear_only_as_theme_fallbacks():
-    """The five tabs must not be able to hardcode their own selection colour.
-
-    Scoped to occurrences rather than banned outright, because the token system
-    itself requires themeVar("--zone-selected-stroke", "#ffae42") -- an outright
-    ban would fail a correct implementation.
-    """
-    source = _engine_source()
-    allowed = {(m.start(), m.end()) for m in THEMEVAR.finditer(source)}
-
-    def inside_themevar(pos):
-        return any(start <= pos < end for start, end in allowed)
-
-    problems = []
-    for literal in ("#ffae42", "#1a1a1a", "#9a7a16"):
-        for m in re.finditer(re.escape(literal), source):
-            if not inside_themevar(m.start()):
-                line = source.count("\n", 0, m.start()) + 1
-                problems.append(f"{literal} at engine.js:{line}")
-    assert not problems, "hardcoded zone state colours:\n" + "\n".join(problems)
-```
-
-- [ ] **Step 2: Run it to verify it fails**
-
-Run: `cd Scripts && python3.9 -m pytest ../tests/test_zone_state_styling.py::test_selection_colours_appear_only_as_theme_fallbacks -q`
-Expected: FAIL listing roughly ten locations — the three hover sites, the six selection sites, and
-the prose mention in the comment at `1510`.
-
-- [ ] **Step 3: Add the shared fill helper above `styleFn`**
+- [ ] **Step 1: Add the shared fill helper above `styleFn`**
 
 Insert immediately before `function styleFn(feature) {` at line 1470:
 
@@ -702,7 +669,7 @@ function zoneFillStyle(v, has, ref, layer, bump) {
 }
 ```
 
-- [ ] **Step 4: Replace the body of `styleFn` (lines 1470-1531)**
+- [ ] **Step 2: Replace the body of `styleFn` (lines 1470-1531)**
 
 ```js
 function styleFn(feature) {
@@ -742,7 +709,7 @@ function styleFn(feature) {
 }
 ```
 
-- [ ] **Step 5: Replace the body of `epiTrendsStyleFn` (lines 1320-1374)**
+- [ ] **Step 3: Replace the body of `epiTrendsStyleFn` (lines 1320-1374)**
 
 ```js
 function epiTrendsStyleFn(feature) {
@@ -801,7 +768,7 @@ function epiTrendsStyleFn(feature) {
 }
 ```
 
-- [ ] **Step 6: Delete the leftover selection re-paint blocks**
+- [ ] **Step 4: Delete the leftover selection re-paint blocks**
 
 In `setTrendsSelection`, replace:
 
@@ -864,14 +831,14 @@ block and the `contextSelectedLayer = layer;` assignment.
 In `genomicMapHooks.highlightZones`, delete the `geoLayer.eachLayer(...)` block that calls
 `bringToFront()` on highlighted zones — the ring pane replaces it.
 
-- [ ] **Step 7: Delete the old `zoomWeight` ramp, now that nothing calls it**
+- [ ] **Step 5: Delete the old `zoomWeight` ramp, now that nothing calls it**
 
 Run: `grep -n "zoomWeight" Scripts/assets/engine.js`
 Expected: only the function definition — all six call sites were replaced by `zoneStroke()` in
-Steps 4 and 5. Delete the function and its comment (lines `583-591`). If any call site remains,
+Steps 2 and 3. Delete the function and its comment (lines `583-591`). If any call site remains,
 migrate it before deleting.
 
-- [ ] **Step 8: Check what still references `contextSelectedLayer`**
+- [ ] **Step 6: Check what still references `contextSelectedLayer`**
 
 Run: `grep -n "contextSelectedLayer" Scripts/assets/engine.js`
 Expected: only the `let contextSelectedLayer = null;` declaration at `2795` and the read inside
@@ -879,15 +846,21 @@ Expected: only the `let contextSelectedLayer = null;` declaration at `2795` and 
 wholesale and removes the declaration with it. Deleting the declaration here would leave
 `clearSearchHighlight` referencing an undeclared variable.
 
-- [ ] **Step 9: Run the tests**
+- [ ] **Step 7: Run the tests**
 
-Run: `cd Scripts && python3.9 -m pytest ../tests/test_zone_state_styling.py -q`
-Expected: the literal-containment test now fails on **one** remaining hit — the prose `#ffae42` in
-the comment at old line `1510` ("distinct from the amber (#ffae42) hover"), if that comment
-survived your `styleFn` rewrite. Delete the stale comment; the behaviour it describes is gone.
-Re-run: all tests PASS.
+Run: `cd Scripts && python3.9 -m pytest ../tests -q`
+Expected: **unchanged at 2 failed, 38 passed.** This task reads no new tokens, so the guard test
+result must not move.
 
-- [ ] **Step 10: Build and verify**
+Then confirm the only `#ffae42` / `#1a1a1a` / `#9a7a16` literals left in `engine.js` are the four
+hover/mouseout sites that Task 7 owns, plus the one legitimate
+`themeVar("--zone-selected-stroke", "#ffae42")` fallback inside `SelectionRing`:
+
+Run: `grep -n '#ffae42\|#1a1a1a\|#9a7a16' Scripts/assets/engine.js`
+Expected: exactly five hits — one `themeVar` fallback and four `setStyle` calls inside the
+`geoLayer` `mouseover`/`mouseout` handlers. Any other hit means a site was missed.
+
+- [ ] **Step 8: Build and verify**
 
 Run: `python3.9 Scripts/build_dashboard.py`, serve, then check every tab:
 - Snapshot: borders are off-white; selecting a zone shows exactly ONE highlight (the cased amber
@@ -897,7 +870,7 @@ Run: `python3.9 Scripts/build_dashboard.py`, serve, then check every tab:
 - Trends health zone: select a zone, drag the time slider — the ring stays put through every tick.
 - Genomic: the coordinator's highlighted zones show the same amber ring, not gold.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add Scripts/assets/engine.js tests/test_zone_state_styling.py
@@ -915,7 +888,44 @@ The trap: these handlers do more than restyle. Snapshot binds the layer-value to
 drives the floating readout. Suppressing the whole handler would take the tooltip and readout away
 from the zone the user just clicked — a functional regression, not a styling change.
 
-- [ ] **Step 1: Add the selection check at the top of `mouseover`**
+- [ ] **Step 1: Add the failing literal-containment test**
+
+Every remaining hardcoded selection colour in `engine.js` now lives in the four hover/mouseout
+sites this task migrates, so the guard can finally be written and go green in the same task.
+
+Append to `tests/test_zone_state_styling.py`:
+
+```python
+def test_selection_colours_appear_only_as_theme_fallbacks():
+    """The five tabs must not be able to hardcode their own selection colour.
+
+    Scoped to occurrences rather than banned outright, because the token system
+    itself requires themeVar("--zone-selected-stroke", "#ffae42") -- an outright
+    ban would fail a correct implementation.
+    """
+    source = _engine_source()
+    allowed = [(m.start(), m.end()) for m in THEMEVAR.finditer(source)]
+
+    def inside_token_read(pos):
+        return any(start <= pos < end for start, end in allowed)
+
+    problems = []
+    for literal in ("#ffae42", "#1a1a1a", "#9a7a16"):
+        for m in re.finditer(re.escape(literal), source):
+            if not inside_token_read(m.start()):
+                line = source.count("\n", 0, m.start()) + 1
+                problems.append(f"{literal} at engine.js:{line}")
+    assert not problems, "hardcoded zone state colours:\n" + "\n".join(problems)
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd Scripts && python3.9 -m pytest ../tests/test_zone_state_styling.py::test_selection_colours_appear_only_as_theme_fallbacks -q`
+Expected: FAIL listing exactly four `#ffae42` sites — three in `mouseover` (trends, epi-trends and
+the default snapshot branch) and one in the trends `mouseout` re-apply. Those four are what this
+task removes.
+
+- [ ] **Step 3: Add the selection check at the top of `mouseover`**
 
 Immediately after the `if (activeView === "genomic-epidemiology") return;` line inside `mouseover`,
 insert:
@@ -928,7 +938,7 @@ insert:
         const isSelected = currentSelectedNoms().indexOf(feature.properties.nom) !== -1;
 ```
 
-- [ ] **Step 2: Guard each `setStyle` / `bringToFront` pair**
+- [ ] **Step 4: Guard each `setStyle` / `bringToFront` pair**
 
 In the `trends` branch, replace:
 
@@ -986,7 +996,7 @@ with:
 
 Leave the `bindTooltip(...).openTooltip(...)` line that follows it **outside** the guard.
 
-- [ ] **Step 3: Add hover to the Context tab**
+- [ ] **Step 5: Add hover to the Context tab**
 
 Replace the whole `if (activeView === "context") { return; }` block inside `mouseover` with:
 
@@ -1023,7 +1033,7 @@ with:
 `resetStyle` on a selected zone is now harmless — its ring is in another pane, and `styleFn`
 carries no selection stroke to lose.
 
-- [ ] **Step 4: Fix the `mouseout` asymmetry in the trends branch**
+- [ ] **Step 6: Fix the `mouseout` asymmetry in the trends branch**
 
 Replace:
 
@@ -1046,7 +1056,7 @@ with:
 Leave the `epi-trends` `mouseout` branch alone — `hideEpiFloat()` must keep firing for a selected
 zone, or the float readout strands open after the cursor leaves.
 
-- [ ] **Step 5: Build and verify the exact regression this task guards against**
+- [ ] **Step 7: Build and verify the exact regression this task guards against**
 
 Run: `python3.9 Scripts/build_dashboard.py`, serve, then:
 - Snapshot: click a zone, then hover it. Its border must NOT change — and its layer-value tooltip
@@ -1057,7 +1067,7 @@ Run: `python3.9 Scripts/build_dashboard.py`, serve, then:
   selected zone's amber ring stays fully intact along the shared edge. This is requirement 4.
 - Context: hover any zone — it lifts to white. Click it — ring appears, hover no longer changes it.
 
-- [ ] **Step 6: Verify the ring survives a pan (the `tearDownHoverDecoration` edge case)**
+- [ ] **Step 8: Verify the ring survives a pan (the `tearDownHoverDecoration` edge case)**
 
 `tearDownHoverDecoration()` runs on `movestart` to clear hover decoration that a pan would
 otherwise strand. It must not touch the selection ring, which is not hover decoration and lives in
@@ -1067,10 +1077,15 @@ Select a zone, then pan the map by dragging.
 Expected: the hover lift on whatever was under the cursor clears, and the selected zone's ring is
 untouched throughout the drag and after it settles.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
+
+Also run the full suite: `cd Scripts && python3.9 -m pytest ../tests -q`
+Expected: **2 failed, 39 passed** — the new literal-containment test now PASSES, and the only
+`#ffae42` left in `engine.js` is the `themeVar("--zone-selected-stroke", "#ffae42")` fallback
+inside `SelectionRing`. The two long-standing failures are unchanged; Task 8 clears them.
 
 ```bash
-git add Scripts/assets/engine.js
+git add Scripts/assets/engine.js tests/test_zone_state_styling.py
 git commit -m "Suppress hover restyle on selected zones without losing tooltips"
 ```
 
