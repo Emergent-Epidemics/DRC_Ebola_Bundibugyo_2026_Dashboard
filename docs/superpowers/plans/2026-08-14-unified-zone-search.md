@@ -1248,12 +1248,12 @@ function findGeoLayerByNom(nom) {
   let activeIdx = -1;
 
   // Per-view i18n goes on the data-i18n-* ATTRIBUTES, never the properties:
-  // applyI18n() re-reads those attributes on every language toggle, so setting
+  // applyStaticI18n() re-reads those attributes on every language toggle, so setting
   // input.placeholder here would survive only until the first EN/FR switch --
   // a bug that only ever shows up in the French build.
   input.setAttribute("data-i18n-placeholder", view.placeholder);
   input.setAttribute("data-i18n-aria", view.aria);
-  applyI18n();
+  applyStaticI18n();
 
   function isNarrow() {
     return window.matchMedia("(max-width: 700px)").matches;

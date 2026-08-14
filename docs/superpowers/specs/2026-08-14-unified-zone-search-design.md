@@ -355,14 +355,14 @@ bootstrap), so one read at init is sufficient and no re-keying is needed.
 
 ### Per-view i18n must be applied to attributes, not properties
 
-`applyI18n()` re-reads `data-i18n-aria` and `data-i18n-placeholder` from the DOM
+`applyStaticI18n()` re-reads `data-i18n-aria` and `data-i18n-placeholder` from the DOM
 on **every** language toggle (`engine.js:276-284`). Setting `input.placeholder`
 or `input.setAttribute("aria-label", …)` directly would therefore survive only
 until the first EN/FR switch — the Trends box would show "Search for a
 location…" until the user toggles language and "Type a health zone name…"
 forever after, a bug visible only in the French build. The controller rewrites
 the **`data-i18n-*` attributes** at init from the view's entry, then calls
-`applyI18n()`.
+`applyStaticI18n()`.
 
 The `aria` key is per-view for the same reason the placeholder is: the markup's
 `ui.zone_search` = "Search health zone" / "Rechercher une zone de santé" is
