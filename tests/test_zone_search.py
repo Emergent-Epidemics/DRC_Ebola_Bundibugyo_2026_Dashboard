@@ -124,6 +124,14 @@ def _band_c(css):
     )
 
 
+def _band_b(css):
+    """The mid branch. Unlike band C there is exactly one such block."""
+    return "\n".join(
+        body for query, body in _media_blocks(css)
+        if query == "@media (max-width: 999.98px)"
+    )
+
+
 def _rules(text):
     """[(selector, body)] for every flat rule. @media headers do not match --
     their bodies contain braces, which the body pattern forbids."""
@@ -223,22 +231,46 @@ def test_zone_search_positioned_for_every_non_stub_view():
     assert "body.stub-view #zone-search" in css
 
 
-# Panels displaced downward by the search in band B or band C. Each must offset
-# by --zone-search-height so the gap cannot drift.
-DISPLACED = ["#controls", "#info", "#trends-legend", "#epi-trends-legend", "#context-national"]
+# Which panels each band pushes below the search. Band A displaces nothing --
+# there the search sits BESIDE the corner panel, not above it. #context-national
+# appears only in band B: at <=700px a pre-existing rule already drops it to
+# top:clamp(128px, 24vh, 200px), well clear of the search.
+DISPLACED_BY_BAND = {
+    "band B": ["#controls", "#context-national"],
+    "band C": ["#controls", "#info", "#trends-legend", "#epi-trends-legend"],
+}
+
+DROP_OFFSET = "calc(12px + var(--zone-search-drop))"
 
 
-def test_every_displaced_panel_offsets_by_the_search_height():
-    """Each panel the search pushes down must offset by the token, not by a
-    literal, so the gap between search and panel cannot drift."""
-    offset = "calc(12px + var(--zone-search-height) + 8px)"
+def test_displaced_panels_offset_by_the_drop_token_in_the_right_band():
+    """Asserting the offset exists SOMEWHERE would pass for a panel displaced
+    in the wrong band -- which is exactly how a band-B max-height leaked into
+    band C once already. Anchor each panel to the band that must move it."""
     css = _css()
-    for panel in DISPLACED:
-        rules = _rules_for(css, panel)
-        assert rules, f"{panel} has no rule at all -- did a selector get renamed?"
-        assert any(offset in body for _sel, body in rules), (
-            f"{panel} is displaced by the search but no rule offsets by {offset}"
-        )
+    bands = {"band B": _band_b(css), "band C": _band_c(css)}
+    for band, panels in DISPLACED_BY_BAND.items():
+        assert bands[band], f"{band} block not found in dashboard.css"
+        for panel in panels:
+            rules = _rules_for(bands[band], panel)
+            assert rules, f"{panel} has no rule in {band}"
+            assert any(DROP_OFFSET in body for _sel, body in rules), (
+                f"{panel} must be displaced in {band} but no rule there "
+                f"offsets by {DROP_OFFSET}"
+            )
+
+
+def test_nothing_is_displaced_in_band_a():
+    """Band A is the unqualified default. An offset leaking into it would push
+    the corner panels down on wide screens, where the search sits beside them
+    and there is nothing to make room for."""
+    css = _css()
+    outside = css
+    for _query, body in _media_blocks(css):
+        outside = outside.replace(body, "")
+    assert DROP_OFFSET not in outside, (
+        "a displacement offset leaked into band A (the unqualified default)"
+    )
 
 
 def test_zone_search_input_reads_the_height_token():

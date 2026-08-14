@@ -17,6 +17,11 @@
     /* Sets #zone-search-input's min-height AND every band B/C displacement
        offset, so the two can never disagree about how tall the search is. */
     --zone-search-height: 32px;
+    /* The clearance a displaced panel must leave below the search: its height
+       plus an 8px gap. Split out from --zone-search-height so displaced tops
+       (12px + drop) and their max-height give-backs (Xvh - drop) can't drift
+       apart arithmetically -- they are the same quantity with opposite signs. */
+    --zone-search-drop: calc(var(--zone-search-height) + 8px);
   }
   /* Common full-width header (title + build info on the left, outbreak size
      summary on the right), identical on every page -- see common/chrome.py.
@@ -247,12 +252,12 @@
   @media (max-width: 999.98px) {
     body.view-map #zone-search,
     body.view-context #zone-search { top:12px; left:12px; }
-    body.view-map #controls { top:calc(12px + var(--zone-search-height) + 8px); }
+    body.view-map #controls { top:calc(12px + var(--zone-search-drop)); }
     body.view-context #context-national {
-      top:calc(12px + var(--zone-search-height) + 8px);
+      top:calc(12px + var(--zone-search-drop));
       /* Displacement must not push the panel's bottom edge toward the footer:
          give back exactly what the top took. */
-      max-height:calc(80vh - var(--zone-search-height) - 8px);
+      max-height:calc(80vh - var(--zone-search-drop));
     }
   }
   #legend       { bottom:calc(var(--view-chrome-height) + 12px); left:12px; width:max-content; max-width:min(360px, calc(100vw - 24px)); }
@@ -895,7 +900,7 @@
       /* Map is full-width in its own top section on narrow screens (see
          "map and plots column stack" rules below), so no panel-width
          offset is needed here the way there is on wider screens. */
-      top:calc(12px + var(--zone-search-height) + 8px); bottom:auto; right:12px;
+      top:calc(12px + var(--zone-search-drop)); bottom:auto; right:12px;
       max-width:none; width:auto; padding:6px;
     }
     #trends-legend-title,
@@ -931,7 +936,7 @@
       /* Cancel the wide-screen right:calc(...) offset -- the map is
          full-width in its own top section here (see the map/table stacking
          rules above), so this just needs to sit in its own top-left corner. */
-      top:calc(12px + var(--zone-search-height) + 8px); left:12px; right:auto; bottom:auto;
+      top:calc(12px + var(--zone-search-drop)); left:12px; right:auto; bottom:auto;
       max-width:min(240px, calc(100vw - 24px));
     }
     body.view-context #context-national {
@@ -987,10 +992,10 @@
        a phone-sized Genomic page would reveal the search as soon as the tree
        coordinator registered. */
     body.view-genomic-epidemiology #zone-search { display:none !important; }
-    #controls       { top:calc(12px + var(--zone-search-height) + 8px); }
+    #controls       { top:calc(12px + var(--zone-search-drop)); }
     #info {
-      top:calc(12px + var(--zone-search-height) + 8px);
-      max-height:calc(80vh - var(--zone-search-height) - 8px);
+      top:calc(12px + var(--zone-search-drop));
+      max-height:calc(80vh - var(--zone-search-drop));
     }
     /* #controls' wide-screen width (min(340px, 100vw-24px) -- needed when
        expanded, to fit the search box/select/checkboxes) makes its
@@ -1031,7 +1036,7 @@
      NOT folded into the max-height:500px block: a wide, short window (e.g.
      1200x450) is band A, where nothing is displaced. */
   @media (max-width: 700px) and (max-height: 500px) {
-    #info { max-height:calc(70vh - var(--zone-search-height) - 8px); }
+    #info { max-height:calc(70vh - var(--zone-search-drop)); }
   }
   /* Tracker stack ("outbreak size summary", top-right of #site-header;
      rows are right-aligned to hug the header's right edge). */
