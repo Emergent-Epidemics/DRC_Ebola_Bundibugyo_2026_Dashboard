@@ -261,16 +261,27 @@ def test_no_rule_hides_the_eyebrow():
 
 
 def test_short_viewport_shrinks_the_qualifier():
-    # Two @media (max-height: 500px) blocks exist -- an unrelated one earlier
-    # in the file, and the #tracker-only one placed after the base rules so
-    # its overrides win the cascade. Check across all of them, not just
-    # whichever comes first.
+    """A landscape phone must shrink .qual alongside .num and .sub, or the
+    header grows taller than it did before. Asserting the selector is present
+    is not enough -- an override no smaller than the base clamp's floor would
+    satisfy that while shrinking nothing."""
     text = re.sub(r"/\*.*?\*/", "", CSS.read_text(encoding="utf-8"), flags=re.DOTALL)
     blocks = re.findall(r"@media \(max-height: 500px\) \{(.*?)\n  \}", text, re.DOTALL)
     assert blocks, "could not locate any @media (max-height: 500px) block"
-    assert any("#tracker .global-cell .qual" in block for block in blocks), (
-        "a landscape phone must shrink .qual alongside .num and .sub, or the "
-        "header grows taller than it did before"
+    overrides = [m for m in
+                 (re.search(r"#tracker \.global-cell \.qual \{([^}]*)\}", b) for b in blocks)
+                 if m]
+    assert overrides, "no short-viewport override for #tracker .global-cell .qual"
+    shrunk = re.search(r"font-size:\s*([\d.]+)px", overrides[0].group(1))
+    assert shrunk, "the short-viewport .qual rule must declare a font-size"
+    # Two-space indent picks out the unconditional rule, not the nested one.
+    base = re.search(r"^  #tracker \.global-cell \.qual \{([^}]*)\}", text, re.M)
+    assert base, "no unconditional #tracker .global-cell .qual rule found"
+    floor = re.search(r"font-size:\s*clamp\(\s*([\d.]+)px", base.group(1))
+    assert floor, "the base .qual rule must declare a clamp() font-size"
+    assert float(shrunk.group(1)) < float(floor.group(1)), (
+        f"the short-viewport override ({shrunk.group(1)}px) is not smaller than "
+        f"the base clamp's floor ({floor.group(1)}px), so it shrinks nothing"
     )
 
 
@@ -326,10 +337,15 @@ def test_tracker_media_rules_come_after_the_base_rules():
     #tracker media override has to sit after the base block."""
     text = re.sub(r"/\*.*?\*/", "", CSS.read_text(encoding="utf-8"), flags=re.DOTALL)
     lines = text.splitlines()
-    # Unconditional rules are indented two spaces, rules nested inside an
-    # @media block four. That indentation convention holds throughout the file.
-    base = [i for i, ln in enumerate(lines) if re.match(r"  #tracker\b", ln)]
-    nested = [i for i, ln in enumerate(lines) if re.match(r"    #tracker\b", ln)]
+    base, nested = [], []
+    for i, ln in enumerate(lines):
+        m = re.match(r"( *)#tracker\b", ln)
+        if not m:
+            continue
+        # Bucket on the measured indent rather than two fixed widths: an
+        # oddly-indented rule then lands in a bucket instead of disappearing
+        # from both, which would hide exactly the bug this test exists to catch.
+        (base if len(m.group(1)) <= 2 else nested).append(i)
     assert base, "no unconditional #tracker rules found"
     assert nested, "no @media #tracker rules found"
     assert min(nested) > max(base), (

@@ -1002,6 +1002,11 @@
     #controls.collapsed { width:auto; max-width:min(160px, calc(60vw - 18px)); }
   }
   @media (max-height: 500px) {
+    /* #tracker deliberately has no rules here: this block sits above the
+       unconditional #tracker rules, so an equal-specificity override in it
+       would lose the source-order tiebreak and silently never apply. The
+       tracker's own max-height:500px block lives below those base rules --
+       see the comment there. */
     .panel          { font-size:11px; padding:5px 7px; }
     #site-header    { padding:4px 8px; }
     #site-header h1#page-heading { font-size:clamp(16px, 4.5vh, 22px); margin-bottom:1px; letter-spacing:0.2px; }
