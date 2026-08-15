@@ -222,16 +222,48 @@ Measured at 390px: three columns of full-word labels plus qualifiers occupy roug
 ~374px available. No abbreviation is needed at any rendered width, which is the whole argument
 for not abbreviating at 1400px either.
 
-- **`@media (max-width: 700px)`** (`dashboard.css:866-874`) — the rule hiding `.countries-row`
-  becomes moot (node deleted). The rule hiding `.global-title` is **removed**, so the eyebrow
-  survives onto phones and the numbers are no longer undated; the narrow info row carries only
-  "dashboard last updated", a different date. `.qual` stays visible with full words.
-- **`@media (max-width: 700px)` centring block** (`dashboard.css:1072-1084`) — loses its
-  `.countries-row` and `.country` entries. `#tracker`, `.stats-block`, `.global-title` and
-  `.tracker-footnotes` all still render and still need re-centring.
-- **`@media (max-height: 500px)`** (`dashboard.css:1019-1024`) — the `.countries-row` line is
-  removed and `.qual { font-size:9px; margin-top:1px; }` added alongside the existing `.num` /
-  `.sub` shrink rules, so a landscape phone does not grow the header.
+- **`@media (max-width: 700px)`** — the rule hiding `.countries-row` becomes moot (node deleted).
+  The rule hiding `.global-title` is **removed**, so the eyebrow survives onto phones and the
+  numbers are no longer undated; the narrow info row carries only "dashboard last updated", a
+  different date. `.qual` stays visible with full words.
+- **`@media (max-height: 500px)`** — the `.countries-row` line is removed and
+  `.qual { font-size:9px; margin-top:1px; }` added alongside the existing `.num` / `.sub` shrink
+  rules, so a landscape phone does not grow the header.
+- **Both blocks move.** See below — this is a correctness fix, not a tidy-up.
+
+### The media overrides were dead, and had been all along
+
+Every `#tracker` rule in the two media blocks sat **before** the unconditional `#tracker` block in
+the file. Media queries add no specificity, so for an equal-specificity selector the cascade falls
+through to source order — and the unconditional rule, being later, won every conflicting
+declaration:
+
+| Declaration in the media block | Intended | Actually rendered |
+|---|---|---|
+| `#tracker { padding:0 2px }` (both blocks) | 2px | 4px |
+| `.global-row { gap:14px }` / `gap:clamp(8px,3vh,16px)` | tighter | `clamp(14px,6vw,36px)` |
+| `.global-title { font-size:9px; margin-bottom:0 }` | 9px | `clamp(9px,1.5vw,10px)` |
+| `.global-cell .num { font-size:clamp(16px,4.5vh,22px) }` | ≤22px | `clamp(20px,6vw,30px)` |
+| `.global-cell .sub { font-size:9px; margin-top:0 }` | 9px | `clamp(9px,1.5vw,10px)` |
+
+Only the `display:none` that hid the eyebrow ever took effect, because the cascade resolves per
+property and no base rule declares `display`.
+
+The file already contained the fix idiom: a third `@media (max-width: 700px)` block placed *after*
+the base rules, carrying the narrow-screen centring overrides, with a comment explaining it had to
+go there to win. Nobody had applied that to the other two blocks.
+
+**Resolution:** every `#tracker` media rule moves below the unconditional block, merged into two
+blocks — `max-width:700px` first, then `max-height:500px`, preserving the original relative order
+so a landscape phone matching both still takes the tighter `gap`. Non-`#tracker` rules stay where
+they are. The blast radius is `#tracker` only, which is the component this spec already owns.
+
+`tests/test_tracker_headline.py::test_tracker_media_rules_come_after_the_base_rules` makes a
+recurrence a build failure, comparing the line index of the last two-space-indented `#tracker`
+rule against the first four-space-indented one.
+
+Verified in headless Chrome at `innerHeight` 363px: `.qual` went 10.5px → 9px, `.sub` → 9px,
+`.num` → 16.3px; at `innerHeight` 813px the base clamps still apply.
 
 ## Not changing
 

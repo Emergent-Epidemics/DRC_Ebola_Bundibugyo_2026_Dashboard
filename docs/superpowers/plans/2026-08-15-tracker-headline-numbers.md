@@ -749,6 +749,30 @@ git commit -m "Tracker: keep the eyebrow on narrow screens, retire the country-r
 
 ---
 
+### Task 4b: Move the media overrides below the base rules
+
+Discovered while implementing Task 4 and confirmed in headless Chrome: both media blocks sit
+BEFORE the unconditional `#tracker` block, so every equal-specificity override in them lost the
+source-order tiebreak and silently never applied. Only `display:none` worked, because no base
+rule declares `display`. See the spec's "The media overrides were dead" section.
+
+Landed as commit `d1e58a9`. The `#tracker` rules were lifted out of both early blocks and merged
+into two blocks placed after the base rules — `max-width:700px` first, then `max-height:500px`,
+preserving the original relative order so a landscape phone matching both takes the tighter
+`gap`. Non-`#tracker` rules in both early blocks were left untouched.
+
+Guarded by `test_tracker_media_rules_come_after_the_base_rules`, which compares the line index of
+the last two-space-indented `#tracker` rule against the first four-space-indented one. It was
+written first and confirmed failing against the pre-move file.
+
+`test_short_viewport_shrinks_the_qualifier` also changed from `re.search` to `re.findall` +
+`any(...)`: the file now legitimately contains two `@media (max-height: 500px)` blocks, and
+`re.search` was matching the earlier non-`#tracker` one.
+
+Module total afterwards: 19 tests. Full suite: 87 passed.
+
+---
+
 ### Task 5: Brand theme layer
 
 **Files:**
@@ -851,7 +875,7 @@ Seven rules are gone: `.countries-row`, `.country .name`, `.country .conf`, `.co
 cd Scripts && python3.9 -m pytest ../tests/test_tracker_headline.py -q
 ```
 
-Expected: `18 passed`.
+Expected: `18 passed` (19 at HEAD, after Task 4b).
 
 - [ ] **Step 5: Run the full suite**
 
@@ -859,7 +883,7 @@ Expected: `18 passed`.
 cd Scripts && python3.9 -m pytest ../tests -q
 ```
 
-Expected: `86 passed`.
+Expected: `86 passed` (87 at HEAD, after Task 4b).
 
 - [ ] **Step 6: Commit**
 
@@ -957,13 +981,13 @@ Expected: clean, or only the intended source files if a defect was found and fix
 cd Scripts && python3.9 -m pytest ../tests -q
 ```
 
-Expected: `86 passed`.
+Expected: `86 passed` (87 at HEAD, after Task 4b).
 
 ---
 
 ## Done when
 
-- `cd Scripts && python3.9 -m pytest ../tests -q` reports 86 passed.
+- `cd Scripts && python3.9 -m pytest ../tests -q` reports 87 passed.
 - `grep -rn "countries-row\|conf_deaths\|susp_deaths\|outbreak_size" Scripts/ locales/ Data/Branding/` returns nothing.
 - The header renders correctly in both languages at 1280px, 900px, 390px and 800×450.
 - `git status --short` shows no build artifacts.
