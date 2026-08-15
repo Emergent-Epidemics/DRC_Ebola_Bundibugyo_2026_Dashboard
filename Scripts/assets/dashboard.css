@@ -863,15 +863,6 @@
        instead of just disappearing. */
     #title-sub { display:none; }
     #header-narrow-row { display:flex; }
-    /* Stats-block simplified to just the cases/deaths/recovered numbers --
-       drop the "OUTBREAK SIZE" label and the per-country breakdown rows,
-       there's not enough width to justify them here. */
-    #tracker .global-title,
-    #tracker .countries-row { display:none; }
-    #tracker        { margin-top:0; padding:0 2px; }
-    #tracker .global-row { gap:14px; }
-    #tracker .countries-row { gap:2px; margin-top:6px; }
-    #tracker .country { gap:3px 6px; }
     #info           { max-width:60vw; }
     /* Contributors/Methods and Terms move into the header info popup on
        narrow screens (see #header-info-popup-links above) instead of
@@ -1011,17 +1002,16 @@
     #controls.collapsed { width:auto; max-width:min(160px, calc(60vw - 18px)); }
   }
   @media (max-height: 500px) {
+    /* #tracker deliberately has no rules here: this block sits above the
+       unconditional #tracker rules, so an equal-specificity override in it
+       would lose the source-order tiebreak and silently never apply. The
+       tracker's own max-height:500px block lives below those base rules --
+       see the comment there. */
     .panel          { font-size:11px; padding:5px 7px; }
     #site-header    { padding:4px 8px; }
     #site-header h1#page-heading { font-size:clamp(16px, 4.5vh, 22px); margin-bottom:1px; letter-spacing:0.2px; }
     #site-header .sub { font-size:9px; }
     #footer-links .link-btn { padding:5px 10px; font-size:11px; }
-    #tracker        { margin-top:0; padding:0 2px; }
-    #tracker .global-title { font-size:9px; margin-bottom:0; }
-    #tracker .global-row { gap:clamp(8px, 3vh, 16px); }
-    #tracker .global-cell .num { font-size:clamp(16px, 4.5vh, 22px); }
-    #tracker .global-cell .sub { font-size:9px; margin-top:0; }
-    #tracker .countries-row { margin-top:3px; font-size:10px; gap:1px; }
     #info           { max-height:70vh; }
     #legend         { max-height:60vh; bottom:calc(var(--view-chrome-height) + 8px); }
     body.view-context #context-national { max-height:min(28vh, calc(50vh - 80px)); }
@@ -1042,45 +1032,67 @@
   @media (max-width: 700px) and (max-height: 500px) {
     #info { max-height:calc(70vh - var(--zone-search-drop)); }
   }
-  /* Tracker stack ("outbreak size summary", top-right of #site-header;
-     rows are right-aligned to hug the header's right edge). */
+  /* Tracker stack (outbreak headline numbers, top-right of #site-header;
+     rows are right-aligned to hug the header's right edge). Each metric owns
+     a column; where a suspected count exists it hangs under that metric's
+     label as .qual. See
+     docs/superpowers/specs/2026-08-15-tracker-headline-numbers-design.md. */
   #tracker { display:flex; flex-direction:column; align-items:flex-end; margin-top:0; padding:0 4px; }
   #tracker .stats-block  { display:flex; flex-direction:column; align-items:flex-end; }
   #tracker .global-title { font-size:clamp(9px, 1.5vw, 10px); color:#bbb; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:2px; text-align:right; }
-  #tracker .global-row { display:flex; align-items:flex-end; gap:clamp(14px, 6vw, 36px); line-height:1.05; }
+  /* flex-start, not flex-end: the recovered cell carries no .qual line, so
+     aligning bottoms would push its .num down out of line with the other two. */
+  #tracker .global-row { display:flex; align-items:flex-start; gap:clamp(14px, 6vw, 36px); line-height:1.05; }
   #tracker .global-cell { display:flex; flex-direction:column; align-items:center; }
   #tracker .global-cell .num { font-size:clamp(20px, 6vw, 30px); font-weight:700; font-variant-numeric: tabular-nums; line-height:1; }
   #tracker .global-cell .sub { font-size:clamp(9px, 1.5vw, 10px); color:#bbb; text-transform:uppercase; letter-spacing:0.6px; margin-top:2px; }
+  /* Deliberately not uppercased or letter-spaced like .sub: this is a sentence
+     fragment, not a label, and staying lowercase keeps it subordinate. Hue is
+     reserved for what is being counted, so a suspected count gets none -- it
+     is the same thing as the number above it, less certain.
+
+     Slightly larger than .sub on purpose: .sub is uppercase, so its cap-height
+     does the work, while this line is lowercase and rides on a smaller
+     x-height. At 10.5px lowercase it still reads smaller than 10px uppercase.
+
+     nowrap is safe because #site-header sets flex-wrap:wrap -- a count long
+     enough to widen the cell pushes #site-header-right onto its own row rather
+     than overflowing the viewport. */
+  #tracker .global-cell .qual { font-size:clamp(9.5px, 1.5vw, 10.5px); color:#bbb; margin-top:3px; font-variant-numeric: tabular-nums; white-space:nowrap; }
+  #tracker .global-cell .qual .qnum { color:#ddd; font-weight:600; }
   #tracker .global-cell.cases  .num { color:#ffd166; }
   #tracker .global-cell.deaths .num { color:#ff4d4d; }
   #tracker .global-cell.recovered .num { color:#8CD790; }
-  #tracker .countries-row { display:flex; flex-direction:column; align-items:flex-end; gap:3px; margin-top:8px; font-size:clamp(10px, 1.6vw, 11px); color:#ddd; }
-  #tracker .country { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; justify-content:flex-end; }
-  #tracker .country .name { color:#9fcdfb; font-weight:600; }
-  #tracker .country .nums { font-variant-numeric: tabular-nums; }
-  #tracker .country .conf   { color:#ff6b6b; font-weight:600; }
-  #tracker .country .susp   { color:#ffae42; font-weight:600; }
-  #tracker .country .conf-d { color:#c97a8a; font-weight:600; }
-  #tracker .country .susp-d { color:#caa385; font-weight:600; }
-  #tracker .country .dot { color:#444; }
-  #tracker .country .sub { font-size:10px; color:#888; }
   #tracker .caveat-mark { font-size:0.85em; color:#ffae42; font-weight:700; margin-left:1px; vertical-align:super; line-height:0; }
   #tracker .tracker-footnotes { margin-top:8px; max-width:min(480px, 92vw); font-size:10px; color:#aaa; line-height:1.4; text-align:left; }
   #tracker .tracker-footnotes p { margin:0 0 4px; }
   #tracker .tracker-footnotes p:last-child { margin-bottom:0; }
   #tracker .tracker-footnotes .mark { color:#ffae42; font-weight:700; margin-right:3px; }
+  /* Both #tracker media blocks live HERE, after the unconditional rules above,
+     and not with their siblings earlier in the file. Media queries add no
+     specificity, so an equal-specificity #tracker rule in an earlier block
+     loses the source-order tiebreak to the base rule below it and silently
+     does nothing -- which is what had happened to every override in here.
+     Only display:none survived, because no base rule declares display. */
   @media (max-width: 700px) {
-    /* Placed after the base #tracker rules above (rather than in the earlier
-       max-width:700px block) so these actually win the cascade: same
-       specificity + later source order beats the unconditional right-aligned
-       rules above, which is what centers the outbreak-summary contents
-       inside #site-header-right on narrow screens. */
-    #tracker { align-items:center; }
+    /* Centering: the base rules right-align to hug the header's right edge,
+       which only makes sense in the wide two-column layout. Narrow screens
+       stack #site-header-left above #site-header-right and centre both. */
+    #tracker { align-items:center; margin-top:0; padding:0 2px; }
     #tracker .stats-block { align-items:center; }
     #tracker .global-title { text-align:center; }
-    #tracker .countries-row { align-items:center; }
-    #tracker .country { justify-content:center; }
+    #tracker .global-row { gap:14px; }
     #tracker .tracker-footnotes { text-align:center; }
+  }
+  /* After the block above, so a landscape phone -- which matches both -- takes
+     this one's tighter gap. That was the original order too. */
+  @media (max-height: 500px) {
+    #tracker { margin-top:0; padding:0 2px; }
+    #tracker .global-title { font-size:9px; margin-bottom:0; }
+    #tracker .global-row { gap:clamp(8px, 3vh, 16px); }
+    #tracker .global-cell .num { font-size:clamp(16px, 4.5vh, 22px); }
+    #tracker .global-cell .sub { font-size:9px; margin-top:0; }
+    #tracker .global-cell .qual { font-size:9px; margin-top:1px; }
   }
   #imperial-model-estimates {
     margin-top:6px;

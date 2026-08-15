@@ -181,14 +181,15 @@ ui:
   context_as_of: "au"
   trends_no_data: "Pas de données d'incidence quotidienne pour {province}."
   tracker:
-    outbreak_size: "taille de l'épidémie (confirmés)"
+    eyebrow: "confirmés · cumul au {date}"
+    eyebrow_nodate: "confirmés · cumul"
     cases: "cas"
     deaths: "décès"
     recovered: "guéris"
-    conf: "conf."
-    susp: "susp."
-    conf_deaths: "décès conf."
-    susp_deaths: "décès susp."
+    # "cas suspect(s)" and "décès suspect(s)" are both masculine, so one pair
+    # of strings serves both columns.
+    suspected_one: "{n} suspect"
+    suspected_other: "{n} suspects"
   title_sub:
     latest: "Dernier"
     insp_sitrep: "sitrep INSP"

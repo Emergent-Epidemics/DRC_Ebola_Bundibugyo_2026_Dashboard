@@ -181,14 +181,15 @@ ui:
   context_as_of: "as of"
   trends_no_data: "No daily onset data for {province}."
   tracker:
-    outbreak_size: "outbreak size (confirmed)"
+    # Values are lowercase because #tracker .global-title and
+    # #tracker .global-cell .sub already carry text-transform:uppercase.
+    eyebrow: "confirmed · cumulative to {date}"
+    eyebrow_nodate: "confirmed · cumulative"
     cases: "cases"
     deaths: "deaths"
     recovered: "recovered"
-    conf: "conf"
-    susp: "susp"
-    conf_deaths: "conf deaths"
-    susp_deaths: "susp deaths"
+    suspected_one: "{n} suspected"
+    suspected_other: "{n} suspected"
   title_sub:
     latest: "Latest"
     insp_sitrep: "INSP Sit Rep"
