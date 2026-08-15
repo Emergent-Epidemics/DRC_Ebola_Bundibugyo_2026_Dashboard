@@ -142,12 +142,12 @@ with a single `--partner-h` variable driving logo height per band (replacing
 both the unconditional `clamp(18px, 3vmin, 28px)` and the
 `@media (max-width: 999.98px)` patch added when the three logos landed):
 
-| Band | `--partner-h` | group gap / within-group gap |
+| Band | `--partner-h` | `--partner-gap` |
 |---|---|---|
-| default | 22px | 30 / 12 |
-| ≤ 999.98px | 18px | 22 / 9 |
-| ≤ 799.98px | 15px | 16 / 7 |
-| `max-height: 500px` | 16px | 16 / 7 |
+| default | 22px | 24px |
+| ≤ 999.98px | 18px | 18px |
+| ≤ 799.98px | 15px | 10px |
+| `max-height: 500px` | 16px | 11px |
 
 The 799.98px step is set by French, and by arithmetic rather than taste:
 "Contributeurs, données et méthodes" plus "Conditions d'utilisation" measure
@@ -167,7 +167,15 @@ legible there (`northeastern.png` is RGBA with a transparent ground and would
 vanish outright). The theme file is optional in the build
 (`common/theme.py:22-23`), so that fallback has to keep working.
 
-**Grouped.** Gaps carry the affiliation: 12px within a group, 30px between.
+**Uniformly spaced.** One `--partner-gap` sets the separation between every
+pair of neighbouring logos — the same value between affiliations as within one.
+
+Grouped spacing (a tighter gap within an affiliation than between) was built
+first and rejected on sight: with marks this varied in shape and internal
+padding, the two gap sizes read as accidental unevenness rather than as
+structure. The `.partner-group` wrappers stay in the markup, so restoring it is
+a matter of giving `#partners` a larger gap than `.partner-group`; the group
+data below is what those wrappers are built from.
 
 | Group | Members |
 |---|---|

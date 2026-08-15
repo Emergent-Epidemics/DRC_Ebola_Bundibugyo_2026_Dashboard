@@ -7,6 +7,10 @@
        by buildPartners()), so the strip is resized by moving this one number
        per width band -- never by touching per-logo heights. */
     --partner-h: 22px;
+    /* Separation between logos, uniform across the strip. Steps down with
+       --partner-h per width band: at the bottom of the ≤799.98px band the
+       whole strip has to fit in 342px (see that block). */
+    --partner-gap: 24px;
     --epi-panel-width: 50%;
     --trends-panel-width: 40%;
     /* Band-A (wide-branch) panel widths #zone-search's offset is derived from.
@@ -696,12 +700,17 @@
     box-shadow:none;
     display:flex; flex-wrap:nowrap; align-items:center;
     justify-content:center;
-    /* Gap BETWEEN affiliations; .partner-group holds the tight gap within one.
-       See buildPartners() in engine.js and PARTNER_GROUPS in data_sources.py. */
-    gap:30px;
+    /* One separation for the whole strip: --partner-gap drives both the space
+       between affiliation groups and the space within one, so every logo sits
+       the same distance from its neighbours. buildPartners() still wraps each
+       affiliation in .partner-group (see PARTNER_GROUPS in data_sources.py);
+       giving #partners a larger gap than .partner-group is all it takes to
+       bring grouped spacing back. */
+    gap:var(--partner-gap);
   }
   #view-switcher #partners .partner-group {
-    display:flex; flex-wrap:nowrap; align-items:center; gap:12px; min-width:0;
+    display:flex; flex-wrap:nowrap; align-items:center;
+    gap:var(--partner-gap); min-width:0;
   }
   #view-switcher #partners a { display:inline-flex; align-items:center; transition:opacity .15s ease; }
   #view-switcher #partners a:hover { opacity:0.78; }
@@ -710,9 +719,7 @@
     width:auto; max-width:min(14vmin, 110px); display:block; object-fit:contain;
   }
   @media (max-width: 999.98px) {
-    :root { --partner-h: 18px; }
-    #view-switcher #partners { gap:22px; }
-    #view-switcher #partners .partner-group { gap:9px; }
+    :root { --partner-h: 18px; --partner-gap: 18px; }
     #view-switcher #partners img { max-width:min(10vmin, 68px); }
   }
   /* Last step before the ≤700px rules move the links into the ⓘ popup
@@ -721,9 +728,7 @@
      spends 32px on padding and the column gap, so the strip has to fit in
      W − 359 — 342px at the bottom of this band. */
   @media (max-width: 799.98px) {
-    :root { --partner-h: 15px; }
-    #view-switcher #partners { gap:16px; }
-    #view-switcher #partners .partner-group { gap:7px; }
+    :root { --partner-h: 15px; --partner-gap: 10px; }
   }
   #context-hint,
   #travel-hint,
@@ -1073,10 +1078,9 @@
     #legend         { max-height:60vh; bottom:calc(var(--view-chrome-height) + 8px); }
     body.view-context #context-national { max-height:min(28vh, calc(50vh - 80px)); }
     body.view-context #context { max-height:min(55vh, calc(100vh - 200px)); }
-    :root { --view-chrome-height: 28px; --partner-h: 16px; }
+    :root { --view-chrome-height: 28px; --partner-h: 16px; --partner-gap: 11px; }
     #view-switcher { padding:3px 8px; gap:6px; }
-    #view-switcher #partners { padding:1px 2px; gap:16px; }
-    #view-switcher #partners .partner-group { gap:7px; }
+    #view-switcher #partners { padding:1px 2px; }
     #view-switcher #partners img { max-width:min(12vmin, 72px); }
     .view-tab { padding:3px 8px; font-size:11px; }
   }
