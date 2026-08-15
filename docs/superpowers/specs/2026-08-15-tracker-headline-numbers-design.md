@@ -156,6 +156,14 @@ New base rules in `dashboard.css`, matching the existing `.sub` idiom:
 `.qual` is **not** uppercased or letter-spaced, unlike `.sub` and `.global-title` — it is a
 sentence fragment, not a label, and the lowercase reinforces its subordinate role.
 
+### Field read for the headline cases figure
+
+Switches from `totals.global_total_cases` to `totals.global_confirmed_cases`. Both producers set
+them to the same value — `data_sources.py:974` and `:3128` each assign the confirmed count to
+`global_total_cases` — so nothing changes numerically. But the label now says "confirmed", and a
+field named `global_total_cases` reads like it includes suspected. The rename makes the code say
+what the UI says.
+
 ### `.global-row` alignment
 
 Flips from `align-items:flex-end` to `align-items:flex-start`. With bottoms aligned, the
@@ -176,6 +184,7 @@ keeps working untouched. The file is empty today; the machinery stays live.
 | key | en | fr | |
 |---|---|---|---|
 | `eyebrow` | `confirmed · cumulative to {date}` | `confirmés · cumul au {date}` | new |
+| `eyebrow_nodate` | `confirmed · cumulative` | `confirmés · cumul` | new |
 | `cases` | `cases` | `cas` | unchanged |
 | `deaths` | `deaths` | `décès` | unchanged |
 | `recovered` | `recovered` | `guéris` | unchanged |
@@ -189,7 +198,10 @@ singular/plural pair is load-bearing only in French (`suspect` vs `suspects`); E
 invariant either way, and a count of exactly 1 is plausible enough to justify the two keys.
 Selection is `n === 1 ? suspected_one : suspected_other`.
 
-`{date}` is filled from `PAYLOAD.asof`.
+`{date}` is filled from `PAYLOAD.asof`. That value can legitimately be empty —
+`ASOF_FALLBACK` is `""` (`data_sources.py:259`) and `detect_asof()` returns it when neither
+local sitrep CSVs nor the build GeoJSON yield a date — so a falsy `asof` selects
+`eyebrow_nodate` instead, rather than rendering "cumulative to " with nothing after it.
 
 All values are stored lowercase, as `outbreak_size` is today; `#tracker .global-title` already
 carries `text-transform:uppercase`, so the eyebrow renders as
@@ -206,8 +218,8 @@ for not abbreviating at 1400px either.
   survives onto phones and the numbers are no longer undated; the narrow info row carries only
   "dashboard last updated", a different date. `.qual` stays visible with full words.
 - **`@media (max-width: 700px)` centring block** (`dashboard.css:1072-1084`) — loses its
-  `.countries-row`, `.country` and `.tracker-footnotes` entries; only `#tracker`,
-  `.stats-block` and `.global-title` still need re-centring.
+  `.countries-row` and `.country` entries. `#tracker`, `.stats-block`, `.global-title` and
+  `.tracker-footnotes` all still render and still need re-centring.
 - **`@media (max-height: 500px)`** (`dashboard.css:1019-1024`) — the `.countries-row` line is
   removed and `.qual { font-size:9px; margin-top:1px; }` added alongside the existing `.num` /
   `.sub` shrink rules, so a landscape phone does not grow the header.
