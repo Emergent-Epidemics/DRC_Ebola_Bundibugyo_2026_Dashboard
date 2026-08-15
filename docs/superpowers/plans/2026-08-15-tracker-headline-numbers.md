@@ -460,16 +460,41 @@ Append to `tests/test_tracker_headline.py`:
 ```python
 def _tracker_lines(path):
     """Every line of the stylesheet that names a selector under #tracker.
+
     Comments are stripped first so a commented-out rule cannot satisfy or trip
-    an assertion."""
+    an assertion. Assumes each rule sits on one line, as dashboard.css does --
+    for a stylesheet that splits selectors from declarations, this returns the
+    selector lines only and sees no declarations at all.
+    """
     text = re.sub(r"/\*.*?\*/", "", path.read_text(encoding="utf-8"), flags=re.DOTALL)
     return "\n".join(ln for ln in text.splitlines() if "#tracker" in ln)
+
+
+def _hex_luma(value):
+    """Rough perceived brightness of a #rgb or #rrggbb colour, 0-255."""
+    h = value.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return 0.299 * r + 0.587 * g + 0.114 * b
 
 
 def test_base_stylesheet_styles_the_qualifier():
     lines = _tracker_lines(CSS)
     assert "#tracker .global-cell .qual {" in lines
     assert "#tracker .global-cell .qual .qnum {" in lines
+    # Hue is reserved for what is being counted, so a suspected figure gets
+    # none -- its lower confidence is carried by tone alone. If these two
+    # collapse to one colour, nothing in the block encodes that distinction.
+    # The number is the brighter of the pair here because this is the dark
+    # base layer; the brand layer inverts both, since its background does too.
+    qual = re.search(r"#tracker \.global-cell \.qual \{[^}]*color:(#[0-9a-fA-F]{3,6})", lines)
+    qnum = re.search(r"#tracker \.global-cell \.qual \.qnum \{[^}]*color:(#[0-9a-fA-F]{3,6})", lines)
+    assert qual and qnum, "both .qual and .qual .qnum must declare a colour"
+    assert _hex_luma(qnum.group(1)) > _hex_luma(qual.group(1)), (
+        f"the suspected count ({qnum.group(1)}) must read brighter than the "
+        f"word beside it ({qual.group(1)}) on the dark base layer"
+    )
 
 
 def test_global_row_is_top_aligned():
@@ -516,7 +541,15 @@ Replace lines 1045-1071 with:
   /* Deliberately not uppercased or letter-spaced like .sub: this is a sentence
      fragment, not a label, and staying lowercase keeps it subordinate. Hue is
      reserved for what is being counted, so a suspected count gets none -- it
-     is the same thing as the number above it, less certain. */
+     is the same thing as the number above it, less certain.
+
+     Slightly larger than .sub on purpose: .sub is uppercase, so its cap-height
+     does the work, while this line is lowercase and rides on a smaller
+     x-height. At 10.5px lowercase it still reads smaller than 10px uppercase.
+
+     nowrap is safe because #site-header sets flex-wrap:wrap -- a count long
+     enough to widen the cell pushes #site-header-right onto its own row rather
+     than overflowing the viewport. */
   #tracker .global-cell .qual { font-size:clamp(9.5px, 1.5vw, 10.5px); color:#bbb; margin-top:3px; font-variant-numeric: tabular-nums; white-space:nowrap; }
   #tracker .global-cell .qual .qnum { color:#ddd; font-weight:600; }
   #tracker .global-cell.cases  .num { color:#ffd166; }

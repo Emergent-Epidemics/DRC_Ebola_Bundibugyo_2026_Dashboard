@@ -156,6 +156,15 @@ New base rules in `dashboard.css`, matching the existing `.sub` idiom:
 `.qual` is **not** uppercased or letter-spaced, unlike `.sub` and `.global-title` — it is a
 sentence fragment, not a label, and the lowercase reinforces its subordinate role.
 
+Its nominal size is half a pixel *larger* than `.sub`'s, which looks backwards for a subordinate
+line and is not. `.sub` is uppercase, so its cap-height carries the reading; `.qual` is lowercase
+and rides on a smaller x-height. At 10.5px lowercase (x-height ≈ 5.4px) it still reads smaller
+than 10px uppercase (cap-height ≈ 7.2px).
+
+`white-space:nowrap` on `.qual` is safe because `#site-header` sets `flex-wrap:wrap`: a suspected
+count long enough to widen its cell pushes `#site-header-right` onto its own row rather than
+overflowing the viewport.
+
 ### Field read for the headline cases figure
 
 Switches from `totals.global_total_cases` to `totals.global_confirmed_cases`. Both producers set
