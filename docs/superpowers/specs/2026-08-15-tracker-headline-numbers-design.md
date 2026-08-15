@@ -299,6 +299,14 @@ Related: the caveat metric alias map (`data_sources.py:986-998`) has no `recover
 so no footnote can currently be attached to the recovered figure even though it is now a headline
 number. Out of scope here — it is a three-line addition if wanted later.
 
+Also pre-existing: `PAYLOAD.asof` is a single English-formatted string built by `_format_asof()`
+in Python, so the French eyebrow renders `CONFIRMÉS · CUMUL AU 2 AUG 2026`. Localising it would
+mean making `_format_asof()` locale-aware and carrying both forms in the payload. This branch does
+not introduce the problem — the header-left already rendered `Dernier sitrep INSP - 2 Aug 2026` —
+but it does repeat the same English date in one more place. By contrast the "dashboard last
+updated" line *is* localised, because it goes through `formatBuildTimestamp()` and
+`toLocaleDateString`.
+
 ## Verification
 
 - `python3.9 -m pytest` from `Scripts/`. No test currently references `#tracker` or its classes,
@@ -311,3 +319,24 @@ number. Out of scope here — it is a three-line addition if wanted later.
   to confirm nothing orphaned survives.
 - Temporarily add a `suspected_deaths` row to `Data/caveats.csv` and confirm the mark lands on
   the qualifier number and the footnote renders.
+
+### Verification results (2026-08-15)
+
+Built locally and served over HTTP; measured with `getComputedStyle` in Chrome.
+
+| Viewport | Result |
+|---|---|
+| 1680px | Eyebrow present, right-aligned; `.num` 30px; all three `.num` at `top: 26px` — one baseline |
+| 900px | Base rules throughout; `padding: 0 4px`, `gap: 36px` |
+| 390px | Eyebrow kept and centred; `padding: 0 2px`, `gap: 14px`; full words, no abbreviation |
+| 800×450 | Revived overrides apply: `.num` 20.25px (`4.5vh`), `.sub` 9px, `.qual` 9px / `margin-top: 1px`, `gap` 13.5px (`3vh`); header 66px tall |
+
+No horizontal overflow at any width. No number appears twice; no `conf`/`susp`; no `DRC` in the
+block. Colours resolve to `--terracotta` / `--maroon` / `--green` on the three numbers, `--muted`
+on labels and the qualifier word, `--ink` on the qualifier number.
+
+French: `CONFIRMÉS · CUMUL AU 2 AUG 2026 · 3 802 CAS · 275 suspects · 1 707 DÉCÈS · 91 suspects ·
+727 GUÉRIS` — plural agreement correct, French digit grouping applied by `toLocaleString`.
+
+Caveats: adding a `suspected_deaths` row rendered `91*`, with the mark inside `.qnum` inside
+`.qual` and the footnote below, both in `--terracotta`.
