@@ -112,18 +112,31 @@ def _build_tracker_source():
     src = ENGINE.read_text(encoding="utf-8")
     start = src.index("function buildTracker()")
     end = src.index("\nfunction ", start + 1)
-    return src[start:end]
+    body = src[start:end]
+    # The slice ends at the first column-0 "function", so a nested helper
+    # declared flush-left would cut it short mid-function -- and every guard
+    # below would then pass or fail for the wrong reason, silently. These two
+    # assertions turn that into a loud failure instead.
+    assert "tracker.innerHTML" in body, "buildTracker() source slice is truncated"
+    assert body.rstrip().endswith("}"), "buildTracker() source slice is truncated"
+    return body
 
 
 def test_build_tracker_has_no_per_country_branch():
     body = _build_tracker_source()
     for token in ("countries-row", "tracker-countries", "per_country",
-                  "conf-d", "susp-d", "country"):
+                  "conf-d", "susp-d"):
         assert token not in body, (
             f"buildTracker() still references {token!r}; the per-country row "
             f"was removed (totals.per_country stays in the payload, it is "
             f"only no longer rendered)"
         )
+    # Word-boundary so a future countryCode/countrySelector is not a false
+    # positive -- only the bare identifier the retired row used.
+    assert not re.search(r"\bcountry\b", body), (
+        "buildTracker() still references a bare `country` identifier; the "
+        "per-country row was removed"
+    )
 
 
 def test_build_tracker_renders_the_qualifier():
@@ -132,6 +145,13 @@ def test_build_tracker_renders_the_qualifier():
                   "ui.tracker.suspected_one", "ui.tracker.suspected_other",
                   "ui.tracker.eyebrow", "ui.tracker.eyebrow_nodate"):
         assert token in body, f"buildTracker() should emit {token!r}"
+    # The tokens above all live inside qualifier()'s own body, so they are
+    # present whether or not it is ever called. Assert the two call sites too,
+    # and that each is wired to the suspected field matching the confirmed
+    # number it sits under.
+    for call in ('qualifier(totals.global_suspected_cases, "suspected_cases")',
+                 'qualifier(totals.global_suspected_deaths, "suspected_deaths")'):
+        assert call in body, f"buildTracker() should call {call}"
 
 
 def test_build_tracker_reads_confirmed_cases_not_total():
