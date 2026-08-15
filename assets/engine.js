@@ -385,19 +385,17 @@ function buildTracker() {
       ? base + "<span class='caveat-mark' aria-hidden='true'>" + esc(mark) + "</span>"
       : base;
   }
+  // Suspected counts hang under the confirmed figure they qualify, so they can
+  // only be read against the right number. A zero renders nothing at all --
+  // "0 suspected" reads as a finding rather than the absence of one.
+  function qualifier(v, metric) {
+    const n = v || 0;
+    if (!n) return "";
+    const key = n === 1 ? "ui.tracker.suspected_one" : "ui.tracker.suspected_other";
+    const num = "<span class='qnum'>" + countWithMark(n, metric) + "</span>";
+    return "<div class='qual'>" + tf(key, { n: num }) + "</div>";
+  }
   const tr = t("ui.tracker");
-  const per = (totals.per_country || []);
-  const countryHTML = per.map(function(c) {
-    return "<div class='country'>" +
-             "<span class='name'>" + esc(c.country) + "</span>" +
-             "<span class='nums'>" +
-               "<span class='conf'>"   + countWithMark(c.confirmed_cases,  "confirmed_cases")  + "</span> " + tr.conf + " · " +
-               "<span class='susp'>"   + countWithMark(c.suspected_cases,  "suspected_cases")  + "</span> " + tr.susp + " · " +
-               "<span class='conf-d'>" + countWithMark(c.confirmed_deaths, "confirmed_deaths") + "</span> " + tr.conf_deaths + " · " +
-               "<span class='susp-d'>" + countWithMark(c.suspected_deaths, "suspected_deaths") + "</span> " + tr.susp_deaths +
-             "</span>" +
-           "</div>";
-  }).join("");
   const footnotesHTML = caveats.length
     ? "<div class='tracker-footnotes'>" +
         caveats.map(function(c) {
@@ -405,27 +403,34 @@ function buildTracker() {
         }).join("") +
       "</div>"
     : "";
-  const globalDeaths = (totals.global_confirmed_deaths || 0);
-  const globalRecovered = (totals.global_recovered_cases || 0);
+  // PAYLOAD.asof can legitimately be empty: ASOF_FALLBACK is "" and
+  // detect_asof() returns it when neither the sitrep CSVs nor the build
+  // GeoJSON yield a date. Fall back to the undated wording rather than
+  // rendering "cumulative to " with nothing after it.
+  const asof = PAYLOAD.asof || "";
+  const eyebrow = asof
+    ? tf("ui.tracker.eyebrow", { date: esc(asof) })
+    : t("ui.tracker.eyebrow_nodate");
   tracker.innerHTML =
     "<div class='stats-block'>" +
-      "<div class='global-title'>" + tr.outbreak_size + "</div>" +
+      "<div class='global-title'>" + eyebrow + "</div>" +
       "<div class='global-row'>" +
         "<div class='global-cell cases'>" +
-          "<div class='num'>" + fmtLocale(totals.global_total_cases) + "</div>" +
+          "<div class='num'>" + countWithMark(totals.global_confirmed_cases, "confirmed_cases") + "</div>" +
           "<div class='sub'>" + tr.cases + "</div>" +
+          qualifier(totals.global_suspected_cases, "suspected_cases") +
         "</div>" +
         "<div class='global-cell deaths'>" +
-          "<div class='num'>" + fmtLocale(globalDeaths) + "</div>" +
+          "<div class='num'>" + countWithMark(totals.global_confirmed_deaths, "confirmed_deaths") + "</div>" +
           "<div class='sub'>" + tr.deaths + "</div>" +
+          qualifier(totals.global_suspected_deaths, "suspected_deaths") +
         "</div>" +
         "<div class='global-cell recovered'>" +
-          "<div class='num'>" + fmtLocale(globalRecovered) + "</div>" +
+          "<div class='num'>" + fmtLocale(totals.global_recovered_cases) + "</div>" +
           "<div class='sub'>" + tr.recovered + "</div>" +
         "</div>" +
       "</div>" +
     "</div>" +
-    "<div class='countries-row tracker-countries'>" + (countryHTML || "<span class='sub'>—</span>") + "</div>" +
     footnotesHTML;
 }
 
