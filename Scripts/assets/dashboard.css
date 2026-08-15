@@ -1,7 +1,12 @@
   html, body { margin:0; padding:0; height:100%; font-family: -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif; background:#111; color:#eee; }
   body { display:flex; flex-direction:column; }
   :root {
-    --view-chrome-height: 44px;
+    --view-chrome-height: 32px;
+    /* Base height of a partner logo. Each logo multiplies this by its own
+       optical factor (PARTNER_SCALE in common/data_sources.py, applied inline
+       by buildPartners()), so the strip is resized by moving this one number
+       per width band -- never by touching per-logo heights. */
+    --partner-h: 22px;
     --epi-panel-width: 50%;
     --trends-panel-width: 40%;
     /* Band-A (wide-branch) panel widths #zone-search's offset is derived from.
@@ -643,8 +648,18 @@
     justify-content:flex-start;
     align-items:center;
     flex-wrap:wrap;
-    gap:8px;
+    gap:14px;
   }
+  /* Quiet text links, not buttons: these are two once-a-visit reference links
+     and used to render as filled .link-btns competing with the page tabs.
+     Scoped to #footer-links so the #header-info-popup-links copies -- a
+     stacked menu, where button chrome is right -- are untouched. */
+  #footer-links .link-btn {
+    padding:0; background:none; border:none; border-radius:0;
+    font-size:12px; font-weight:400; color:#ffd28a;
+    text-decoration:underline; text-underline-offset:2px;
+  }
+  #footer-links .link-btn:hover { background:none; color:#ffae42; }
   .view-tabs {
     display:flex; justify-content:center; align-items:center;
     flex-wrap:wrap; gap:6px;
@@ -659,37 +674,56 @@
   }
   .view-tab:hover { background:#333; color:#eee; }
   .view-tab.active { color:#ffd28a; border-color:#ffae42; background:#2a2418; }
+  /* The strip is allowed to give ground (flex-shrink:1, min-width:0). It used
+     to be flex-shrink:0, which made #footer-links the only column that could
+     yield -- and when it wrapped, its second row fell out of the bar, since
+     the bar's height is a variable, not auto. */
   #view-switcher #partners {
     position:static;
     z-index:auto;
     justify-self:end;
-    flex-shrink:0;
+    flex-shrink:1;
+    min-width:0;
     max-width:none;
     margin:0;
     padding:2px 4px;
+    /* White plate for the un-themed fallback only: this bar is
+       rgba(20,20,20,0.96) without dashboard-theme.css, where color-on-white
+       artwork needs a ground (northeastern.png is transparent-ground RGBA and
+       would disappear outright). The theme layer removes both. */
     background:#ffffff;
     border-radius:4px;
     box-shadow:none;
     display:flex; flex-wrap:nowrap; align-items:center;
-    justify-content:center; gap:2px;
+    justify-content:center;
+    /* Gap BETWEEN affiliations; .partner-group holds the tight gap within one.
+       See buildPartners() in engine.js and PARTNER_GROUPS in data_sources.py. */
+    gap:30px;
+  }
+  #view-switcher #partners .partner-group {
+    display:flex; flex-wrap:nowrap; align-items:center; gap:12px; min-width:0;
   }
   #view-switcher #partners a { display:inline-flex; align-items:center; transition:opacity .15s ease; }
   #view-switcher #partners a:hover { opacity:0.78; }
+  /* height is set inline per logo as calc(var(--partner-h) * <scale>). */
   #view-switcher #partners img {
-    height:clamp(18px, 3vmin, 28px); width:auto;
-    max-width:min(14vmin, 110px); display:block; object-fit:contain;
+    width:auto; max-width:min(14vmin, 110px); display:block; object-fit:contain;
   }
-  /* #partners never shrinks (flex-shrink:0), so once the strip is wide enough
-     the Contributors/Terms column next to it wraps onto a second row and
-     spills out of the fixed-height bar. Eight logos hit that at ~980px in FR
-     (the longer button labels) and ~880px in EN, both well above the ≤700px
-     rules below, so step the logos down for the whole intermediate band. */
   @media (max-width: 999.98px) {
-    #view-switcher #partners { padding:2px 3px; gap:1px; }
-    #view-switcher #partners img {
-      height:clamp(14px, 2.4vmin, 20px);
-      max-width:min(10vmin, 68px);
-    }
+    :root { --partner-h: 18px; }
+    #view-switcher #partners { gap:22px; }
+    #view-switcher #partners .partner-group { gap:9px; }
+    #view-switcher #partners img { max-width:min(10vmin, 68px); }
+  }
+  /* Last step before the ≤700px rules move the links into the ⓘ popup
+     entirely. The binding constraint is French: "Contributeurs, données et
+     méthodes" + "Conditions d'utilisation" need 327px on one line, and the bar
+     spends 32px on padding and the column gap, so the strip has to fit in
+     W − 359 — 342px at the bottom of this band. */
+  @media (max-width: 799.98px) {
+    :root { --partner-h: 15px; }
+    #view-switcher #partners { gap:16px; }
+    #view-switcher #partners .partner-group { gap:7px; }
   }
   #context-hint,
   #travel-hint,
@@ -841,7 +875,10 @@
   #info.collapsed #info-body,
   .panel.collapsed .panel-body { display:none; }
   @media (max-width: 700px) {
-    :root { --view-chrome-height: 54px; }
+    /* Only the logo strip is left in the bar at this width: Methods/Terms move
+       into the ⓘ popup (see #footer-links .link-btn below) and the language
+       switch into #header-narrow-row, so the bar needs no room for a text row. */
+    :root { --view-chrome-height: 36px; }
     .panel          { font-size:12px; padding:6px 8px; }
     /* Narrow viewports: stack the right column (outbreak summary) below the
        left column (title/build info) instead of squeezing them side by side,
@@ -869,8 +906,10 @@
       scrollbar-width:thin;
     }
     .view-tab { flex:0 0 auto; }
+    /* Nothing shares the bar here, so the strip centres rather than sitting
+       hard right across from an empty column. */
+    #view-switcher #partners { justify-self:center; }
     #view-switcher #partners img {
-      height:clamp(14px, 3.5vmin, 22px);
       max-width:min(12vmin, 80px);
     }
     #site-header h1#page-heading { margin-bottom:2px; }
@@ -1029,18 +1068,16 @@
     #site-header    { padding:4px 8px; }
     #site-header h1#page-heading { font-size:clamp(16px, 4.5vh, 22px); margin-bottom:1px; letter-spacing:0.2px; }
     #site-header .sub { font-size:9px; }
-    #footer-links .link-btn { padding:5px 10px; font-size:11px; }
+    #footer-links .link-btn { font-size:11px; }
     #info           { max-height:70vh; }
     #legend         { max-height:60vh; bottom:calc(var(--view-chrome-height) + 8px); }
     body.view-context #context-national { max-height:min(28vh, calc(50vh - 80px)); }
     body.view-context #context { max-height:min(55vh, calc(100vh - 200px)); }
-    :root { --view-chrome-height: 46px; }
+    :root { --view-chrome-height: 28px; --partner-h: 16px; }
     #view-switcher { padding:3px 8px; gap:6px; }
-    #view-switcher #partners { padding:1px 2px; gap:1px; }
-    #view-switcher #partners img {
-      max-height:clamp(14px, 3.5vh, 20px); height:clamp(14px, 3.5vh, 20px);
-      max-width:min(12vmin, 72px);
-    }
+    #view-switcher #partners { padding:1px 2px; gap:16px; }
+    #view-switcher #partners .partner-group { gap:7px; }
+    #view-switcher #partners img { max-width:min(12vmin, 72px); }
     .view-tab { padding:3px 8px; font-size:11px; }
   }
   /* A landscape phone is band C AND max-height:500px; the 70vh cap above wins
@@ -1163,60 +1200,32 @@
   #imperial-model-estimates .info-wrap:hover .info-tooltip,
   #imperial-model-estimates .info-wrap:focus-within .info-tooltip { display:block; }
   #site-header .sub { margin-top:4px; font-size:11px; opacity:0.8; }
-  /* Lives in #footer-links (bottom bar) beside the methods/terms links. */
-  #lang-switcher {
-    display:inline-flex; align-items:center;
-  }
-  .lang-toggle-track {
-    position:relative;
-    display:inline-grid;
-    grid-template-columns:1fr 1fr;
-    align-items:stretch;
-    background:#9b7d4e;
-    border:1px solid #9b7d4e;
-    border-radius:999px;
-    padding:2px;
-    min-width:92px;
-    box-shadow:inset 0 1px 2px rgba(0,0,0,0.15);
-  }
-  .lang-toggle-thumb {
-    position:absolute;
-    top:2px; bottom:2px; left:2px;
-    width:calc(50% - 2px);
-    border-radius:999px;
-    background:#e7e3db;
-    border:none;
-    box-shadow:0 1px 3px rgba(0,0,0,0.2);
-    transition:transform 0.22s ease;
-    pointer-events:none;
-    z-index:0;
-  }
-  #lang-switcher.lang-fr .lang-toggle-thumb {
-    transform:translateX(100%);
-  }
+  /* Language switch: two plain words, not a switch. Two copies exist -- the
+     wide one rendered into #title-sub by langSwitchHtml(), the narrow one
+     static in #header-narrow-row -- so everything here is keyed off the class,
+     never an id. Colours are literals, not var(--link)/var(--muted): those
+     tokens only exist in dashboard-theme.css, which the build appends only if
+     the file is present (common/theme.py), so a var() here would resolve to
+     nothing on the un-themed fallback. */
   select, button { background:#222; color:#eee; border:1px solid #444; padding:4px 6px; border-radius:4px; font-size:12px; box-sizing:border-box; }
-  #lang-switcher .lang-btn {
-    position:relative; z-index:1;
-    border:none !important; border-radius:999px; box-sizing:border-box;
-    padding:4px 16px; font-size:11px; font-weight:600;
-    cursor:pointer; line-height:1.3; letter-spacing:0.4px;
-    min-width:44px;
+  .lang-switch {
+    display:inline-flex; align-items:baseline; gap:6px;
+    white-space:nowrap;
   }
-  #lang-switcher .lang-btn:not(.active) {
-    color:#e7e3db !important;
-    background:#9b7d4e !important;
+  .lang-switch .lang-sep { color:#555; }
+  .lang-switch .lang-btn {
+    background:none !important; border:none !important; border-radius:0;
+    padding:0; font-size:inherit; font-family:inherit; line-height:inherit;
+    cursor:pointer; color:#9fcdfb !important; text-decoration:underline;
+    text-underline-offset:2px;
   }
-  #lang-switcher .lang-btn:not(.active):hover {
-    color:#fff !important;
-    background:#9b7d4e !important;
-  }
-  #lang-switcher .lang-btn.active {
-    color:#9b7d4e !important;
-    background:transparent !important;
-  }
-  #lang-switcher .lang-btn.active:hover {
-    color:#9b7d4e !important;
-    background:transparent !important;
+  .lang-switch .lang-btn:hover { color:#ffae42 !important; }
+  /* !important on the border too: the rule above zeroes the generic
+     `select, button` border with `border:none !important`, which would
+     otherwise win over a plain border-bottom here. */
+  .lang-switch .lang-btn.active {
+    color:#eee !important; font-weight:700; text-decoration:none;
+    border-bottom:2px solid #ffae42 !important; padding-bottom:1px; cursor:default;
   }
   select { max-width:100%; }
   label { display:block; margin-top:6px; font-size:12px; color:#bbb; }

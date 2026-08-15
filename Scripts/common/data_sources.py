@@ -76,6 +76,8 @@ __all__ = [
     '_NAME_TO_NOM',
     '_NOM_TO_NAME',
     'PARTNER_ORDER',
+    'PARTNER_GROUPS',
+    'PARTNER_SCALE',
     '_parse_sitrep_date',
     '_format_asof',
     '_parse_csv_stem_date',
@@ -298,6 +300,24 @@ PARTNER_ORDER = [
     "INSP.png", "inrb.png", "UMIE.jpeg", "africa-cdc.png", "WHO.jpg",
     "northeastern.png", "psi.jpg", "oxford.jpg",
 ]
+
+# The footer strip is unboxed (see Data/Branding/dashboard-theme.css), so the
+# gaps between logos are what group them: tight within a group, wide between.
+# Group index per logo -- 0 DRC national, 1 continental and global, 2 academic.
+PARTNER_GROUPS = {
+    "INSP.png": 0, "inrb.png": 0, "UMIE.jpeg": 0,
+    "africa-cdc.png": 1, "WHO.jpg": 1,
+    "northeastern.png": 2, "psi.jpg": 2, "oxford.jpg": 2,
+}
+
+# Equal pixel height is not equal visual weight: a solid tile or a heavy
+# letterform outweighs a thin wordmark at the same height. The old bounding box
+# hid that; unboxed, each mark needs its own factor on --partner-h.
+PARTNER_SCALE = {
+    "INSP.png": 1.0, "inrb.png": 1.0, "WHO.jpg": 1.0,
+    "UMIE.jpeg": 0.95, "africa-cdc.png": 0.95,
+    "psi.jpg": 0.9, "northeastern.png": 0.85, "oxford.jpg": 0.82,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -3438,6 +3458,8 @@ def load_partners() -> list[dict]:
                 "alt": Path(fname).stem.upper(),
                 "href": url_map.get(fname, ""),
                 "data_uri": uri,
+                "group": PARTNER_GROUPS.get(fname, 0),
+                "scale": PARTNER_SCALE.get(fname, 1.0),
             })
     return out
 

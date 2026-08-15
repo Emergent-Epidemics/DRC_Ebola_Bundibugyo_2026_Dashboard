@@ -81,6 +81,17 @@ BODY_TEMPLATE = r"""
          inline on wider screens. -->
     <div id="header-narrow-row">
       <div class="sub" id="header-updated-line"></div>
+      <!-- Narrow-screen copy of the language switch. The wide-screen one is
+           rendered into #title-sub by langSwitchHtml() in engine.js, which is
+           hidden here; this one is static markup because #header-narrow-row is
+           never rebuilt. Both use .lang-btn, and clicks are delegated, so the
+           two copies need no separate wiring. -->
+      <span class="lang-switch sub" role="group"
+            data-i18n-aria="ui.aria.language" aria-label="Language">
+        <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true">English</button>
+        <span class="lang-sep" aria-hidden="true">|</span>
+        <button type="button" class="lang-btn" data-lang="fr" aria-pressed="false">Français</button>
+      </span>
       <button type="button" id="header-info-btn" aria-haspopup="true" aria-expanded="false"
               data-i18n-aria="ui.aria.header_info" aria-label="More information">ⓘ</button>
       <div id="header-info-popup" role="tooltip" aria-hidden="true">
@@ -205,13 +216,6 @@ __NAV_LINKS__
 </div>
 <div id="view-switcher">
   <div id="footer-links">
-    <div id="lang-switcher" class="lang-switcher" role="group" aria-label="Language">
-      <div class="lang-toggle-track">
-        <span class="lang-toggle-thumb" aria-hidden="true"></span>
-        <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true">EN</button>
-        <button type="button" class="lang-btn" data-lang="fr" aria-pressed="false">FR</button>
-      </div>
-    </div>
     <button id="methods-btn" class="link-btn" type="button" data-i18n="ui.methods_btn">Contributors, Data, and Methods</button>
     <button id="terms-btn"   class="link-btn" type="button" data-i18n="ui.terms_btn">Terms of Use</button>
   </div>

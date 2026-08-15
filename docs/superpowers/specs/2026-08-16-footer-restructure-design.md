@@ -130,7 +130,7 @@ other overrides. The same rule applies to `.lang-switch`: literal
 `--view-chrome-height` drops **44px → 32px** wide. Below 700px the bar holds
 only the logo strip (Methods/Terms are already hidden there and the language
 control has moved to the header), so it drops **54px → 36px** and the strip
-centres instead of right-aligning. The `max-height:500px` band goes 46px → 34px.
+centres instead of right-aligning. The `max-height:500px` band goes 46px → 28px.
 
 The structural fix is that `#partners` is allowed to give ground:
 
@@ -142,12 +142,20 @@ with a single `--partner-h` variable driving logo height per band (replacing
 both the unconditional `clamp(18px, 3vmin, 28px)` and the
 `@media (max-width: 999.98px)` patch added when the three logos landed):
 
-| Band | `--partner-h` |
-|---|---|
-| default | 22px |
-| ≤ 999.98px | 18px |
-| ≤ 700px | 18px |
-| `max-height: 500px` | 16px |
+| Band | `--partner-h` | group gap / within-group gap |
+|---|---|---|
+| default | 22px | 30 / 12 |
+| ≤ 999.98px | 18px | 22 / 9 |
+| ≤ 799.98px | 15px | 16 / 7 |
+| `max-height: 500px` | 16px | 16 / 7 |
+
+The 799.98px step is set by French, and by arithmetic rather than taste:
+"Contributeurs, données et méthodes" plus "Conditions d'utilisation" measure
+327px on one line, and the bar spends 32px on its own padding and the column
+gap, so the strip must fit in `W − 359` — 342px at the bottom of the band.
+`flex-shrink` alone does not achieve this: shrinking the flex *container* does
+not scale the images inside it, so the strip has to actually be told to get
+smaller.
 
 ### C · The logo strip
 

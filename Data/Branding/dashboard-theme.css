@@ -300,10 +300,40 @@ h4 {
   background: rgba(155, 125, 78, 0.12) !important;
 }
 
+/* No plate under the theme: this bar is already --card, so the box was a
+   hairline rectangle drawn around eight logos, making them read as one slab.
+   The base stylesheet keeps its white plate for the un-themed fallback, where
+   the bar is dark -- see #view-switcher #partners in Scripts/assets/dashboard.css. */
 #view-switcher #partners {
-  background: var(--card) !important;
-  border: 1px solid var(--border) !important;
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
   box-shadow: none !important;
+}
+
+/* Footer links and the language switch: quiet text, in the theme's link
+   colours rather than the base stylesheet's amber. */
+#footer-links .link-btn {
+  background: none !important;
+  border: none !important;
+  color: var(--link) !important;
+}
+#footer-links .link-btn:hover {
+  background: none !important;
+  color: var(--link-hover) !important;
+}
+.lang-switch .lang-btn {
+  color: var(--link) !important;
+}
+.lang-switch .lang-btn:hover {
+  color: var(--link-hover) !important;
+}
+.lang-switch .lang-btn.active {
+  color: var(--ink) !important;
+  border-bottom: 2px solid var(--terracotta) !important;
+}
+.lang-switch .lang-sep {
+  color: var(--border) !important;
 }
 
 #context-hint,
@@ -386,9 +416,11 @@ h4 {
   background: #faf9f7 !important;
 }
 
+/* Unscoped duplicate of the rule above -- kept in step with it deliberately;
+   both have to go for the strip to lose its box. */
 #partners {
-  background: var(--card) !important;
-  border: 1px solid var(--border) !important;
+  background: none !important;
+  border: none !important;
   box-shadow: none !important;
 }
 
