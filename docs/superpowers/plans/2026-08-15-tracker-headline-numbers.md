@@ -154,7 +154,7 @@ def test_suspected_strings_interpolate_the_count():
 cd Scripts && python3.9 -m pytest ../tests/test_tracker_headline.py -q
 ```
 
-Expected: 5 failures. `test_retired_tracker_keys_are_gone` reports `['conf', 'conf_deaths', 'outbreak_size', 'susp', 'susp_deaths']`; the other four fail on `KeyError: 'eyebrow'` or the missing-key assertion.
+Expected: `4 failed, 1 passed`. `test_retired_tracker_keys_are_gone` reports `['conf', 'conf_deaths', 'outbreak_size', 'susp', 'susp_deaths']`; two more fail on `KeyError: 'eyebrow'` and one on the missing-key assertion. `test_tracker_keys_match_across_locales` passes even in the red phase, because the two stale locale files already carry identical key sets — it guards drift between locales, not the rename.
 
 - [ ] **Step 3: Replace the `ui.tracker` block in `locales/en.yaml`**
 
@@ -253,6 +253,34 @@ git commit -m "Tracker: replace abbreviated locale keys with eyebrow + suspected
 
 Append to `tests/test_tracker_headline.py`:
 
+First, two items raised by the Task 1 code-quality review. Annotate the three constants that
+Task 1 declared but did not use — replace the `ENGINE` / `CSS` / `THEME` lines with:
+
+```python
+# ENGINE/CSS/THEME are read by the markup and stylesheet guards below; the
+# locale guards above need only LOCALES.
+ENGINE = REPO / "Scripts" / "assets" / "engine.js"
+CSS = REPO / "Scripts" / "assets" / "dashboard.css"
+THEME = REPO / "Data" / "Branding" / "dashboard-theme.css"
+```
+
+and add the missing locale guard, which belongs with the Task 1 tests but was not specified
+there:
+
+```python
+def test_tracker_strings_are_lowercase():
+    """#tracker .global-title and .global-cell .sub apply text-transform:
+    uppercase, so a capitalised value renders doubly shouted -- or worse, looks
+    deliberate. Store lowercase and let the CSS decide."""
+    for lang in LANGS:
+        for key, value in _tracker_strings(lang).items():
+            assert value == value.lower(), (
+                f"{lang} ui.tracker.{key} is not lowercase: {value!r}"
+            )
+```
+
+Then the markup guards proper:
+
 ```python
 def _build_tracker_source():
     """The body of buildTracker(), from its declaration to the next top-level
@@ -299,7 +327,7 @@ def test_build_tracker_reads_confirmed_cases_not_total():
 cd Scripts && python3.9 -m pytest ../tests/test_tracker_headline.py -q
 ```
 
-Expected: 3 failures — `countries-row` still present, `class='qual'` absent, `global_total_cases` still present.
+Expected: 4 failures — one value not lowercase would show here if any were (none are, so that guard is green from the start; it is a regression guard, not a red-phase one), plus `countries-row` still present, `class='qual'` absent, and `global_total_cases` still present. If `test_tracker_strings_are_lowercase` fails, a locale value from Task 1 is wrong — fix the YAML, not the test.
 
 - [ ] **Step 3: Replace `buildTracker()` in `Scripts/assets/engine.js`**
 
@@ -388,7 +416,7 @@ Notes for the implementer:
 cd Scripts && python3.9 -m pytest ../tests/test_tracker_headline.py -q
 ```
 
-Expected: `8 passed`.
+Expected: `9 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -489,7 +517,7 @@ Nine rules are gone: `.countries-row`, `.country`, `.country .name`, `.country .
 cd Scripts && python3.9 -m pytest ../tests/test_tracker_headline.py -q
 ```
 
-Expected: `10 passed`. The media queries still carry `.countries-row` and `.country` rules at
+Expected: `11 passed`. The media queries still carry `.countries-row` and `.country` rules at
 this point — Task 4 removes them and adds the guard that proves it.
 
 - [ ] **Step 5: Commit**
@@ -649,7 +677,7 @@ Replace the two retired lines inside it. The block becomes:
 cd Scripts && python3.9 -m pytest ../tests/test_tracker_headline.py -q
 ```
 
-Expected: `13 passed`.
+Expected: `14 passed`.
 
 - [ ] **Step 7: Confirm nothing orphaned survives in the base stylesheet**
 
@@ -770,7 +798,7 @@ Seven rules are gone: `.countries-row`, `.country .name`, `.country .conf`, `.co
 cd Scripts && python3.9 -m pytest ../tests/test_tracker_headline.py -q
 ```
 
-Expected: `17 passed`.
+Expected: `18 passed`.
 
 - [ ] **Step 5: Run the full suite**
 
@@ -778,7 +806,7 @@ Expected: `17 passed`.
 cd Scripts && python3.9 -m pytest ../tests -q
 ```
 
-Expected: `85 passed`.
+Expected: `86 passed`.
 
 - [ ] **Step 6: Commit**
 
@@ -876,13 +904,13 @@ Expected: clean, or only the intended source files if a defect was found and fix
 cd Scripts && python3.9 -m pytest ../tests -q
 ```
 
-Expected: `85 passed`.
+Expected: `86 passed`.
 
 ---
 
 ## Done when
 
-- `cd Scripts && python3.9 -m pytest ../tests -q` reports 85 passed.
+- `cd Scripts && python3.9 -m pytest ../tests -q` reports 86 passed.
 - `grep -rn "countries-row\|conf_deaths\|susp_deaths\|outbreak_size" Scripts/ locales/ Data/Branding/` returns nothing.
 - The header renders correctly in both languages at 1280px, 900px, 390px and 800×450.
 - `git status --short` shows no build artifacts.
