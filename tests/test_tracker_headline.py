@@ -16,6 +16,9 @@ from pathlib import Path
 import yaml
 
 REPO = Path(__file__).resolve().parents[1]
+
+# ENGINE/CSS/THEME are read by the markup and stylesheet guards below; the
+# locale guards above need only LOCALES.
 ENGINE = REPO / "Scripts" / "assets" / "engine.js"
 CSS = REPO / "Scripts" / "assets" / "dashboard.css"
 THEME = REPO / "Data" / "Branding" / "dashboard-theme.css"
@@ -89,3 +92,53 @@ def test_suspected_strings_interpolate_the_count():
             assert "{n}" in tr[key], (
                 f"{lang} ui.tracker.{key} must interpolate {{n}}"
             )
+
+
+def test_tracker_strings_are_lowercase():
+    """#tracker .global-title and .global-cell .sub apply text-transform:
+    uppercase, so a capitalised value renders doubly shouted -- or worse, looks
+    deliberate. Store lowercase and let the CSS decide."""
+    for lang in LANGS:
+        for key, value in _tracker_strings(lang).items():
+            assert value == value.lower(), (
+                f"{lang} ui.tracker.{key} is not lowercase: {value!r}"
+            )
+
+
+def _build_tracker_source():
+    """The body of buildTracker(), from its declaration to the next top-level
+    function. Scoping the assertions this way keeps them from tripping over
+    unrelated uses of the same words elsewhere in a 4000-line file."""
+    src = ENGINE.read_text(encoding="utf-8")
+    start = src.index("function buildTracker()")
+    end = src.index("\nfunction ", start + 1)
+    return src[start:end]
+
+
+def test_build_tracker_has_no_per_country_branch():
+    body = _build_tracker_source()
+    for token in ("countries-row", "tracker-countries", "per_country",
+                  "conf-d", "susp-d", "country"):
+        assert token not in body, (
+            f"buildTracker() still references {token!r}; the per-country row "
+            f"was removed (totals.per_country stays in the payload, it is "
+            f"only no longer rendered)"
+        )
+
+
+def test_build_tracker_renders_the_qualifier():
+    body = _build_tracker_source()
+    for token in ("class='qual'", "class='qnum'",
+                  "ui.tracker.suspected_one", "ui.tracker.suspected_other",
+                  "ui.tracker.eyebrow", "ui.tracker.eyebrow_nodate"):
+        assert token in body, f"buildTracker() should emit {token!r}"
+
+
+def test_build_tracker_reads_confirmed_cases_not_total():
+    body = _build_tracker_source()
+    assert "global_confirmed_cases" in body
+    assert "global_total_cases" not in body, (
+        "the headline figure is labelled 'confirmed', so it reads "
+        "totals.global_confirmed_cases; global_total_cases is an alias for the "
+        "same number whose name no longer matches the label"
+    )
