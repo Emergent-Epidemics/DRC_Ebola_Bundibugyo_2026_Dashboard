@@ -162,3 +162,31 @@ def test_build_tracker_reads_confirmed_cases_not_total():
         "totals.global_confirmed_cases; global_total_cases is an alias for the "
         "same number whose name no longer matches the label"
     )
+
+
+def _tracker_lines(path):
+    """Every line of the stylesheet that names a selector under #tracker.
+    Comments are stripped first so a commented-out rule cannot satisfy or trip
+    an assertion."""
+    text = re.sub(r"/\*.*?\*/", "", path.read_text(encoding="utf-8"), flags=re.DOTALL)
+    return "\n".join(ln for ln in text.splitlines() if "#tracker" in ln)
+
+
+def test_base_stylesheet_styles_the_qualifier():
+    lines = _tracker_lines(CSS)
+    assert "#tracker .global-cell .qual {" in lines
+    assert "#tracker .global-cell .qual .qnum {" in lines
+
+
+def test_global_row_is_top_aligned():
+    # Three rules select .global-row (base plus two media queries); only the
+    # base one declares alignment, so assert on the declaration rather than on
+    # whichever rule happens to come first in the file.
+    lines = [ln for ln in _tracker_lines(CSS).splitlines()
+             if "#tracker .global-row" in ln]
+    assert lines, "no #tracker .global-row rule found"
+    assert any("align-items:flex-start" in ln for ln in lines), (
+        "the recovered cell carries no .qual line, so aligning bottoms would "
+        "drop its big number out of line with the other two"
+    )
+    assert not any("align-items:flex-end" in ln for ln in lines)

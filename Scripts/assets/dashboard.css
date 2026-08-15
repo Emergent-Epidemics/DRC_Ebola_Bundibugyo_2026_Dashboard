@@ -1042,28 +1042,29 @@
   @media (max-width: 700px) and (max-height: 500px) {
     #info { max-height:calc(70vh - var(--zone-search-drop)); }
   }
-  /* Tracker stack ("outbreak size summary", top-right of #site-header;
-     rows are right-aligned to hug the header's right edge). */
+  /* Tracker stack (outbreak headline numbers, top-right of #site-header;
+     rows are right-aligned to hug the header's right edge). Each metric owns
+     a column; where a suspected count exists it hangs under that metric's
+     label as .qual. See
+     docs/superpowers/specs/2026-08-15-tracker-headline-numbers-design.md. */
   #tracker { display:flex; flex-direction:column; align-items:flex-end; margin-top:0; padding:0 4px; }
   #tracker .stats-block  { display:flex; flex-direction:column; align-items:flex-end; }
   #tracker .global-title { font-size:clamp(9px, 1.5vw, 10px); color:#bbb; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:2px; text-align:right; }
-  #tracker .global-row { display:flex; align-items:flex-end; gap:clamp(14px, 6vw, 36px); line-height:1.05; }
+  /* flex-start, not flex-end: the recovered cell carries no .qual line, so
+     aligning bottoms would push its .num down out of line with the other two. */
+  #tracker .global-row { display:flex; align-items:flex-start; gap:clamp(14px, 6vw, 36px); line-height:1.05; }
   #tracker .global-cell { display:flex; flex-direction:column; align-items:center; }
   #tracker .global-cell .num { font-size:clamp(20px, 6vw, 30px); font-weight:700; font-variant-numeric: tabular-nums; line-height:1; }
   #tracker .global-cell .sub { font-size:clamp(9px, 1.5vw, 10px); color:#bbb; text-transform:uppercase; letter-spacing:0.6px; margin-top:2px; }
+  /* Deliberately not uppercased or letter-spaced like .sub: this is a sentence
+     fragment, not a label, and staying lowercase keeps it subordinate. Hue is
+     reserved for what is being counted, so a suspected count gets none -- it
+     is the same thing as the number above it, less certain. */
+  #tracker .global-cell .qual { font-size:clamp(9.5px, 1.5vw, 10.5px); color:#bbb; margin-top:3px; font-variant-numeric: tabular-nums; white-space:nowrap; }
+  #tracker .global-cell .qual .qnum { color:#ddd; font-weight:600; }
   #tracker .global-cell.cases  .num { color:#ffd166; }
   #tracker .global-cell.deaths .num { color:#ff4d4d; }
   #tracker .global-cell.recovered .num { color:#8CD790; }
-  #tracker .countries-row { display:flex; flex-direction:column; align-items:flex-end; gap:3px; margin-top:8px; font-size:clamp(10px, 1.6vw, 11px); color:#ddd; }
-  #tracker .country { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; justify-content:flex-end; }
-  #tracker .country .name { color:#9fcdfb; font-weight:600; }
-  #tracker .country .nums { font-variant-numeric: tabular-nums; }
-  #tracker .country .conf   { color:#ff6b6b; font-weight:600; }
-  #tracker .country .susp   { color:#ffae42; font-weight:600; }
-  #tracker .country .conf-d { color:#c97a8a; font-weight:600; }
-  #tracker .country .susp-d { color:#caa385; font-weight:600; }
-  #tracker .country .dot { color:#444; }
-  #tracker .country .sub { font-size:10px; color:#888; }
   #tracker .caveat-mark { font-size:0.85em; color:#ffae42; font-weight:700; margin-left:1px; vertical-align:super; line-height:0; }
   #tracker .tracker-footnotes { margin-top:8px; max-width:min(480px, 92vw); font-size:10px; color:#aaa; line-height:1.4; text-align:left; }
   #tracker .tracker-footnotes p { margin:0 0 4px; }
