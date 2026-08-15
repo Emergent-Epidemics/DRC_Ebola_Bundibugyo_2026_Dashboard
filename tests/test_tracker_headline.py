@@ -353,3 +353,25 @@ def test_tracker_media_rules_come_after_the_base_rules():
         f"last unconditional rule at line {max(base) + 1}; it loses the "
         f"source-order tiebreak and will silently never apply"
     )
+
+
+def test_build_tracker_suppresses_a_zero_qualifier():
+    """A zero suspected count renders nothing at all -- "0 suspected" reads as
+    a finding rather than the absence of one. No other guard in this module
+    would notice if that short-circuit were dropped."""
+    body = _build_tracker_source()
+    assert 'if (!n) return "";' in body, (
+        "qualifier() must short-circuit on a falsy count before building any "
+        "markup, or a metric with no suspected cases renders an empty .qual"
+    )
+
+
+def test_recovered_cell_has_no_qualifier():
+    """Recovered is a confirmed-only outcome with no suspected counterpart, and
+    the layout leans on that: .global-row top-aligns precisely because this one
+    cell is a line shorter than the other two."""
+    body = _build_tracker_source()
+    recovered = body[body.index("global-cell recovered"):]
+    assert "qualifier(" not in recovered, (
+        "the recovered cell must not render a .qual line"
+    )

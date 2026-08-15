@@ -985,9 +985,23 @@ Expected: `86 passed` (87 at HEAD, after Task 4b).
 
 ---
 
+### Post-review additions
+
+The final whole-branch review found two behaviours in `buildTracker()` with no static guard.
+Both were added and proven non-vacuous against a deliberate regression:
+
+- `test_build_tracker_suppresses_a_zero_qualifier` — a zero suspected count must render nothing;
+  "0 suspected" reads as a finding rather than the absence of one.
+- `test_recovered_cell_has_no_qualifier` — recovered has no suspected counterpart, and the
+  top-alignment of `.global-row` depends on that cell being a line shorter than the other two.
+
+Module total: 21 tests. Full suite: 89 passed.
+
+---
+
 ## Done when
 
-- `cd Scripts && python3.9 -m pytest ../tests -q` reports 87 passed.
+- `cd Scripts && python3.9 -m pytest ../tests -q` reports 89 passed.
 - `grep -rn "countries-row\|conf_deaths\|susp_deaths\|outbreak_size" Scripts/ locales/ Data/Branding/` returns nothing.
 - The header renders correctly in both languages at 1280px, 900px, 390px and 800×450.
 - `git status --short` shows no build artifacts.
