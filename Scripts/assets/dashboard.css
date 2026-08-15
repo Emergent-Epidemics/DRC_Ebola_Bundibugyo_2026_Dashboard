@@ -863,15 +863,11 @@
        instead of just disappearing. */
     #title-sub { display:none; }
     #header-narrow-row { display:flex; }
-    /* Stats-block simplified to just the cases/deaths/recovered numbers --
-       drop the "OUTBREAK SIZE" label and the per-country breakdown rows,
-       there's not enough width to justify them here. */
-    #tracker .global-title,
-    #tracker .countries-row { display:none; }
+    /* The eyebrow stays: at 390px three columns of full-word labels plus their
+       .qual lines occupy roughly 260px of the ~374px available, and it is the
+       only place the block dates its own numbers. */
     #tracker        { margin-top:0; padding:0 2px; }
     #tracker .global-row { gap:14px; }
-    #tracker .countries-row { gap:2px; margin-top:6px; }
-    #tracker .country { gap:3px 6px; }
     #info           { max-width:60vw; }
     /* Contributors/Methods and Terms move into the header info popup on
        narrow screens (see #header-info-popup-links above) instead of
@@ -1021,7 +1017,7 @@
     #tracker .global-row { gap:clamp(8px, 3vh, 16px); }
     #tracker .global-cell .num { font-size:clamp(16px, 4.5vh, 22px); }
     #tracker .global-cell .sub { font-size:9px; margin-top:0; }
-    #tracker .countries-row { margin-top:3px; font-size:10px; gap:1px; }
+    #tracker .global-cell .qual { font-size:9px; margin-top:1px; }
     #info           { max-height:70vh; }
     #legend         { max-height:60vh; bottom:calc(var(--view-chrome-height) + 8px); }
     body.view-context #context-national { max-height:min(28vh, calc(50vh - 80px)); }
@@ -1087,8 +1083,6 @@
     #tracker { align-items:center; }
     #tracker .stats-block { align-items:center; }
     #tracker .global-title { text-align:center; }
-    #tracker .countries-row { align-items:center; }
-    #tracker .country { justify-content:center; }
     #tracker .tracker-footnotes { text-align:center; }
   }
   #imperial-model-estimates {

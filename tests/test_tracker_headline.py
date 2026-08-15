@@ -215,3 +215,56 @@ def test_global_row_is_top_aligned():
         "drop its big number out of line with the other two"
     )
     assert not any("align-items:flex-end" in ln for ln in lines)
+
+
+# Selectors the per-country row owned. Matched only against lines that already
+# mention #tracker, so an unrelated .name or .dot elsewhere in the file is not
+# our business. \.conf\b also matches .conf-d, which is retired too.
+RETIRED_SELECTORS = (
+    r"\.countries-row\b",
+    r"\.country\b",
+    r"\.conf\b",
+    r"\.susp\b",
+    r"\.dot\b",
+    r"\.nums\b",
+    r"\.name\b",
+)
+
+RULE = re.compile(r"([^{}]+)\{([^{}]*)\}")
+
+
+def _rule_blocks(path):
+    """(selector, declarations) for every brace-delimited rule in the file.
+    @media openers do not match, because their bodies contain braces."""
+    text = re.sub(r"/\*.*?\*/", "", path.read_text(encoding="utf-8"), flags=re.DOTALL)
+    return [(m.group(1).strip(), m.group(2)) for m in RULE.finditer(text)]
+
+
+def test_base_stylesheet_has_no_country_row_rules():
+    lines = _tracker_lines(CSS)
+    for pattern in RETIRED_SELECTORS:
+        assert not re.search(pattern, lines), (
+            f"dashboard.css still styles {pattern} under #tracker"
+        )
+
+
+def test_no_rule_hides_the_eyebrow():
+    # The eyebrow is the only place the block states its as-of date. Hiding it
+    # on phones, as the old max-width:700px rule did, leaves three undated
+    # numbers -- #header-narrow-row carries only the dashboard build time,
+    # which is a different date.
+    for selector, body in _rule_blocks(CSS):
+        if "#tracker .global-title" in selector:
+            assert "display:none" not in body.replace(" ", ""), (
+                f"rule {selector!r} hides the eyebrow"
+            )
+
+
+def test_short_viewport_shrinks_the_qualifier():
+    text = re.sub(r"/\*.*?\*/", "", CSS.read_text(encoding="utf-8"), flags=re.DOTALL)
+    block = re.search(r"@media \(max-height: 500px\) \{(.*?)\n  \}", text, re.DOTALL)
+    assert block, "could not locate the @media (max-height: 500px) block"
+    assert "#tracker .global-cell .qual" in block.group(1), (
+        "a landscape phone must shrink .qual alongside .num and .sub, or the "
+        "header grows taller than it did before"
+    )
