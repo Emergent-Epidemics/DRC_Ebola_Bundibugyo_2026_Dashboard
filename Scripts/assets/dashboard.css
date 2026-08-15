@@ -679,6 +679,18 @@
     height:clamp(18px, 3vmin, 28px); width:auto;
     max-width:min(14vmin, 110px); display:block; object-fit:contain;
   }
+  /* #partners never shrinks (flex-shrink:0), so once the strip is wide enough
+     the Contributors/Terms column next to it wraps onto a second row and
+     spills out of the fixed-height bar. Eight logos hit that at ~980px in FR
+     (the longer button labels) and ~880px in EN, both well above the ≤700px
+     rules below, so step the logos down for the whole intermediate band. */
+  @media (max-width: 999.98px) {
+    #view-switcher #partners { padding:2px 3px; gap:1px; }
+    #view-switcher #partners img {
+      height:clamp(14px, 2.4vmin, 20px);
+      max-width:min(10vmin, 68px);
+    }
+  }
   #context-hint,
   #travel-hint,
   #flow-hint,

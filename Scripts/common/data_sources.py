@@ -294,7 +294,10 @@ _NAME_TO_NOM = {
 }
 _NOM_TO_NAME = {v: k for k, v in _NAME_TO_NOM.items()}
 
-PARTNER_ORDER = ["INSP.png", "inrb.png", "UMIE.jpeg", "africa-cdc.png", "WHO.jpg"]
+PARTNER_ORDER = [
+    "INSP.png", "inrb.png", "UMIE.jpeg", "africa-cdc.png", "WHO.jpg",
+    "northeastern.png", "psi.jpg", "oxford.jpg",
+]
 
 
 # ---------------------------------------------------------------------------

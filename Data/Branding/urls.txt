@@ -3,3 +3,6 @@ INSP.png, https://insp.cd/
 UMIE.jpeg, https://inrb.net/
 africa-cdc.png, https://africacdc.org/
 WHO.jpg, https://www.who.int/
+northeastern.png, https://www.northeastern.edu/
+psi.jpg, https://www.psi.ox.ac.uk/
+oxford.jpg, https://www.ox.ac.uk/
