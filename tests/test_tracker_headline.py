@@ -268,3 +268,47 @@ def test_short_viewport_shrinks_the_qualifier():
         "a landscape phone must shrink .qual alongside .num and .sub, or the "
         "header grows taller than it did before"
     )
+
+
+def _tracker_declarations(path):
+    """The declaration bodies of every rule selecting under #tracker. The theme
+    layer puts selectors and declarations on separate lines, so _tracker_lines()
+    sees no colours at all -- this is the one that does."""
+    return "\n".join(body for sel, body in _rule_blocks(path) if "#tracker" in sel)
+
+
+def test_theme_layer_has_no_country_row_rules():
+    lines = _tracker_lines(THEME)
+    for pattern in RETIRED_SELECTORS:
+        assert not re.search(pattern, lines), (
+            f"dashboard-theme.css still styles {pattern} under #tracker"
+        )
+
+
+def test_theme_layer_drops_the_hardcoded_rust():
+    assert "#a66b55" not in THEME.read_text(encoding="utf-8"), (
+        "the suspected-deaths colour was the one hard-coded hex in the tracker "
+        "theme rules; it leaves with the row it painted"
+    )
+
+
+def test_theme_layer_styles_the_qualifier():
+    lines = _tracker_lines(THEME)
+    assert "#tracker .global-cell .qual" in lines
+    assert "#tracker .global-cell .qual .qnum" in lines
+
+
+def test_tracker_hues_are_one_meaning_each():
+    """Each headline hue names exactly one thing. The collision this redesign
+    removes was --terracotta painting both confirmed cases and suspected
+    cases."""
+    decls = _tracker_declarations(THEME)
+    for token in ("var(--maroon)", "var(--green)"):
+        assert decls.count(token) == 1, (
+            f"{token} is used {decls.count(token)} times under #tracker; each "
+            f"hue must name exactly one thing"
+        )
+    # --terracotta is the cases hue and also the caveat mark, which annotates a
+    # number rather than being one. Two uses, no more.
+    assert decls.count("var(--terracotta)") == 2
+    assert "var(--red)" not in decls

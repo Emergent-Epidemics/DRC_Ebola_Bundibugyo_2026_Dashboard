@@ -152,8 +152,11 @@ html, body {
 
 #tracker .global-title,
 #tracker .global-cell .sub,
-#tracker .country .sub {
+#tracker .global-cell .qual {
   color: var(--muted) !important;
+}
+#tracker .global-cell .qual .qnum {
+  color: var(--ink) !important;
 }
 #tracker .global-cell.cases .num {
   color: var(--terracotta) !important;
@@ -163,27 +166,6 @@ html, body {
 }
 #tracker .global-cell.recovered .num {
   color: var(--green) !important;
-}
-#tracker .countries-row {
-  color: var(--ink) !important;
-}
-#tracker .country .name {
-  color: var(--link) !important;
-}
-#tracker .country .conf {
-  color: var(--red) !important;
-}
-#tracker .country .susp {
-  color: var(--terracotta) !important;
-}
-#tracker .country .conf-d {
-  color: var(--maroon) !important;
-}
-#tracker .country .susp-d {
-  color: #a66b55 !important;
-}
-#tracker .country .dot {
-  color: var(--border) !important;
 }
 #tracker .caveat-mark,
 #tracker .tracker-footnotes .mark {
