@@ -863,11 +863,6 @@
        instead of just disappearing. */
     #title-sub { display:none; }
     #header-narrow-row { display:flex; }
-    /* The eyebrow stays: at 390px three columns of full-word labels plus their
-       .qual lines occupy roughly 260px of the ~374px available, and it is the
-       only place the block dates its own numbers. */
-    #tracker        { margin-top:0; padding:0 2px; }
-    #tracker .global-row { gap:14px; }
     #info           { max-width:60vw; }
     /* Contributors/Methods and Terms move into the header info popup on
        narrow screens (see #header-info-popup-links above) instead of
@@ -1012,12 +1007,6 @@
     #site-header h1#page-heading { font-size:clamp(16px, 4.5vh, 22px); margin-bottom:1px; letter-spacing:0.2px; }
     #site-header .sub { font-size:9px; }
     #footer-links .link-btn { padding:5px 10px; font-size:11px; }
-    #tracker        { margin-top:0; padding:0 2px; }
-    #tracker .global-title { font-size:9px; margin-bottom:0; }
-    #tracker .global-row { gap:clamp(8px, 3vh, 16px); }
-    #tracker .global-cell .num { font-size:clamp(16px, 4.5vh, 22px); }
-    #tracker .global-cell .sub { font-size:9px; margin-top:0; }
-    #tracker .global-cell .qual { font-size:9px; margin-top:1px; }
     #info           { max-height:70vh; }
     #legend         { max-height:60vh; bottom:calc(var(--view-chrome-height) + 8px); }
     body.view-context #context-national { max-height:min(28vh, calc(50vh - 80px)); }
@@ -1074,16 +1063,31 @@
   #tracker .tracker-footnotes p { margin:0 0 4px; }
   #tracker .tracker-footnotes p:last-child { margin-bottom:0; }
   #tracker .tracker-footnotes .mark { color:#ffae42; font-weight:700; margin-right:3px; }
+  /* Both #tracker media blocks live HERE, after the unconditional rules above,
+     and not with their siblings earlier in the file. Media queries add no
+     specificity, so an equal-specificity #tracker rule in an earlier block
+     loses the source-order tiebreak to the base rule below it and silently
+     does nothing -- which is what had happened to every override in here.
+     Only display:none survived, because no base rule declares display. */
   @media (max-width: 700px) {
-    /* Placed after the base #tracker rules above (rather than in the earlier
-       max-width:700px block) so these actually win the cascade: same
-       specificity + later source order beats the unconditional right-aligned
-       rules above, which is what centers the outbreak-summary contents
-       inside #site-header-right on narrow screens. */
-    #tracker { align-items:center; }
+    /* Centering: the base rules right-align to hug the header's right edge,
+       which only makes sense in the wide two-column layout. Narrow screens
+       stack #site-header-left above #site-header-right and centre both. */
+    #tracker { align-items:center; margin-top:0; padding:0 2px; }
     #tracker .stats-block { align-items:center; }
     #tracker .global-title { text-align:center; }
+    #tracker .global-row { gap:14px; }
     #tracker .tracker-footnotes { text-align:center; }
+  }
+  /* After the block above, so a landscape phone -- which matches both -- takes
+     this one's tighter gap. That was the original order too. */
+  @media (max-height: 500px) {
+    #tracker { margin-top:0; padding:0 2px; }
+    #tracker .global-title { font-size:9px; margin-bottom:0; }
+    #tracker .global-row { gap:clamp(8px, 3vh, 16px); }
+    #tracker .global-cell .num { font-size:clamp(16px, 4.5vh, 22px); }
+    #tracker .global-cell .sub { font-size:9px; margin-top:0; }
+    #tracker .global-cell .qual { font-size:9px; margin-top:1px; }
   }
   #imperial-model-estimates {
     margin-top:6px;

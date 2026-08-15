@@ -261,10 +261,14 @@ def test_no_rule_hides_the_eyebrow():
 
 
 def test_short_viewport_shrinks_the_qualifier():
+    # Two @media (max-height: 500px) blocks exist -- an unrelated one earlier
+    # in the file, and the #tracker-only one placed after the base rules so
+    # its overrides win the cascade. Check across all of them, not just
+    # whichever comes first.
     text = re.sub(r"/\*.*?\*/", "", CSS.read_text(encoding="utf-8"), flags=re.DOTALL)
-    block = re.search(r"@media \(max-height: 500px\) \{(.*?)\n  \}", text, re.DOTALL)
-    assert block, "could not locate the @media (max-height: 500px) block"
-    assert "#tracker .global-cell .qual" in block.group(1), (
+    blocks = re.findall(r"@media \(max-height: 500px\) \{(.*?)\n  \}", text, re.DOTALL)
+    assert blocks, "could not locate any @media (max-height: 500px) block"
+    assert any("#tracker .global-cell .qual" in block for block in blocks), (
         "a landscape phone must shrink .qual alongside .num and .sub, or the "
         "header grows taller than it did before"
     )
@@ -312,3 +316,24 @@ def test_tracker_hues_are_one_meaning_each():
     # number rather than being one. Two uses, no more.
     assert decls.count("var(--terracotta)") == 2
     assert "var(--red)" not in decls
+
+
+def test_tracker_media_rules_come_after_the_base_rules():
+    """Media queries add no specificity. An equal-specificity #tracker rule in
+    an @media block that sits EARLIER in the file therefore loses the
+    source-order tiebreak to the unconditional rule below it, and silently does
+    nothing -- no warning, no visible error, it just never applies. Every
+    #tracker media override has to sit after the base block."""
+    text = re.sub(r"/\*.*?\*/", "", CSS.read_text(encoding="utf-8"), flags=re.DOTALL)
+    lines = text.splitlines()
+    # Unconditional rules are indented two spaces, rules nested inside an
+    # @media block four. That indentation convention holds throughout the file.
+    base = [i for i, ln in enumerate(lines) if re.match(r"  #tracker\b", ln)]
+    nested = [i for i, ln in enumerate(lines) if re.match(r"    #tracker\b", ln)]
+    assert base, "no unconditional #tracker rules found"
+    assert nested, "no @media #tracker rules found"
+    assert min(nested) > max(base), (
+        f"an @media #tracker rule at line {min(nested) + 1} sits before the "
+        f"last unconditional rule at line {max(base) + 1}; it loses the "
+        f"source-order tiebreak and will silently never apply"
+    )
