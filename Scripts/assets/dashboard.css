@@ -524,13 +524,19 @@
     background:#ffffff; color:#2a2a27;
     border:1px solid #e7e3db; border-radius:8px;
     padding:10px 12px; box-shadow:0 4px 16px rgba(42,42,39,0.12);
-    font-size:12px; pointer-events:none;
+    /* Text matches the active-case marker tooltip (caseMarkerTooltip +
+       .case-tt-row): same 12px/1.5, same one-colour label-and-value pair, same
+       gapless block under the title. The box itself is deliberately NOT the
+       same -- that one is a stock Leaflet tooltip. */
+    font-size:12px; line-height:1.5; pointer-events:none;
   }
   body.view-epi-trends #epi-float.visible { display:block; }
   #epi-float strong { color:#2a2a27; }
-  #epi-float table { width:100%; border-collapse:collapse; margin-top:6px; }
-  #epi-float td { padding:2px 0; color:#2a2a27; }
-  #epi-float td:first-child { color:#9c968b; }
+  #epi-float table { width:100%; border-collapse:collapse; }
+  /* Rows carry no padding of their own; line-height does the spacing, as in
+     the marker tooltip's flex rows. Labels stay the same colour as values --
+     no muted first column here. */
+  #epi-float td { padding:0; color:#2a2a27; }
   #epi-float td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
   #trends-legend {
     position:absolute; z-index:1000;
