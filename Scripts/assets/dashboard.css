@@ -1059,7 +1059,15 @@
   /* Deliberately not uppercased or letter-spaced like .sub: this is a sentence
      fragment, not a label, and staying lowercase keeps it subordinate. Hue is
      reserved for what is being counted, so a suspected count gets none -- it
-     is the same thing as the number above it, less certain. */
+     is the same thing as the number above it, less certain.
+
+     Slightly larger than .sub on purpose: .sub is uppercase, so its cap-height
+     does the work, while this line is lowercase and rides on a smaller
+     x-height. At 10.5px lowercase it still reads smaller than 10px uppercase.
+
+     nowrap is safe because #site-header sets flex-wrap:wrap -- a count long
+     enough to widen the cell pushes #site-header-right onto its own row rather
+     than overflowing the viewport. */
   #tracker .global-cell .qual { font-size:clamp(9.5px, 1.5vw, 10.5px); color:#bbb; margin-top:3px; font-variant-numeric: tabular-nums; white-space:nowrap; }
   #tracker .global-cell .qual .qnum { color:#ddd; font-weight:600; }
   #tracker .global-cell.cases  .num { color:#ffd166; }
