@@ -484,8 +484,9 @@ h4 {
   border-color: var(--border) !important;
 }
 #epi-float strong { color: var(--ink) !important; }
+/* Label and value share one colour, matching the active-case marker tooltip.
+   No muted first column here -- see dashboard.css/#epi-float td. */
 #epi-float td { color: var(--ink) !important; }
-#epi-float td:first-child { color: var(--muted) !important; }
 
 #epi-split-handle::before {
   background: var(--grip) !important;
