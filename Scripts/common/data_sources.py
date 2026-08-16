@@ -90,9 +90,12 @@ __all__ = [
     '_fetch_insp_sitrep_urls_wp',
     '_fetch_insp_sitrep_urls_homepage',
     '_pick_latest_sitrep_url',
+    '_pick_sitrep_url_for_date',
+    '_sitrep_date_from_slug',
     'fetch_latest_insp_sitrep_url',
     '_latest_insp_url_from_local',
     'detect_asof',
+    'detect_asof_date',
     'latest_insp_url',
     '_NORM_RE',
     '_norm',
@@ -270,8 +273,14 @@ INSP_SITREP_FETCH = os.environ.get("INSP_SITREP_FETCH", "1").strip().lower() not
 )
 
 # Slugs for the Bundibugyo Ebola sitrep series on insp.cd (not generic MVE carousel pages).
-_SITREP_SLUG_MODERN_RE = re.compile(r"sitrep-n(\d{1,3})-(mvb|mve)_", re.I)
+# INSP has renamed the sitrep slug twice: ``sitrep-n072-mvb_25-07-2026`` up to
+# #072, then ``sitrep-n092-mvebdb-14-08-2026`` from #073 on. Match any ``mv*``
+# disease token and either separator so the next rename of that token does not
+# silently strand us on an old sitrep again (see tests/test_insp_sitrep_url.py).
+_SITREP_SLUG_MODERN_RE = re.compile(r"sitrep-n(\d{1,3})-(mv[a-z]*)[-_]", re.I)
 _SITREP_SLUG_LEGACY_RE = re.compile(r"sitrep-mve-n-(\d{1,3})-(\d{4})", re.I)
+# Trailing report date on a modern slug: ``sitrep-n092-mvebdb-14-08-2026``.
+_SITREP_SLUG_DATE_RE = re.compile(r"[-_](\d{2})-(\d{2})-(\d{4})$")
 _INSP_SITREP_PATH_RE = re.compile(
     r"(?:https?://(?:www\.)?insp\.cd)?(/sitrep-[\w-]+/?)",
     re.I,
@@ -431,6 +440,17 @@ def _sitrep_num_from_slug(slug: str) -> int | None:
     return None
 
 
+def _sitrep_date_from_slug(slug: str) -> datetime.date | None:
+    """Report date embedded in a modern sitrep slug (``...-14-08-2026``)."""
+    m = _SITREP_SLUG_DATE_RE.search(slug.strip("/").lower())
+    if not m:
+        return None
+    try:
+        return datetime(int(m.group(3)), int(m.group(2)), int(m.group(1))).date()
+    except ValueError:
+        return None
+
+
 def _is_bdbv_insp_sitrep_slug(slug: str) -> bool:
     """True for Bundibugyo Ebola sitrep permalinks (excludes unrelated MVE pages)."""
     s = slug.strip("/").lower()
@@ -503,17 +523,52 @@ def _fetch_insp_sitrep_urls_homepage() -> dict[int, str]:
 def _pick_latest_sitrep_url(candidates: dict[int, str]) -> str | None:
     if not candidates:
         return None
-    # Prefer MVB (current Bundibugyo naming); else highest sitrep number.
+    # Prefer the modern per-outbreak series over the legacy ``sitrep-mve-n-NNN``
+    # naming that is shared with other diseases; else highest sitrep number.
+    # Match on the series *shape*, not on one era's disease token: keying off
+    # "-mvb_" meant that once INSP moved to "-mvebdb-", the newest slug carrying
+    # the old marker (#072) beat every newer sitrep in the candidate set.
     for num in sorted(candidates, reverse=True):
         slug = candidates[num][len(INSP_BASE_URL):].strip("/").lower()
-        if "-mvb_" in slug:
+        if _SITREP_SLUG_MODERN_RE.search(slug):
             return candidates[num]
     best_num = max(candidates)
     return candidates[best_num]
 
 
-def fetch_latest_insp_sitrep_url() -> str | None:
-    """Live INSP lookup: WordPress API, then homepage HTML scrape."""
+def _pick_sitrep_url_for_date(
+    candidates: dict[int, str], asof: datetime.date
+) -> str | None:
+    """The published sitrep the displayed data actually came from.
+
+    The header renders this link and the as-of date as one phrase ("Latest
+    INSP Sit Rep - 11 Aug 2026"), so linking the newest sitrep INSP has
+    published would point at a report whose numbers are not on the dashboard
+    -- transcription runs days behind publication. Match the report date
+    instead, and never return one newer than the data.
+    """
+    dated = {}
+    for num, url in candidates.items():
+        d = _sitrep_date_from_slug(url[len(INSP_BASE_URL):])
+        if d is not None:
+            dated[num] = d
+    exact = [num for num, d in dated.items() if d == asof]
+    if exact:
+        return candidates[max(exact)]
+    # No exact hit (a date convention drifted, or the data predates the
+    # scrape window): the newest report that is not ahead of the data.
+    older = [num for num, d in dated.items() if d < asof]
+    if older:
+        return candidates[max(older)]
+    return None
+
+
+def fetch_latest_insp_sitrep_url(asof: datetime.date | None = None) -> str | None:
+    """Live INSP lookup: WordPress API, then homepage HTML scrape.
+
+    With ``asof`` the pick is anchored to the data's report date rather than
+    to whatever INSP published most recently.
+    """
     merged: dict[int, str] = {}
     for source, fetcher in (
         ("wp-json", _fetch_insp_sitrep_urls_wp),
@@ -524,6 +579,21 @@ def fetch_latest_insp_sitrep_url() -> str | None:
             print(f"  INSP sitrep fetch ({source}): "
                   f"#{max(found)} among {len(found)} candidate(s)")
             merged.update(found)
+    if asof is not None:
+        anchored = _pick_sitrep_url_for_date(merged, asof)
+        if anchored:
+            if merged and max(merged) > (_sitrep_num_from_slug(
+                    anchored[len(INSP_BASE_URL):]) or 0):
+                print(f"  NOTE: INSP has published up to #{max(merged)}; the "
+                      f"dashboard's data stops at {_format_asof(asof)}, so the "
+                      f"header links that report, not the newest one")
+            return anchored
+        # Deliberately do NOT fall back to the newest published sitrep here:
+        # that is the bug this anchoring exists to prevent. Returning None
+        # lets the caller drop to the local override / INSP index instead.
+        print("  WARNING: no INSP sitrep matches the data's as-of date "
+              f"({_format_asof(asof)}); leaving the link unanchored")
+        return None
     return _pick_latest_sitrep_url(merged)
 
 
@@ -549,8 +619,9 @@ def _latest_insp_url_from_local() -> str | None:
     return None
 
 
-def detect_asof() -> str:
-    """Derive the 'latest case report' date.
+def detect_asof_date() -> datetime.date | None:
+    """The 'latest case report' date the dashboard displays, as a date.
+
     Checks local sit-rep CSVs first, then falls back to _date fields in the
     build GeoJSON."""
     if SIT_REPS_DIR.exists():
@@ -563,7 +634,7 @@ def detect_asof() -> str:
                 dated.append((d, p))
         if dated:
             d, _ = max(dated)
-            return _format_asof(d)
+            return d
     if BUILD_GEOJSON.exists():
         with open(BUILD_GEOJSON) as f:
             raw = json.load(f)
@@ -576,14 +647,24 @@ def detect_asof() -> str:
                     if parsed is not None:
                         dates.add(parsed)
         if dates:
-            return _format_asof(max(dates))
-    return ASOF_FALLBACK
+            return max(dates)
+    return None
 
 
-def latest_insp_url() -> str:
-    """Latest INSP sitrep permalink: live fetch, then local overrides, then INSP home."""
+def detect_asof() -> str:
+    d = detect_asof_date()
+    return _format_asof(d) if d is not None else ASOF_FALLBACK
+
+
+def latest_insp_url(asof: datetime.date | None = None) -> str:
+    """Permalink for the sitrep the displayed data came from.
+
+    ``asof`` anchors the choice to the data (see _pick_sitrep_url_for_date);
+    without it this falls back to the newest sitrep published. Live fetch
+    first, then local overrides, then the INSP home page.
+    """
     if _insp_live_fetch_enabled():
-        live = fetch_latest_insp_sitrep_url()
+        live = fetch_latest_insp_sitrep_url(asof)
         if live:
             print(f"  insp sitrep URL (live): {live}")
             return live
