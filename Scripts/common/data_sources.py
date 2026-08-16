@@ -3244,6 +3244,32 @@ def _strip_bullet(s: str) -> str:
     return s.lstrip()
 
 
+# The modal renders "Contributors, Data, and Methods" in its own header, so a
+# source document that opens with that title shows it twice. Same idea as
+# _TERMS_HEADER_SKIP_RE below, which drops the equivalent line from the terms
+# text. Only an exact title match is dropped: the English document opens with
+# an h2 "Contributors", which is its first section (peer to "Data" and
+# "Methods") and has to survive.
+_METHODS_TITLE_RE = re.compile(
+    r"^(?:contributors,?\s+data,?\s+(?:and|&)\s+methods"
+    r"|contributeurs,?\s+données,?\s+et\s+méthodes)"
+    r"[\s.:;,]*$",
+    re.IGNORECASE,
+)
+_LEADING_HEADING_RE = re.compile(r"\A\s*<(h[1-4])\b[^>]*>(.*?)</\1>\s*", re.DOTALL | re.IGNORECASE)
+
+
+def _drop_repeated_title(html: str) -> str:
+    """Drop a leading heading that only repeats the dialog's own title."""
+    m = _LEADING_HEADING_RE.match(html)
+    if not m:
+        return html
+    text = re.sub(r"<[^>]+>", "", m.group(2)).replace("&amp;", "&")
+    if _METHODS_TITLE_RE.match(" ".join(text.split())):
+        return html[m.end():]
+    return html
+
+
 def load_methods_html(path: Path | None = None) -> str:
     """Render Contributors_Methods_Data_website.docx as an HTML snippet.
 
@@ -3373,7 +3399,7 @@ def load_methods_html(path: Path | None = None) -> str:
             parts.append(f"<p>{html_body}</p>")
     if in_ul:
         parts.append("</ul>")
-    return "\n".join(parts)
+    return _drop_repeated_title("\n".join(parts))
 
 
 _TERMS_SECTION_RE = re.compile(r"^(\d+)\.\s+(.+)$")
@@ -3391,7 +3417,8 @@ def load_methods_html_lang(lang: str = "en") -> str:
             return load_methods_html(METHODS_DOCX_FR)
         if METHODS_HTML_FR.exists():
             print(f"  methods HTML (fr): {METHODS_HTML_FR.name}")
-            return METHODS_HTML_FR.read_text(encoding="utf-8").strip()
+            # This file (unlike the docx) does open with the dialog's title.
+            return _drop_repeated_title(METHODS_HTML_FR.read_text(encoding="utf-8").strip())
         print("  WARNING: no French methods document; falling back to English")
     return load_methods_html(METHODS_DOCX)
 
