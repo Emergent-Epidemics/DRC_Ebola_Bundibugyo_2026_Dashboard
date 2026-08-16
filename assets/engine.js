@@ -298,8 +298,6 @@ function applyStaticI18n() {
     btn.classList.toggle("active", on);
     btn.setAttribute("aria-pressed", on ? "true" : "false");
   });
-  const langSwitcher = document.getElementById("lang-switcher");
-  if (langSwitcher) langSwitcher.classList.toggle("lang-fr", currentLang === "fr");
   const methodsModal = document.getElementById("methods-modal");
   const termsModal = document.getElementById("terms-modal");
   if (methodsModal) methodsModal.setAttribute("aria-label", t("ui.methods_modal_title"));
@@ -330,6 +328,27 @@ function formatBuildTimestamp(iso) {
   return datePart + ", " + timePart + " UTC";
 }
 
+// Language switch: two plain links, each written in its own language, so
+// neither label needs translating. Rendered here (rather than sitting in the
+// static markup like the narrow-screen copy in #header-narrow-row) because
+// #title-sub's innerHTML is rebuilt on every switch -- which is also why the
+// click handler is delegated rather than bound per node.
+const LANG_LABELS = { en: "English", fr: "Français" };
+function langSwitchHtml() {
+  const langs = Object.keys(LANG_LABELS).filter(function(l) {
+    return I18N.strings && I18N.strings[l];
+  });
+  if (langs.length < 2) return "";
+  return "<span class='lang-switch' role='group' data-i18n-aria='ui.aria.language' aria-label='" +
+    t("ui.aria.language") + "'>" +
+    langs.map(function(lang) {
+      const on = lang === currentLang;
+      return "<button type='button' class='lang-btn" + (on ? " active" : "") + "' data-lang='" + lang +
+        "' aria-pressed='" + (on ? "true" : "false") + "'>" + LANG_LABELS[lang] + "</button>";
+    }).join("<span class='lang-sep' aria-hidden='true'>|</span>") +
+    "</span>";
+}
+
 function buildTitleSub() {
   const linkStyle = "color:#9fcdfb;text-decoration:underline";
   // Latest SitRep link + "built on" tag -- shown inline in #title-sub on
@@ -357,7 +376,7 @@ function buildTitleSub() {
   }
 
   document.getElementById("title-sub").innerHTML =
-    sitrepHtml + (updatedHtml ? "<br/>" + updatedHtml : "");
+    sitrepHtml + "<br/>" + (updatedHtml ? updatedHtml + " · " : "") + langSwitchHtml();
 
   const updatedLineEl = document.getElementById("header-updated-line");
   if (updatedLineEl) updatedLineEl.innerHTML = updatedHtml;
@@ -477,16 +496,33 @@ function buildModeledEstimateNote() {
 })();
 
 // --- partners strip ---
+// The strip carries no bounding box under the theme, so the gaps are what
+// group the logos: .partner-group holds one affiliation (tight gap), #partners
+// spaces the groups apart (wide gap). Each logo also carries its own scale
+// factor on --partner-h -- see PARTNER_GROUPS/PARTNER_SCALE in
+// common/data_sources.py for both, and the design spec for why.
 (function buildPartners() {
   const partners = PAYLOAD.partners || [];
   const root = document.getElementById("partners");
   if (!partners.length || !root) { if (root) root.style.display="none"; return; }
-  root.innerHTML = partners.map(function(p) {
-    const img = "<img src='" + p.data_uri + "' alt='" + p.alt + "' title='" + p.alt + "' />";
-    return p.href
+  let html = "";
+  let openGroup = null;
+  partners.forEach(function(p) {
+    const group = p.group || 0;
+    if (group !== openGroup) {
+      if (openGroup !== null) html += "</span>";
+      html += "<span class='partner-group'>";
+      openGroup = group;
+    }
+    const scale = p.scale || 1;
+    const img = "<img src='" + p.data_uri + "' alt='" + p.alt + "' title='" + p.alt + "' " +
+      "style='height:calc(var(--partner-h) * " + scale + ")' />";
+    html += p.href
       ? "<a href='" + p.href + "' target='_blank' rel='noopener'>" + img + "</a>"
       : img;
-  }).join("");
+  });
+  if (openGroup !== null) html += "</span>";
+  root.innerHTML = html;
 })();
 
 const layerSelect = document.getElementById("layer-select");
@@ -546,8 +582,12 @@ function setLang(lang) {
   }
 }
 
-document.querySelectorAll(".lang-btn").forEach(function(btn) {
-  btn.addEventListener("click", function() { setLang(btn.dataset.lang || "en"); });
+// Delegated, not bound per node: the wide-screen copy of the switch lives
+// inside #title-sub, which buildTitleSub() replaces wholesale on every switch,
+// so per-node listeners would survive exactly one click.
+document.addEventListener("click", function(e) {
+  const btn = e.target.closest && e.target.closest(".lang-btn");
+  if (btn) setLang(btn.dataset.lang || "en");
 });
 
 function getLayer(id) { return LAYERS.find(L => L.id === id); }
