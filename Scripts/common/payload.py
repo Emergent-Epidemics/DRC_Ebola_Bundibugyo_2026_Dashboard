@@ -145,7 +145,8 @@ def build_shared_payload() -> dict:
         print(f"  genomic: {len(genomic.get('tips', []))} tips, "
               f"onset {len(genomic.get('onset_distribution', {}).get('dates', []))} dates")
 
-    asof = detect_asof()
+    asof_date = detect_asof_date()
+    asof = _format_asof(asof_date) if asof_date is not None else ASOF_FALLBACK
     print(f"  asof: {asof}")
     data_build = load_data_build_info()
 
@@ -187,7 +188,7 @@ def build_shared_payload() -> dict:
             "default_hub", "Mongbwalu"),
         "flowminder_latest_yyyymm": flow_yyyymm,
         "initial_view": initial_view,
-        "insp_sitrep_url": latest_insp_url(),
+        "insp_sitrep_url": latest_insp_url(asof_date),
         "data_build": data_build,
         "geometry": {"type": "FeatureCollection", "features": features},
         "zone_data": zone_data,
