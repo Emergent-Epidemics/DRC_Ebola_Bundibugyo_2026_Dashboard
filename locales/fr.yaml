@@ -278,3 +278,4 @@ ui:
     epi_split: "Glisser pour redimensionner la carte et le tableau"
     trends_split: "Glisser pour redimensionner la carte et les tendances"
     header_info: "Plus d'informations"
+    language: "Langue"

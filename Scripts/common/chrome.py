@@ -81,6 +81,17 @@ BODY_TEMPLATE = r"""
          inline on wider screens. -->
     <div id="header-narrow-row">
       <div class="sub" id="header-updated-line"></div>
+      <!-- Narrow-screen copy of the language switch. The wide-screen one is
+           rendered into #title-sub by langSwitchHtml() in engine.js, which is
+           hidden here; this one is static markup because #header-narrow-row is
+           never rebuilt. Both use .lang-btn, and clicks are delegated, so the
+           two copies need no separate wiring. -->
+      <span class="lang-switch sub" role="group"
+            data-i18n-aria="ui.aria.language" aria-label="Language">
+        <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true">English</button>
+        <span class="lang-sep" aria-hidden="true">|</span>
+        <button type="button" class="lang-btn" data-lang="fr" aria-pressed="false">Français</button>
+      </span>
       <button type="button" id="header-info-btn" aria-haspopup="true" aria-expanded="false"
               data-i18n-aria="ui.aria.header_info" aria-label="More information">ⓘ</button>
       <div id="header-info-popup" role="tooltip" aria-hidden="true">
@@ -106,19 +117,33 @@ BODY_TEMPLATE = r"""
 __NAV_LINKS__
   </div>
 </nav>
+<!-- .sheet-head / .sheet-body is what keeps the dialog still while its content
+     scrolls: the sheet is capped at the overlay's height and the body is the
+     scroll container, so the title and close button stay put. Without the
+     split the sheet has no height bound, which makes the overlay itself the
+     scroller and drags the whole dialog off screen. Any modal added here needs
+     both wrappers -- tests/test_modal_scroll_containment.py enforces it. -->
 <div id="methods-modal" class="modal" role="dialog" aria-label="Contributors, Data, and Methods" aria-modal="true">
   <div class="sheet">
-    <button class="close" id="methods-close" aria-label="Close">✕</button>
-    <h2 id="methods-modal-title" data-i18n="ui.methods_modal_title">Contributors, Data, and Methods</h2>
-    <div id="methods-content"></div>
+    <div class="sheet-head">
+      <button class="close" id="methods-close" aria-label="Close">✕</button>
+      <h2 id="methods-modal-title" data-i18n="ui.methods_modal_title">Contributors, Data, and Methods</h2>
+    </div>
+    <div class="sheet-body">
+      <div id="methods-content"></div>
+    </div>
   </div>
 </div>
 <div id="terms-modal" class="modal" role="dialog" aria-label="Terms of Use" aria-modal="true">
   <div class="sheet">
-    <button class="close" id="terms-close" aria-label="Close">✕</button>
-    <h2 id="terms-modal-title" data-i18n="ui.terms_modal_title">Terms of Use</h2>
-    <div id="terms-updated" style="font-size:11px;color:#888;margin-bottom:10px"></div>
-    <div id="terms-content"></div>
+    <div class="sheet-head">
+      <button class="close" id="terms-close" aria-label="Close">✕</button>
+      <h2 id="terms-modal-title" data-i18n="ui.terms_modal_title">Terms of Use</h2>
+    </div>
+    <div class="sheet-body">
+      <div id="terms-updated" style="font-size:11px;color:#888;margin-bottom:10px"></div>
+      <div id="terms-content"></div>
+    </div>
   </div>
 </div>
 <div id="viewport-area">
@@ -205,13 +230,6 @@ __NAV_LINKS__
 </div>
 <div id="view-switcher">
   <div id="footer-links">
-    <div id="lang-switcher" class="lang-switcher" role="group" aria-label="Language">
-      <div class="lang-toggle-track">
-        <span class="lang-toggle-thumb" aria-hidden="true"></span>
-        <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true">EN</button>
-        <button type="button" class="lang-btn" data-lang="fr" aria-pressed="false">FR</button>
-      </div>
-    </div>
     <button id="methods-btn" class="link-btn" type="button" data-i18n="ui.methods_btn">Contributors, Data, and Methods</button>
     <button id="terms-btn"   class="link-btn" type="button" data-i18n="ui.terms_btn">Terms of Use</button>
   </div>

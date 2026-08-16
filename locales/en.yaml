@@ -278,3 +278,4 @@ ui:
     epi_split: "Drag to resize map and table panels"
     trends_split: "Drag to resize map and trends panels"
     header_info: "More information"
+    language: "Language"

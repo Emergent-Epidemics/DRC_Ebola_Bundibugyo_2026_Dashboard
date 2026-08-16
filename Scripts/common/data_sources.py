@@ -76,6 +76,8 @@ __all__ = [
     '_NAME_TO_NOM',
     '_NOM_TO_NAME',
     'PARTNER_ORDER',
+    'PARTNER_GROUPS',
+    'PARTNER_SCALE',
     '_parse_sitrep_date',
     '_format_asof',
     '_parse_csv_stem_date',
@@ -294,7 +296,28 @@ _NAME_TO_NOM = {
 }
 _NOM_TO_NAME = {v: k for k, v in _NAME_TO_NOM.items()}
 
-PARTNER_ORDER = ["INSP.png", "inrb.png", "UMIE.jpeg", "africa-cdc.png", "WHO.jpg"]
+PARTNER_ORDER = [
+    "INSP.png", "inrb.png", "UMIE.jpeg", "africa-cdc.png", "WHO.jpg",
+    "northeastern.png", "psi.jpg", "oxford.jpg",
+]
+
+# The footer strip is unboxed (see Data/Branding/dashboard-theme.css), so the
+# gaps between logos are what group them: tight within a group, wide between.
+# Group index per logo -- 0 DRC national, 1 continental and global, 2 academic.
+PARTNER_GROUPS = {
+    "INSP.png": 0, "inrb.png": 0, "UMIE.jpeg": 0,
+    "africa-cdc.png": 1, "WHO.jpg": 1,
+    "northeastern.png": 2, "psi.jpg": 2, "oxford.jpg": 2,
+}
+
+# Equal pixel height is not equal visual weight: a solid tile or a heavy
+# letterform outweighs a thin wordmark at the same height. The old bounding box
+# hid that; unboxed, each mark needs its own factor on --partner-h.
+PARTNER_SCALE = {
+    "INSP.png": 1.0, "inrb.png": 1.0, "WHO.jpg": 1.0,
+    "UMIE.jpeg": 0.95, "africa-cdc.png": 0.95,
+    "psi.jpg": 0.9, "northeastern.png": 0.85, "oxford.jpg": 0.82,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -3221,6 +3244,58 @@ def _strip_bullet(s: str) -> str:
     return s.lstrip()
 
 
+# The modal renders "Contributors, Data, and Methods" in its own header, so a
+# source document that opens with that title shows it twice. Same idea as
+# _TERMS_HEADER_SKIP_RE below, which drops the equivalent line from the terms
+# text. Only an exact title match is dropped: the English document opens with
+# an h2 "Contributors", which is its first section (peer to "Data" and
+# "Methods") and has to survive.
+_METHODS_TITLE_RE = re.compile(
+    r"^(?:contributors,?\s+data,?\s+(?:and|&)\s+methods"
+    r"|contributeurs,?\s+données,?\s+et\s+méthodes)"
+    r"[\s.:;,]*$",
+    re.IGNORECASE,
+)
+_LEADING_HEADING_RE = re.compile(
+    r"\A\s*<(h[1-4])\b([^>]*)>(.*?)</\1>\s*", re.DOTALL | re.IGNORECASE,
+)
+_ANY_HEADING_RE = re.compile(r"<(h[1-6])\b[^>]*>", re.IGNORECASE)
+
+
+def _drop_repeated_title(html: str) -> str:
+    """Drop a leading heading that only repeats the dialog's own title."""
+    m = _LEADING_HEADING_RE.match(html)
+    if not m:
+        return html
+    text = re.sub(r"<[^>]+>", "", m.group(3)).replace("&amp;", "&")
+    if _METHODS_TITLE_RE.match(" ".join(text.split())):
+        return html[m.end():]
+    return html
+
+
+def _normalise_leading_heading_level(html: str) -> str:
+    """Demote a lone leading h2 to h3 when the other sections are h3.
+
+    The English docx marks "Contributors" as Heading 1 but "Data" and
+    "Methods" as Heading 2, so the three peer sections rendered h2/h3/h3 and
+    the first displayed a size larger than its own peers -- reading as a
+    repeat of the dialog title rather than as a section.
+
+    Deliberately narrow: only a leading h2 that is the document's ONLY h2, in
+    a document that does use h3 sections. A document using h2 consistently is
+    using the level on purpose and is left alone.
+    """
+    levels = [m.group(1).lower() for m in _ANY_HEADING_RE.finditer(html)]
+    if len(levels) < 2 or levels[0] != "h2":
+        return html
+    if levels.count("h2") != 1 or "h3" not in levels:
+        return html
+    m = _LEADING_HEADING_RE.match(html)
+    if not m or m.group(1).lower() != "h2":
+        return html
+    return f"<h3{m.group(2)}>{m.group(3)}</h3>\n" + html[m.end():]
+
+
 def load_methods_html(path: Path | None = None) -> str:
     """Render Contributors_Methods_Data_website.docx as an HTML snippet.
 
@@ -3232,14 +3307,27 @@ def load_methods_html(path: Path | None = None) -> str:
     """
     docx_path = path or METHODS_DOCX
     if not docx_path.exists():
+        print(f"  WARNING: {docx_path} not found; the Contributors dialog will be empty")
         return ""
+    # A missing dependency is a broken build environment, not content. This
+    # used to return an error message as HTML, which shipped into the payload
+    # and rendered inside the public Contributors dialog -- the build reported
+    # success while the deployed site showed "python-docx not installed" to
+    # anyone who opened it. Fail here instead. Only ImportError is caught: any
+    # other failure out of these modules is a real bug and should surface with
+    # its own traceback rather than being reported as a missing install.
     try:
         from docx import Document
         from docx.oxml.ns import qn
         from docx.text.paragraph import Paragraph
-    except Exception:
-        return ("<p style='color:#c66'>python-docx not installed; cannot render "
-                f"{docx_path.name}.</p>")
+    except ImportError as exc:
+        raise RuntimeError(
+            f"python-docx is required to render {docx_path.name} but is not "
+            "installed in the environment running this build. It is declared "
+            "in requirements.txt -- run `pip install -r requirements.txt`. "
+            "Refusing to continue: the Contributors dialog would otherwise "
+            "ship empty or carry an internal error message."
+        ) from exc
     d = Document(docx_path)
     rid_to_url: dict[str, str] = {}
     for rid, rel in d.part.rels.items():
@@ -3337,7 +3425,7 @@ def load_methods_html(path: Path | None = None) -> str:
             parts.append(f"<p>{html_body}</p>")
     if in_ul:
         parts.append("</ul>")
-    return "\n".join(parts)
+    return _normalise_leading_heading_level(_drop_repeated_title("\n".join(parts)))
 
 
 _TERMS_SECTION_RE = re.compile(r"^(\d+)\.\s+(.+)$")
@@ -3355,7 +3443,10 @@ def load_methods_html_lang(lang: str = "en") -> str:
             return load_methods_html(METHODS_DOCX_FR)
         if METHODS_HTML_FR.exists():
             print(f"  methods HTML (fr): {METHODS_HTML_FR.name}")
-            return METHODS_HTML_FR.read_text(encoding="utf-8").strip()
+            # This file (unlike the docx) does open with the dialog's title.
+            return _normalise_leading_heading_level(
+                _drop_repeated_title(METHODS_HTML_FR.read_text(encoding="utf-8").strip())
+            )
         print("  WARNING: no French methods document; falling back to English")
     return load_methods_html(METHODS_DOCX)
 
@@ -3435,6 +3526,8 @@ def load_partners() -> list[dict]:
                 "alt": Path(fname).stem.upper(),
                 "href": url_map.get(fname, ""),
                 "data_uri": uri,
+                "group": PARTNER_GROUPS.get(fname, 0),
+                "scale": PARTNER_SCALE.get(fname, 1.0),
             })
     return out
 
