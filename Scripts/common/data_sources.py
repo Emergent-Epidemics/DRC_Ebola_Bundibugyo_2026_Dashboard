@@ -3255,14 +3255,27 @@ def load_methods_html(path: Path | None = None) -> str:
     """
     docx_path = path or METHODS_DOCX
     if not docx_path.exists():
+        print(f"  WARNING: {docx_path} not found; the Contributors dialog will be empty")
         return ""
+    # A missing dependency is a broken build environment, not content. This
+    # used to return an error message as HTML, which shipped into the payload
+    # and rendered inside the public Contributors dialog -- the build reported
+    # success while the deployed site showed "python-docx not installed" to
+    # anyone who opened it. Fail here instead. Only ImportError is caught: any
+    # other failure out of these modules is a real bug and should surface with
+    # its own traceback rather than being reported as a missing install.
     try:
         from docx import Document
         from docx.oxml.ns import qn
         from docx.text.paragraph import Paragraph
-    except Exception:
-        return ("<p style='color:#c66'>python-docx not installed; cannot render "
-                f"{docx_path.name}.</p>")
+    except ImportError as exc:
+        raise RuntimeError(
+            f"python-docx is required to render {docx_path.name} but is not "
+            "installed in the environment running this build. It is declared "
+            "in requirements.txt -- run `pip install -r requirements.txt`. "
+            "Refusing to continue: the Contributors dialog would otherwise "
+            "ship empty or carry an internal error message."
+        ) from exc
     d = Document(docx_path)
     rid_to_url: dict[str, str] = {}
     for rid, rel in d.part.rels.items():
