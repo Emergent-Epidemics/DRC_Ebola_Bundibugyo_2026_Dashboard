@@ -3640,12 +3640,12 @@ function setActiveView(view) {
     recompute();
   } else if (view === "genomic-epidemiology") {
     map.invalidateSize();
-    // Show the per-zone genome markers by default: the genomic tab links them to
-    // the tree tips (click a marker → select that zone's tips). Guarded on the
-    // layer/markers existing (built above; absent if no genome data).
+    // Show the per-zone genome markers: the genomic tab links them to the tree
+    // tips (click a marker → select that zone's tips). This is the only view
+    // that shows them -- the snapshot map's layer box has no genome toggle.
+    // Guarded on the layer/markers existing (built above; absent if no genome data).
     if (typeof genomeLayer !== "undefined" && GENOME_SEQUENCES.length) {
       genomeLayer.addTo(map);
-      if (showGenomesBox) showGenomesBox.checked = true;
     }
   }
 }
@@ -3847,8 +3847,6 @@ map.on("tooltipopen", function (e) {
 });
 
 const showCasesBox = document.getElementById("show-cases");
-const showGenomesBox = document.getElementById("show-genomes");
-const showGenomesRow = document.getElementById("show-genomes-row");
 
 function genomeIcon(count) {
   const minD = 10;
@@ -3863,21 +3861,11 @@ function genomeIcon(count) {
   });
 }
 
-function syncMarkerToggles(from) {
-  if (from === "cases" && showCasesBox.checked) {
-    showGenomesBox.checked = false;
-    map.removeLayer(genomeLayer);
-    caseLayer.addTo(map);
-    return;
-  }
-  if (from === "genomes" && showGenomesBox.checked) {
-    showCasesBox.checked = false;
-    map.removeLayer(caseLayer);
-    genomeLayer.addTo(map);
-    return;
-  }
-  if (from === "cases") map.removeLayer(caseLayer);
-  if (from === "genomes") map.removeLayer(genomeLayer);
+// The genome markers are genomic-tab-only, so the layer box carries a single
+// marker toggle (active cases) and there is no cross-layer exclusion to keep.
+function syncCaseMarkerToggle() {
+  if (showCasesBox.checked) caseLayer.addTo(map);
+  else map.removeLayer(caseLayer);
 }
 
 function caseMarkerTooltip(c) {
@@ -3966,14 +3954,6 @@ for (const g of GENOME_SEQUENCES) {
   genomeLayer.addLayer(m);
 }
 
-if (!PAYLOAD.genome_markers_available || !GENOME_SEQUENCES.length) {
-  if (showGenomesRow) showGenomesRow.style.display = "none";
-} else if (showGenomesBox) {
-  showGenomesBox.addEventListener("change", function() {
-    syncMarkerToggles("genomes");
-  });
-}
-
 // --- Generic map hooks for per-tab modules (currently the genomic tab) ---
 // Deliberately tip-agnostic (design R6): the shared engine exposes zone-level
 // selection subscribe/emit + zone highlighting + the raw per-zone genome markers.
@@ -4029,7 +4009,7 @@ window.__bdbvMapHooks = genomicMapHooks;
 showCasesBox.addEventListener("change", function() {
   const epiCases = document.getElementById("epi-show-cases");
   if (epiCases) epiCases.checked = showCasesBox.checked;
-  syncMarkerToggles("cases");
+  syncCaseMarkerToggle();
   if (activeView === "epi-trends") restoreCaseMarkersForView("epi-trends");
 });
 
@@ -4200,7 +4180,7 @@ if (!PAYLOAD.flow_arcs_available || !FLOW_ARC_LAYER) {
     epiCases.addEventListener("change", function() {
       if (showCasesBox) showCasesBox.checked = epiCases.checked;
       if (activeView === "epi-trends") restoreCaseMarkersForView("epi-trends");
-      else syncMarkerToggles("cases");
+      else syncCaseMarkerToggle();
     });
   }
 
@@ -4397,34 +4377,19 @@ wireModal("terms-modal", ["terms-btn", "header-terms-btn"], "terms-close");
   syncMatrixUi();
 })();
 
-// --- deep-linking via URL params, e.g. ?genomes=1 or ?cases=1 ---
+// --- deep-linking via URL params, e.g. ?cases=1 ---
 // Runs last so it overrides the defaults set above (cases ON, flow arcs ON).
+// There is no ?genomes= param any more: the genome-count markers are shown by
+// the Genomic Epidemiology tab only, so the snapshot map has nothing to toggle.
 (function applyMarkerUrlParams() {
   const params = new URLSearchParams(window.location.search);
   function isTruthy(v) {
     return v !== null && !["0", "false", "no"].includes(v.toLowerCase());
   }
-  const genomesParam = params.get("genomes");
-  const genomesRequested =
-    isTruthy(genomesParam) &&
-    PAYLOAD.genome_markers_available &&
-    GENOME_SEQUENCES.length &&
-    showGenomesBox;
-  if (genomesRequested) {
-    showGenomesBox.checked = true;
-    syncMarkerToggles("genomes"); // also unticks + removes the case-marker layer
-    if (showFlowArcsBox) {
-      showFlowArcsBox.checked = false;
-      flowArcsUserPref = false;
-    }
-    recompute();
-    syncMatrixUi();
-    return;
-  }
   const casesParam = params.get("cases");
   if (isTruthy(casesParam) && showCasesBox) {
     showCasesBox.checked = true;
-    syncMarkerToggles("cases");
+    syncCaseMarkerToggle();
   }
 })();
 
