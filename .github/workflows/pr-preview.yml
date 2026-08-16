@@ -41,6 +41,11 @@ permissions:
   pull-requests: write
 
 env:
+  # Nothing this workflow reads lives in Git LFS (see .gitattributes), but the
+  # pages-deploy action checks out origin/main, and any commit still carrying
+  # LFS pointers would fire the smudge filter -> blocked batch API -> failed
+  # deploy. Leave pointers as pointers instead of trying to download them.
+  GIT_LFS_SKIP_SMUDGE: "1"
   DATA_REPO: INRB-UMIE/BDBV2026-Data
   PROCESSED_DATA_REPO: INRB-UMIE/BDBV2026-Processed_Sensitive_Data
   # Previews track dev_matching_dashboard plots; production builds use main.

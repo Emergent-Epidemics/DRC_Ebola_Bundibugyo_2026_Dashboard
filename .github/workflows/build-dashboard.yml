@@ -54,6 +54,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # Nothing this workflow reads lives in Git LFS (see .gitattributes); leave any
+  # pointer file a checkout happens to hit as a pointer rather than attempting a
+  # download that an exhausted LFS budget would reject. Same guard as pr-preview.
+  GIT_LFS_SKIP_SMUDGE: "1"
   DATA_REPO: INRB-UMIE/BDBV2026-Data
   # Historically BDBV2026-Linelist_Processing -- see header comment.
   PROCESSED_DATA_REPO: INRB-UMIE/BDBV2026-Processed_Sensitive_Data
