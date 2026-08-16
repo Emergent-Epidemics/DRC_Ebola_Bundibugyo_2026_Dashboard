@@ -3256,7 +3256,10 @@ _METHODS_TITLE_RE = re.compile(
     r"[\s.:;,]*$",
     re.IGNORECASE,
 )
-_LEADING_HEADING_RE = re.compile(r"\A\s*<(h[1-4])\b[^>]*>(.*?)</\1>\s*", re.DOTALL | re.IGNORECASE)
+_LEADING_HEADING_RE = re.compile(
+    r"\A\s*<(h[1-4])\b([^>]*)>(.*?)</\1>\s*", re.DOTALL | re.IGNORECASE,
+)
+_ANY_HEADING_RE = re.compile(r"<(h[1-6])\b[^>]*>", re.IGNORECASE)
 
 
 def _drop_repeated_title(html: str) -> str:
@@ -3264,10 +3267,33 @@ def _drop_repeated_title(html: str) -> str:
     m = _LEADING_HEADING_RE.match(html)
     if not m:
         return html
-    text = re.sub(r"<[^>]+>", "", m.group(2)).replace("&amp;", "&")
+    text = re.sub(r"<[^>]+>", "", m.group(3)).replace("&amp;", "&")
     if _METHODS_TITLE_RE.match(" ".join(text.split())):
         return html[m.end():]
     return html
+
+
+def _normalise_leading_heading_level(html: str) -> str:
+    """Demote a lone leading h2 to h3 when the other sections are h3.
+
+    The English docx marks "Contributors" as Heading 1 but "Data" and
+    "Methods" as Heading 2, so the three peer sections rendered h2/h3/h3 and
+    the first displayed a size larger than its own peers -- reading as a
+    repeat of the dialog title rather than as a section.
+
+    Deliberately narrow: only a leading h2 that is the document's ONLY h2, in
+    a document that does use h3 sections. A document using h2 consistently is
+    using the level on purpose and is left alone.
+    """
+    levels = [m.group(1).lower() for m in _ANY_HEADING_RE.finditer(html)]
+    if len(levels) < 2 or levels[0] != "h2":
+        return html
+    if levels.count("h2") != 1 or "h3" not in levels:
+        return html
+    m = _LEADING_HEADING_RE.match(html)
+    if not m or m.group(1).lower() != "h2":
+        return html
+    return f"<h3{m.group(2)}>{m.group(3)}</h3>\n" + html[m.end():]
 
 
 def load_methods_html(path: Path | None = None) -> str:
@@ -3399,7 +3425,7 @@ def load_methods_html(path: Path | None = None) -> str:
             parts.append(f"<p>{html_body}</p>")
     if in_ul:
         parts.append("</ul>")
-    return _drop_repeated_title("\n".join(parts))
+    return _normalise_leading_heading_level(_drop_repeated_title("\n".join(parts)))
 
 
 _TERMS_SECTION_RE = re.compile(r"^(\d+)\.\s+(.+)$")
@@ -3418,7 +3444,9 @@ def load_methods_html_lang(lang: str = "en") -> str:
         if METHODS_HTML_FR.exists():
             print(f"  methods HTML (fr): {METHODS_HTML_FR.name}")
             # This file (unlike the docx) does open with the dialog's title.
-            return _drop_repeated_title(METHODS_HTML_FR.read_text(encoding="utf-8").strip())
+            return _normalise_leading_heading_level(
+                _drop_repeated_title(METHODS_HTML_FR.read_text(encoding="utf-8").strip())
+            )
         print("  WARNING: no French methods document; falling back to English")
     return load_methods_html(METHODS_DOCX)
 
