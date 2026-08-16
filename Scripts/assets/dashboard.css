@@ -1282,12 +1282,41 @@
     padding:40px 20px; overflow-y:auto;
   }
   .modal.open { display:flex; }
+  /* The sheet is capped at the overlay's content box (max-height:100%) and
+     scrolls internally via .sheet-body. Without the cap the sheet has no
+     height bound, so .modal's own overflow-y:auto makes the OVERLAY the
+     scroll container and scrolling drags the whole dialog off screen.
+
+     box-sizing is load-bearing, not tidiness: the sheet carries 28px of
+     vertical padding, and under the default content-box, max-height:100%
+     caps only the content -- the padding then pushes the outer box 56px past
+     the overlay's content box, which is enough to keep the overlay
+     scrollable and reintroduce the bug in miniature. */
   .modal .sheet {
     background:#1a1a1a; color:#eee;
+    box-sizing:border-box;
     max-width:780px; width:100%;
+    max-height:100%;
+    display:flex; flex-direction:column;
+    overflow:hidden;
     padding:28px 32px; border-radius:8px;
     box-shadow:0 6px 24px rgba(0,0,0,0.6);
     line-height:1.55; font-size:14px;
+  }
+  /* The rule keeps the scroll boundary legible: content now passes underneath
+     the title rather than carrying it away, so without a divider the first
+     visible line reads as if it belongs to the heading. */
+  .modal .sheet-head {
+    flex:0 0 auto;
+    padding-bottom:10px; margin-bottom:2px;
+    border-bottom:1px solid #333;
+  }
+  /* min-height:0 is what lets a flex item shrink below its content height --
+     without it the body never becomes a scroll container and the cap above
+     just clips the overflow instead. */
+  .modal .sheet-body {
+    flex:1 1 auto; min-height:0;
+    overflow-y:auto; overscroll-behavior:contain;
   }
   .modal .close {
     float:right; cursor:pointer; font-size:18px; color:#aaa;

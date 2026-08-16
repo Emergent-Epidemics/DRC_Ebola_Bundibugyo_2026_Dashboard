@@ -117,19 +117,33 @@ BODY_TEMPLATE = r"""
 __NAV_LINKS__
   </div>
 </nav>
+<!-- .sheet-head / .sheet-body is what keeps the dialog still while its content
+     scrolls: the sheet is capped at the overlay's height and the body is the
+     scroll container, so the title and close button stay put. Without the
+     split the sheet has no height bound, which makes the overlay itself the
+     scroller and drags the whole dialog off screen. Any modal added here needs
+     both wrappers -- tests/test_modal_scroll_containment.py enforces it. -->
 <div id="methods-modal" class="modal" role="dialog" aria-label="Contributors, Data, and Methods" aria-modal="true">
   <div class="sheet">
-    <button class="close" id="methods-close" aria-label="Close">✕</button>
-    <h2 id="methods-modal-title" data-i18n="ui.methods_modal_title">Contributors, Data, and Methods</h2>
-    <div id="methods-content"></div>
+    <div class="sheet-head">
+      <button class="close" id="methods-close" aria-label="Close">✕</button>
+      <h2 id="methods-modal-title" data-i18n="ui.methods_modal_title">Contributors, Data, and Methods</h2>
+    </div>
+    <div class="sheet-body">
+      <div id="methods-content"></div>
+    </div>
   </div>
 </div>
 <div id="terms-modal" class="modal" role="dialog" aria-label="Terms of Use" aria-modal="true">
   <div class="sheet">
-    <button class="close" id="terms-close" aria-label="Close">✕</button>
-    <h2 id="terms-modal-title" data-i18n="ui.terms_modal_title">Terms of Use</h2>
-    <div id="terms-updated" style="font-size:11px;color:#888;margin-bottom:10px"></div>
-    <div id="terms-content"></div>
+    <div class="sheet-head">
+      <button class="close" id="terms-close" aria-label="Close">✕</button>
+      <h2 id="terms-modal-title" data-i18n="ui.terms_modal_title">Terms of Use</h2>
+    </div>
+    <div class="sheet-body">
+      <div id="terms-updated" style="font-size:11px;color:#888;margin-bottom:10px"></div>
+      <div id="terms-content"></div>
+    </div>
   </div>
 </div>
 <div id="viewport-area">

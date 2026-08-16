@@ -392,6 +392,11 @@ h4 {
 .modal h2, .modal h3, .modal h4 {
   color: var(--terracotta) !important;
 }
+/* The base sheet's divider is a dark-chrome grey; on the light sheet it has to
+   be the theme's border token or it reads as a black hairline. */
+.modal .sheet-head {
+  border-bottom-color: var(--border) !important;
+}
 .modal .close {
   color: var(--muted) !important;
 }
