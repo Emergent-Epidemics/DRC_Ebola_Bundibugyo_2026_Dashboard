@@ -144,7 +144,7 @@ both the unconditional `clamp(18px, 3vmin, 28px)` and the
 
 | Band | `--partner-h` | `--partner-gap` |
 |---|---|---|
-| default | 22px | 24px |
+| default | 22px | 20px |
 | ≤ 999.98px | 18px | 18px |
 | ≤ 799.98px | 15px | 10px |
 | `max-height: 500px` | 16px | 11px |

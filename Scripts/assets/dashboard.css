@@ -10,7 +10,7 @@
     /* Separation between logos, uniform across the strip. Steps down with
        --partner-h per width band: at the bottom of the ≤799.98px band the
        whole strip has to fit in 342px (see that block). */
-    --partner-gap: 24px;
+    --partner-gap: 20px;
     --epi-panel-width: 50%;
     --trends-panel-width: 40%;
     /* Band-A (wide-branch) panel widths #zone-search's offset is derived from.
