@@ -1,8 +1,16 @@
-*.tif filter=lfs diff=lfs merge=lfs -text
-*.tiff filter=lfs diff=lfs merge=lfs -text
-*.shp filter=lfs diff=lfs merge=lfs -text
-*.shx filter=lfs diff=lfs merge=lfs -text
-*.dbf filter=lfs diff=lfs merge=lfs -text
-*.geojson filter=lfs diff=lfs merge=lfs -text
-*.gpkg filter=lfs diff=lfs merge=lfs -text
-*.csv filter=lfs diff=lfs merge=lfs -text
+# This repo deliberately does NOT use Git LFS.
+#
+# It used to route *.csv (plus *.tif/*.tiff/*.shp/*.shx/*.dbf/*.geojson/*.gpkg)
+# through LFS, but the only files that ever matched were the four small text
+# CSVs in Data/ (177 KB together). They are now stored in regular git.
+#
+# The cost of that blanket rule was a hard dependency on LFS in every CI
+# checkout: when the org's Git LFS budget was exhausted on 2026-08-16, the
+# `git lfs fetch` in actions/checkout failed and took down both the PR preview
+# and the main dashboard build, over 177 KB of plain text.
+#
+# Large binary data belongs in the sibling repo INRB-UMIE/BDBV2026-Data, which
+# uses LFS deliberately and scopes it to data/*/raw/** so that nothing needed
+# at clone time (build/, data/*/processed/, data/shapefiles/) sits behind it.
+# If a genuinely large binary ever has to live here, add a narrow rule for that
+# path -- and remember it makes this repo's CI depend on LFS again.
