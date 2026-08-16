@@ -185,10 +185,6 @@ __NAV_LINKS__
       <input type="checkbox" id="show-cases" />
       <label for="show-cases" style="margin:0;color:#eee" data-i18n="ui.show_cases">Show active-case markers</label>
     </div>
-    <div class="checkbox-row" id="show-genomes-row">
-      <input type="checkbox" id="show-genomes" />
-      <label for="show-genomes" style="margin:0;color:#eee" data-i18n="ui.show_genomes">Show numbers of genome sequences</label>
-    </div>
     <div class="checkbox-row" id="show-flow-arcs-row">
       <input type="checkbox" id="show-flow-arcs" />
       <label for="show-flow-arcs" style="margin:0;color:#eee" data-i18n="ui.show_flow_arcs">Show Flowminder in- and out-flow</label>

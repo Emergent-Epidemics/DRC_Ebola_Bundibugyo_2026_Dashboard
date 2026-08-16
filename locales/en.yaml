@@ -97,7 +97,6 @@ ui:
   zone_search_matches: "{n} matches"
   source: "Source"
   show_cases: "Show active-case markers"
-  show_genomes: "Show numbers of genome sequences"
   show_flow_arcs: "Show Flowminder in- and out-flow"
   importation_pressure_tooltip: "{from} → {to}: importation pressure {pressure} (external cases {cases}; {count} persons)"
   import_force_tooltip: "{from} → {to}: import-force contribution {foi} ({share} of {to}'s importation risk)"
