@@ -6,3 +6,4 @@ WHO.jpg, https://www.who.int/
 northeastern.png, https://www.northeastern.edu/
 psi.jpg, https://www.psi.ox.ac.uk/
 oxford.jpg, https://www.ox.ac.uk/
+global-health.png, https://global.health/

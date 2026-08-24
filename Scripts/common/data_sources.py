@@ -307,16 +307,18 @@ _NOM_TO_NAME = {v: k for k, v in _NAME_TO_NOM.items()}
 
 PARTNER_ORDER = [
     "INSP.png", "inrb.png", "UMIE.jpeg", "africa-cdc.png", "WHO.jpg",
-    "northeastern.png", "psi.jpg", "oxford.jpg",
+    "northeastern.png", "psi.jpg", "oxford.jpg", "global-health.png",
 ]
 
 # The footer strip is unboxed (see Data/Branding/dashboard-theme.css), so the
 # gaps between logos are what group them: tight within a group, wide between.
-# Group index per logo -- 0 DRC national, 1 continental and global, 2 academic.
+# Group index per logo -- 0 DRC national, 1 continental and global, 2 academic,
+# 3 data-science initiative.
 PARTNER_GROUPS = {
     "INSP.png": 0, "inrb.png": 0, "UMIE.jpeg": 0,
     "africa-cdc.png": 1, "WHO.jpg": 1,
     "northeastern.png": 2, "psi.jpg": 2, "oxford.jpg": 2,
+    "global-health.png": 3,
 }
 
 # Equal pixel height is not equal visual weight: a solid tile or a heavy
@@ -326,6 +328,8 @@ PARTNER_SCALE = {
     "INSP.png": 1.0, "inrb.png": 1.0, "WHO.jpg": 1.0,
     "UMIE.jpeg": 0.95, "africa-cdc.png": 0.95,
     "psi.jpg": 0.9, "northeastern.png": 0.85, "oxford.jpg": 0.82,
+    # wide ~3.5:1 wordmark, so a lower height factor keeps its footprint in line
+    "global-health.png": 0.72,
 }
 
 
