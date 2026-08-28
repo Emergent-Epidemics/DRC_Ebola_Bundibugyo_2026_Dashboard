@@ -133,6 +133,11 @@ jobs:
           DATA_ROOT: ${{ github.workspace }}/Data
           DASHBOARD_PLOTS_DIR: ${{ github.workspace }}/BDBV2026-Processed_Sensitive_Data/outputs
           GENOMIC_DIR: ${{ github.workspace }}/BDBV2026-Genomic_Epi/public/data
+          # Substituted into assets/engine.js so CARTO's raster tiles come back
+          # unwatermarked. A public client-side key, held as a secret only so it
+          # sits in one rotatable place; forks get an empty value and build a
+          # watermarked -- but working -- preview.
+          CARTO_BASEMAP_KEY: ${{ secrets.CARTO_BASEMAP_KEY }}
         run: |
           set -euo pipefail
           python Scripts/build_dashboard.py

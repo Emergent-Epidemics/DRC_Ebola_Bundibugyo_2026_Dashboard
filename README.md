@@ -231,6 +231,40 @@ straight at a checked-out/mounted copy of `BDBV2026-Processed_Sensitive_Data`'s
 step. Leave it unset and it defaults to `../BDBV2026-Processed_Sensitive_Data/outputs`
 (a sibling of this repo), same convention as `BUILD_DIR` above.
 
+### CARTO basemap key
+
+The map's basemap tiles come from CARTO's raster endpoint
+(`basemaps.cartocdn.com/light_all`), which since 2026 requires an API key.
+Without one the tiles still render, but under a repeated **"API key required"**
+watermark. Keys are free (no CARTO account needed) up to a fair-use limit of 5M
+tile requests per calendar month: <https://carto.com/basemaps/apikey>.
+
+`Scripts/assets/engine.js` holds a `{{CARTO_BASEMAP_KEY}}` placeholder;
+`Scripts/build_dashboard.py` substitutes the `CARTO_BASEMAP_KEY` environment
+variable into it when writing `assets/engine.js`:
+
+```bash
+CARTO_BASEMAP_KEY=your_key_here python Scripts/build_dashboard.py
+```
+
+Leave it unset and the build still succeeds, printing a warning and producing a
+watermarked map -- the intended default for local iteration, so day-to-day work
+doesn't spend the shared quota.
+
+**The key is public, and that is expected.** This is a static site: whatever key
+the build injects is served in `assets/engine.js` to every visitor. CARTO
+basemap keys are designed as client-side credentials (the protection is the
+per-key fair-use quota, not secrecy), so this is not a leak — but it does mean
+the key must not be treated as one, and CARTO's terms require only that the
+OSM/CARTO attribution stays visible on the map. In CI it is held as the
+`CARTO_BASEMAP_KEY` repository secret purely so it lives in one rotatable place
+instead of in the source; both `build-dashboard.yml` and `pr-preview.yml` pass
+it through. Set it under **Settings → Secrets and variables → Actions**.
+
+Note that CARTO is retiring these raster basemaps in favour of vector ones
+(`light_all` → `positron-gl-style`). That migration means moving the map from
+Leaflet to MapLibre GL JS and is not done here; the key applies to both.
+
 Copy the build to the site entry point before deploying to GitHub Pages:
 
 ```bash

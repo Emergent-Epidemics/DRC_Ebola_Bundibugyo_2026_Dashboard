@@ -192,6 +192,12 @@ jobs:
           # with a warning, same as before).
           DASHBOARD_PLOTS_DIR: ${{ github.workspace }}/BDBV2026-Processed_Sensitive_Data/outputs
           GENOMIC_DIR: ${{ github.workspace }}/BDBV2026-Genomic_Epi/public/data
+          # Substituted into assets/engine.js so CARTO's raster tiles come back
+          # unwatermarked. This is a public client-side key -- it is served to
+          # every dashboard visitor either way -- held as a repo secret only so
+          # it lives in one rotatable place rather than in the source. If the
+          # secret is unset the build still succeeds and the map is watermarked.
+          CARTO_BASEMAP_KEY: ${{ secrets.CARTO_BASEMAP_KEY }}
         run: |
           set -euo pipefail
           python Scripts/build_dashboard.py
