@@ -656,7 +656,30 @@ const INITIAL_VIEW = PAYLOAD.initial_view || {lat: -2.5, lon: 22.5, zoom: 5};
 // LAYER panel, and every view either relocates a search box into that corner
 // or expects touch users to pinch-zoom. Zoom via wheel/pinch/double-click.
 const map = L.map("map", {zoomControl: false}).setView([INITIAL_VIEW.lat, INITIAL_VIEW.lon], INITIAL_VIEW.zoom);
-L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+// CARTO's raster basemaps require an API key as of 2026. Without one the tiles
+// still render, but under a repeated "API key required" watermark -- a notice,
+// not an outage, so a keyless build degrades rather than breaking.
+//
+// The key is a public client-side credential, not a secret: it is served in
+// this file to every visitor by design (the quota is per-key fair use, 5M
+// tiles/month, and CARTO's terms only require that the attribution below stays
+// visible). It is nonetheless substituted at build time from CARTO_BASEMAP_KEY
+// rather than committed here, so it lives in exactly one place and can be
+// rotated without a source change. See README "CARTO basemap key".
+//
+// The placeholder deliberately contains braces so it fails the character test
+// below: an unsubstituted build therefore sends no `key` parameter at all
+// instead of a literal "cb1_2gkn_1_caa9a973d1b5b58f2f681a45". The same test rejects a
+// malformed injected value, which is what keeps a stray quote in the
+// environment from breaking out of this string literal.
+//
+// NOTE: CARTO is retiring these raster tiles in favour of vector basemaps
+// (light_all -> positron-gl-style). That migration means Leaflet -> MapLibre
+// and is tracked separately; the key applies either way.
+const CARTO_KEY = "cb1_2gkn_1_caa9a973d1b5b58f2f681a45";
+const CARTO_TILES = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+  + (/^[A-Za-z0-9_-]+$/.test(CARTO_KEY) ? "?key=" + encodeURIComponent(CARTO_KEY) : "");
+L.tileLayer(CARTO_TILES, {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>',
   subdomains: "abcd", maxZoom: 19
 }).addTo(map);
