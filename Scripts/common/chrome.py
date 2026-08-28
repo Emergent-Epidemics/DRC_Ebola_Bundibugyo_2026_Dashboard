@@ -36,7 +36,9 @@ NAV_ITEMS = [
 # "stub-view" body class below), matching every other page for now; see the
 # README "Multi-page structure" section for why that engine/payload sharing
 # exists and the trade-off it implies.
-STUB_VIEWS = {"clinical-symptoms", "surveillance-testing", "genomic-epidemiology"}
+# Clinical Symptoms is wired when Processed_Sensitive_Data clinical_symptoms
+# artifacts are present (see pages/clinical_symptoms.py); the other two remain stubs.
+STUB_VIEWS = {"surveillance-testing", "genomic-epidemiology"}
 
 HEAD_TEMPLATE = r"""<!doctype html>
 <html lang="en">
