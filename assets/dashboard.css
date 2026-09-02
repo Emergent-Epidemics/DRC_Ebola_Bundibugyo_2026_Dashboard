@@ -625,8 +625,30 @@
   }
   #trends-play-btn:hover { background:#4d769f; }
   #trends-play-btn.playing { background:#9b7d4e; border-color:#9b7d4e; }
-  #trends-legend-desc {
+  #trends-legend-desc, #trends-recency-desc {
     font-size:10px; color:#888; line-height:1.35; margin:4px 0 8px 0;
+  }
+  /* Segmented cumulative/recency toggle, styled to match the dark
+     #trends-legend panel it sits inside. */
+  #trends-mode-toggle {
+    display:flex; gap:0; margin:8px 0 2px;
+    border:1px solid rgba(255,255,255,0.25); border-radius:6px;
+    overflow:hidden; width:fit-content;
+  }
+  .trends-mode-btn {
+    appearance:none; border:0; background:rgba(255,255,255,0.08); color:#ccc;
+    font:inherit; font-size:12px; padding:4px 10px; cursor:pointer;
+  }
+  .trends-mode-btn + .trends-mode-btn { border-left:1px solid rgba(255,255,255,0.25); }
+  .trends-mode-btn:hover { background:rgba(255,255,255,0.16); }
+  .trends-mode-btn.active { background:#4d769f; color:#fff; }
+  .recency-swatches {
+    display:flex; flex-direction:column; gap:3px; margin-top:4px;
+  }
+  .recency-swatch { display:flex; align-items:center; gap:6px; font-size:12px; color:#f4f4f4; }
+  .recency-chip {
+    display:inline-block; width:14px; height:14px; border-radius:3px;
+    border:1px solid rgba(255,255,255,0.35); flex:0 0 auto;
   }
   /* Full-width bottom chrome: Contributors/Methods/Terms links on the left
      (across from the partner logos on the right -- tabs used to live here,
@@ -961,10 +983,12 @@
       max-width:none; width:auto; padding:6px;
     }
     #trends-legend-title,
+    #trends-mode-toggle,
     #trends-legend-desc,
     #trends-legend-bar,
     #trends-legend-ticks,
     #trends-legend-scale,
+    #trends-recency-legend,
     #trends-date-slider,
     #trends-date-label { display:none; }
     #trends-play-row { margin-top:0; }
@@ -2030,6 +2054,28 @@ body.epi-splitting #epi-split-handle::before {
   color: var(--link) !important;
   border-color: var(--terracotta) !important;
 }
+/* Cumulative/recency mode toggle + recency swatch legend on the Trends map.
+   Like .trends-scope-btn above, the segmented buttons need their own
+   !important overrides or the generic "select, button" rule wins; and the
+   swatch labels inherit a dark-theme colour from the base dashboard.css that
+   is invisible on the light panel, so re-assert the ink colour here. */
+#trends-mode-toggle { border-color: var(--border) !important; }
+.trends-mode-btn {
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  border-color: var(--border) !important;
+}
+.trends-mode-btn:hover {
+  background: rgba(155, 125, 78, 0.08) !important;
+  color: var(--maroon) !important;
+}
+.trends-mode-btn.active {
+  background: rgba(155, 125, 78, 0.16) !important;
+  color: var(--link) !important;
+}
+.trends-mode-btn + .trends-mode-btn { border-left-color: var(--border) !important; }
+.recency-swatch { color: var(--ink) !important; }
+.recency-chip { border-color: rgba(0, 0, 0, 0.2) !important; }
 /* #trends-search-results renders plain, class-less <button> results (see
    engine.js renderTrendsSearchResults), so -- like .trends-scope-btn above
    -- the hover/active state needs its own !important override or the
