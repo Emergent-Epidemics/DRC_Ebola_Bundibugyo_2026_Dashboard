@@ -4281,36 +4281,73 @@ def canonicalize_genomic_zones(genomic: dict, known_noms) -> dict:
 
 
 _ONSET_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_ONSET_CSV_NAME = "dhis2_linelist_with_imputed_onset.csv"
+# status_aggregated.csv is the SAME table the Trends tab's "Daily Cases by
+# Symptom Onset" SVG is rendered from (manifest.json's ``source_csv``). The
+# genomic panel reads its confirmed_case column so both charts show identical
+# data; the earlier dhis2_linelist_with_imputed_onset.csv path counted EVERY
+# linelist row (confirmed + probable + suspected + not_a_case + unclassified),
+# so the "Confirmed positive cases" panel read ~6x high.
+_STATUS_AGG_CSV_NAME = "status_aggregated.csv"
 
 
-def _latest_onset_linelist(outputs_dir):
-    """Newest dated ``outputs/<date>/dhis2_linelist_with_imputed_onset.csv``, or None.
+def _onset_manifest_dated_dir(base: Path):
+    """The dated ``outputs/<date>/`` dir the onset SVGs are read from.
 
-    Mirrors _latest_spatiotemporal_key_outputs_dir: pick the newest YYYY-MM-DD dir
-    that actually contains the CSV (not manifest.json's date, whose cadence differs).
+    load_dashboard_plots() resolves the plot snapshot from manifest.json's
+    top-level ``date``; matching it here keeps this panel and the Trends SVG on
+    one snapshot. Returns None when there is no manifest, date, or matching dir.
+    """
+    manifest_path = base / "manifest.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        date = json.loads(manifest_path.read_text(encoding="utf-8")).get("date")
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not date:
+        return None
+    dated = base / str(date)
+    return dated if dated.is_dir() else None
+
+
+def _latest_status_aggregated(outputs_dir):
+    """Path to ``status_aggregated.csv``, or None.
+
+    Prefers the SAME dated dir the onset SVGs use (manifest.json's ``date``) so
+    this panel and the Trends SVG share one snapshot; falls back to the newest
+    YYYY-MM-DD dir that actually contains the file.
     """
     base = Path(outputs_dir)
     if not base.exists():
         return None
+    preferred = _onset_manifest_dated_dir(base)
+    if preferred is not None and (preferred / _STATUS_AGG_CSV_NAME).exists():
+        return preferred / _STATUS_AGG_CSV_NAME
     dated = sorted(
         (p for p in base.iterdir()
-         if p.is_dir() and _ONSET_DATE_RE.match(p.name) and (p / _ONSET_CSV_NAME).exists()),
+         if p.is_dir() and _ONSET_DATE_RE.match(p.name) and (p / _STATUS_AGG_CSV_NAME).exists()),
         key=lambda p: p.name,
     )
-    return (dated[-1] / _ONSET_CSV_NAME) if dated else None
+    return (dated[-1] / _STATUS_AGG_CSV_NAME) if dated else None
 
 
 def load_onset_imputed_series(outputs_dir=None, known_noms=None, tree_most_recent=None):
-    """Aggregate the imputed-onset linelist to per-date/zone observed-vs-imputed
-    counts for the genomic tab's sample-distribution panel. Returns {} if absent.
+    """Confirmed cases per date/zone, split observed-vs-imputed onset, for the
+    genomic tab's sample-distribution panel. Returns {} if absent.
+
+    Reads ``status_aggregated.csv`` -- the pre-aggregated table the Trends tab's
+    "Daily Cases by Symptom Onset" SVG is rendered from -- and takes ONLY its
+    ``confirmed_case`` column (the panel is titled "Confirmed positive cases"),
+    so the two charts show identical data. Rows are pre-summed per
+    ``(date_of_symptom_onset_imputed, onset_date_was_imputed, spatial_scale)``:
+    ``national`` rows feed the national series, ``healthzone`` rows feed by_zone.
 
     Zone strings are joined to canonical ``nom`` via _norm against ``known_noms``
     (the payload's zone_data keys); unmatched names pass through unchanged.
     ``tree_most_recent`` (meta.mostRecentDate) is echoed so the panel can mark the
     "beyond-tree" region (onset dates strictly after it).
     """
-    path = _latest_onset_linelist(outputs_dir if outputs_dir is not None else DASHBOARD_PLOTS_DIR)
+    path = _latest_status_aggregated(outputs_dir if outputs_dir is not None else DASHBOARD_PLOTS_DIR)
     if path is None:
         return {}
     nom_by_norm = {_norm(n): n for n in (known_noms or ())}
@@ -4322,14 +4359,20 @@ def load_onset_imputed_series(outputs_dir=None, known_noms=None, tree_most_recen
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             d = (row.get("date_of_symptom_onset_imputed") or "").strip()
-            z = (row.get("health_zone") or "").strip()
-            if not d or not z:
+            if not d:
+                continue
+            n = _i(row.get("confirmed_case"))
+            if not n or n <= 0:
                 continue
             bucket = "imputed" if (row.get("onset_date_was_imputed") or "").strip().upper() == "TRUE" else "observed"
-            zc = by_zone.setdefault(canon(z), {}).setdefault(d, {"observed": 0, "imputed": 0})
-            zc[bucket] += 1
-            nc = national.setdefault(d, {"observed": 0, "imputed": 0})
-            nc[bucket] += 1
+            scale = (row.get("spatial_scale") or "").strip().lower()
+            if scale == "national":
+                national.setdefault(d, {"observed": 0, "imputed": 0})[bucket] += n
+            elif scale == "healthzone":
+                z = (row.get("health_zone") or "").strip()
+                if not z or z.upper() == "NA":
+                    continue
+                by_zone.setdefault(canon(z), {}).setdefault(d, {"observed": 0, "imputed": 0})[bucket] += n
     return {
         "dates": sorted(national),
         "national": national,
