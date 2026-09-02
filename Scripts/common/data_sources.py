@@ -146,6 +146,7 @@ __all__ = [
     '_read_insp_cumulative_confirmed_df',
     '_parse_confirmed_count',
     'load_confirmed_cases_timeseries',
+    'compute_confirmed_recency_timeseries',
     '_PHR_DATASET',
     '_PHR_NON_TEXT',
     '_PHR_ZONE_METRICS',

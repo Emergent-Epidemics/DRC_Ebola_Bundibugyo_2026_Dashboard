@@ -128,6 +128,7 @@ def build_shared_payload() -> dict:
     invasion_risk = reconcile_invasion_active_cases(invasion_risk, zone_data)
     assert_harmonised_coverage(invasion_risk, zone_data, harmonised_confirmed)
     confirmed_timeseries = load_confirmed_cases_timeseries(set(zone_data.keys()))
+    confirmed_recency = compute_confirmed_recency_timeseries(confirmed_timeseries)
 
     # Genomic-epi slice (page-scoped to the genomic tab in chrome.py): phylo
     # products from the BDBV2026-Genomic_Epi sibling + the observed/imputed onset
@@ -218,6 +219,7 @@ def build_shared_payload() -> dict:
         "phr_context": phr_context_by_lang.get("en", {"national": [], "by_nom": {}}),
         "phr_context_by_lang": phr_context_by_lang,
         "confirmed_timeseries": confirmed_timeseries,
+        "confirmed_recency": confirmed_recency,
         "genomic": genomic,
     }
 
