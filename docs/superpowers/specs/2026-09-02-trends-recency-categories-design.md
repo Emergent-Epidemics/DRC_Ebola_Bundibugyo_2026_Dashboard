@@ -68,8 +68,12 @@ matching the established "Python computes values, JS colours" pattern.
 - **New pure function** in `Scripts/common/data_sources.py`, e.g.
   `compute_confirmed_recency_timeseries(confirmed_ts, near_days=14, mid_days=42)`.
   - Input: the already-built `confirmed_timeseries` dict (no CSV re-read).
-  - Output: `{ dates, by_nom: { nom → [catInt per dateIdx] }, thresholds:
-    {near: 14, mid: 42}, labels }` where `catInt ∈ {1,2,3,4}`.
+  - Output: `{ dates, by_nom: { nom → [catInt per dateIdx] }, days_by_nom:
+    { nom → [daysSinceLastCase per dateIdx] }, thresholds: {near: 14, mid: 42},
+    labels }` where `catInt ∈ {1,2,3,4}` and `daysSinceLastCase` is an integer
+    (`-1` for a zone with no case yet as of that frame). `days_by_nom` is the
+    authoritative source for the tooltip's "*d* days ago", so the frontend never
+    re-derives the day count and cannot drift from the Python category.
   - "Last increase" detection: `cumulative[i] > cumulative[i-1]`; a nonzero
     value at the first date counts as a case event on `dates[0]`. Decreases
     (downward data corrections between sitreps) are ignored as case events.
@@ -111,8 +115,10 @@ values):
 ### Tooltip
 
 In recency mode, the zone tooltip shows the category label plus "last confirmed
-case: *d* days ago" (data already available from the same series). In cumulative
-mode the tooltip is unchanged. (First-version behaviour; expected to iterate.)
+case: *d* days ago", reading `catInt` from `by_nom` and `d` from `days_by_nom`
+(both authored in Python, so no re-derivation). "Never" zones show only the
+category label. In cumulative mode the tooltip is unchanged. (First-version
+behaviour; expected to iterate.)
 
 ### i18n
 
