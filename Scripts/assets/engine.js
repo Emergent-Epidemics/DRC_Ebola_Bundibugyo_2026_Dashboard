@@ -1986,7 +1986,9 @@ function layerHoverTooltipHTML(feature) {
       line2 = t("ui.trends_recency_tooltip_never");
     } else {
       const days = getTrendsRecencyDaysAt(ref, trendsDateIdx);
-      line2 = tf("ui.trends_recency_tooltip_days", {days: days});
+      line2 = days >= 0
+        ? tf("ui.trends_recency_tooltip_days", {days: days})
+        : t("ui.trends_recency_tooltip_never");
     }
     return "<strong>" + name + "</strong><br/>" + catLabel + "<br/>" + line2;
   }
@@ -2693,6 +2695,7 @@ let trendsColorMode = "cumulative"; // "cumulative" | "recency"
 
 // Confirmed-case recency category fills (see docs spec 2026-09-02). Index by
 // category int 1..4; 0 / missing -> no-data neutral.
+// Keep these in sync with the recency swatch colours in Scripts/common/chrome.py.
 const RECENCY_FILL = {1: "#b2182b", 2: "#ef8a62", 3: "#fddbc7", 4: "#e0e0e0"};
 const RECENCY_NODATA_FILL = "#e0e0e0";
 
@@ -3561,6 +3564,37 @@ function initTrendsLegendBar() {
   if (scaleEl) scaleEl.textContent = t("ui.trends_scale_log");
 }
 
+function syncTrendsModeToggle() {
+  const btns = document.querySelectorAll(".trends-mode-btn");
+  btns.forEach(function (b) {
+    const on = b.getAttribute("data-mode") === trendsColorMode;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  const title = document.getElementById("trends-legend-title");
+  const cumu = document.getElementById("trends-cumulative-legend");
+  const rec = document.getElementById("trends-recency-legend");
+  const recency = trendsColorMode === "recency";
+  if (cumu) cumu.style.display = recency ? "none" : "";
+  if (rec) rec.style.display = recency ? "" : "none";
+  if (title) {
+    const strong = title.querySelector("strong");
+    if (strong) {
+      strong.setAttribute("data-i18n", recency ? "ui.trends_recency_title" : "ui.trends_confirmed_title");
+      strong.textContent = t(recency ? "ui.trends_recency_title" : "ui.trends_confirmed_title");
+    }
+  }
+}
+
+function setTrendsColorMode(mode) {
+  const next = mode === "recency" && trendsRecencyAvailable() ? "recency" : "cumulative";
+  if (next === trendsColorMode) { syncTrendsModeToggle(); return; }
+  trendsColorMode = next;
+  syncTrendsModeToggle();
+  // Re-paint the current frame without restarting the animation.
+  if (activeView === "trends") geoLayer.setStyle(styleFn);
+}
+
 function updateTrendsDateLabel() {
   const ts = PAYLOAD.confirmed_timeseries;
   const label = document.getElementById("trends-date-label");
@@ -3642,6 +3676,11 @@ function enterTrendsView() {
     recompute();
   } else {
     if (legendPanel) legendPanel.style.display = "";
+    // Always enter in the cumulative view; the toggle opts into recency.
+    trendsColorMode = "cumulative";
+    const toggle = document.getElementById("trends-mode-toggle");
+    if (toggle) toggle.style.display = trendsRecencyAvailable() ? "" : "none";
+    syncTrendsModeToggle();
     initTrendsLegendBar();
     const slider = document.getElementById("trends-date-slider");
     if (slider) slider.max = String(ts.dates.length - 1);
@@ -3790,6 +3829,11 @@ function activateTrendsScope(scope) {
   document.querySelectorAll(".trends-scope-btn").forEach(function(btn) {
     btn.addEventListener("click", function() {
       activateTrendsScope(btn.getAttribute("data-scope") || "national");
+    });
+  });
+  document.querySelectorAll(".trends-mode-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      setTrendsColorMode(btn.getAttribute("data-mode"));
     });
   });
   activateTrendsScope("national");
