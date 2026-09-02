@@ -15,6 +15,15 @@
 #   EXTERNAL_REPO_TOKEN must grant Contents: Read on
 #   INRB-UMIE/BDBV2026-Processed_Sensitive_Data (not the old
 #   BDBV2026-Linelist_Processing) for the checkout step below to work.
+#
+#   READ_PHYLOGENETIC_ANALYSES is a separate secret that must grant
+#   Contents: Read on INRB-UMIE/BDBV2026-Phylogenetic_Analyses. It is kept
+#   distinct from EXTERNAL_REPO_TOKEN so the two private sources can be
+#   scoped and rotated independently. BDBV2026-Genomic_Epi is public and
+#   needs no token. If READ_PHYLOGENETIC_ANALYSES is missing or unscoped,
+#   the phylogenetics checkout fails the build outright -- deliberately,
+#   since a missing tree would otherwise drop the whole Genomic Epi tab
+#   from the payload silently.
 
 name: Build dashboard
 
@@ -165,12 +174,16 @@ jobs:
           repository: INRB-UMIE/BDBV2026-Genomic_Epi
           path: BDBV2026-Genomic_Epi
 
-      # Phylogenetic analyses repo (public) — latest dated .tree under data/phylogenies/.
+      # Phylogenetic analyses repo (private) — latest dated .tree under
+      # data/phylogenies/ plus the BEAST Ne curves under outputs/beast/.
+      # Needs its own READ_PHYLOGENETIC_ANALYSES secret; the default
+      # GITHUB_TOKEN is scoped to this repo only and cannot read it.
       - name: Checkout phylogenetic analyses repo
         uses: actions/checkout@v4
         with:
           repository: INRB-UMIE/BDBV2026-Phylogenetic_Analyses
           path: BDBV2026-Phylogenetic_Analyses
+          token: ${{ secrets.READ_PHYLOGENETIC_ANALYSES }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
