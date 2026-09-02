@@ -146,6 +146,7 @@ __all__ = [
     '_read_insp_cumulative_confirmed_df',
     '_parse_confirmed_count',
     'load_confirmed_cases_timeseries',
+    'compute_confirmed_recency_timeseries',
     '_PHR_DATASET',
     '_PHR_NON_TEXT',
     '_PHR_ZONE_METRICS',
@@ -2406,6 +2407,90 @@ def load_confirmed_cases_timeseries(valid_noms: set[str]) -> dict | None:
         "by_nom": by_nom,
         "max_confirmed": max_confirmed,
         "min_positive": min_positive or 1,
+    }
+
+
+# ---------------------------------------------------------------------------
+# INSP confirmed-case recency categories (Trends tab "Recency" toggle)
+# ---------------------------------------------------------------------------
+
+# Category integers used across the payload / engine.js:
+#   1 active  (<= near_days since last case)
+#   2 recent  (near_days < d <= mid_days)
+#   3 dormant (d > mid_days)
+#   4 never   (no confirmed case yet as of the frame)
+_RECENCY_LABELS = {
+    "1": "active",
+    "2": "recent",
+    "3": "dormant",
+    "4": "never",
+}
+
+
+def compute_confirmed_recency_timeseries(
+    confirmed_ts: dict | None,
+    near_days: int = 14,
+    mid_days: int = 42,
+) -> dict | None:
+    """Derive per-zone, per-frame confirmed-case *recency* categories.
+
+    Pure transform of the ``confirmed_timeseries`` dict produced by
+    ``load_confirmed_cases_timeseries`` -- no I/O. For each zone and each frame
+    date, classify by days since the zone's most recent *new* confirmed case
+    (the last date its carry-forward cumulative count increased), measured from
+    that frame's date. Returns ``None`` when the input is missing/empty so the
+    Trends toggle silently stays unavailable, matching the slider's posture.
+    """
+    if not confirmed_ts:
+        return None
+    dates = confirmed_ts.get("dates") or []
+    by_nom_cum = confirmed_ts.get("by_nom") or {}
+    if not dates or not by_nom_cum:
+        return None
+
+    # Parse frame dates once; day arithmetic is exact even for irregular frames.
+    parsed: list[date] = []
+    for iso in dates:
+        d = _parse_sitrep_date(iso)
+        if d is None:
+            return None
+        parsed.append(d)
+
+    by_nom: dict[str, list[int]] = {}
+    days_by_nom: dict[str, list[int]] = {}
+    for nom, series in by_nom_cum.items():
+        cats: list[int] = []
+        days: list[int] = []
+        last_event_idx: int | None = None
+        prev = 0
+        for i, raw in enumerate(series):
+            cum = int(raw or 0)
+            # A *new* case = the cumulative count went up since the previous
+            # frame. A nonzero value at the first frame is a baseline event.
+            if cum > prev:
+                last_event_idx = i
+            prev = cum
+            if last_event_idx is None:
+                cats.append(4)
+                days.append(-1)
+            else:
+                d = (parsed[i] - parsed[last_event_idx]).days
+                days.append(d)
+                if d <= near_days:
+                    cats.append(1)
+                elif d <= mid_days:
+                    cats.append(2)
+                else:
+                    cats.append(3)
+        by_nom[nom] = cats
+        days_by_nom[nom] = days
+
+    return {
+        "dates": list(dates),
+        "by_nom": by_nom,
+        "days_by_nom": days_by_nom,
+        "thresholds": {"near": near_days, "mid": mid_days},
+        "labels": dict(_RECENCY_LABELS),
     }
 
 
