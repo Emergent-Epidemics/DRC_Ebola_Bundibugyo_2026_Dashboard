@@ -206,10 +206,25 @@ __NAV_LINKS__
 </div>
 <div id="trends-legend" class="panel">
   <div id="trends-legend-title"><strong data-i18n="ui.trends_confirmed_title">Confirmed cases (cumulative)</strong></div>
-  <p id="trends-legend-desc" data-i18n="ui.trends_legend_desc">Transcribed from INSP sitreps. Cases are sometimes revised downwards in consecutive sitreps.</p>
-  <div class="legend-bar" id="trends-legend-bar"></div>
-  <div class="legend-ticks" id="trends-legend-ticks"></div>
-  <div class="legend-scale" id="trends-legend-scale" data-i18n="ui.trends_scale_log">(log scale)</div>
+  <div id="trends-mode-toggle" role="group" data-i18n-aria="ui.trends_mode_aria" aria-label="Map colouring mode">
+    <button type="button" class="trends-mode-btn active" data-mode="cumulative" data-i18n="ui.trends_mode_cumulative">Cumulative cases</button>
+    <button type="button" class="trends-mode-btn" data-mode="recency" data-i18n="ui.trends_mode_recency">Recency</button>
+  </div>
+  <div id="trends-cumulative-legend">
+    <p id="trends-legend-desc" data-i18n="ui.trends_legend_desc">Transcribed from INSP sitreps. Cases are sometimes revised downwards in consecutive sitreps.</p>
+    <div class="legend-bar" id="trends-legend-bar"></div>
+    <div class="legend-ticks" id="trends-legend-ticks"></div>
+    <div class="legend-scale" id="trends-legend-scale" data-i18n="ui.trends_scale_log">(log scale)</div>
+  </div>
+  <div id="trends-recency-legend" style="display:none">
+    <p id="trends-recency-desc" data-i18n="ui.trends_recency_desc">Health zones coloured by time since their most recent confirmed case.</p>
+    <div class="recency-swatches">
+      <div class="recency-swatch"><span class="recency-chip" style="background:#b2182b"></span><span data-i18n="ui.trends_recency_cat1">Case in last 14 days</span></div>
+      <div class="recency-swatch"><span class="recency-chip" style="background:#ef8a62"></span><span data-i18n="ui.trends_recency_cat2">Case 15–42 days ago</span></div>
+      <div class="recency-swatch"><span class="recency-chip" style="background:#fddbc7"></span><span data-i18n="ui.trends_recency_cat3">No case for &gt;42 days</span></div>
+      <div class="recency-swatch"><span class="recency-chip" style="background:#e0e0e0"></span><span data-i18n="ui.trends_recency_cat4">No confirmed case</span></div>
+    </div>
+  </div>
   <div id="trends-play-row">
     <button type="button" id="trends-play-btn" data-i18n-aria="ui.trends_play" aria-label="Play">▶</button>
     <input type="range" id="trends-date-slider" min="0" max="0" value="0"
