@@ -1749,8 +1749,24 @@ function zoneFillStyle(v, has, ref, layer, bump) {
   };
 }
 
+function trendsRecencyStyle(ref) {
+  const cat = getTrendsRecencyAt(ref, trendsDateIdx);
+  const fillColor = RECENCY_FILL[cat] || RECENCY_NODATA_FILL;
+  // Category 4 ("never") is a muted neutral; give it a slightly lower opacity
+  // so the active categories read as the foreground.
+  const fillOpacity = cat === 4 || !cat ? 0.55 : 0.85;
+  const style = Object.assign({}, zoneStroke("rest"), {fillColor, fillOpacity});
+  // Mirror the cumulative view: suppress zone strokes in Provincial scope so the
+  // province outlines are the only line work.
+  if (trendsScope === "province") style.weight = 0;
+  return style;
+}
+
 function styleFn(feature) {
   if (activeView === "epi-trends") return epiTrendsStyleFn(feature);
+  if (activeView === "trends" && trendsColorMode === "recency") {
+    return trendsRecencyStyle(feature.properties.nom);
+  }
   const ref = feature.properties.nom;
   const v = currentValues.get(ref);
   const has = v != null && !Number.isNaN(v);
@@ -1962,6 +1978,18 @@ function infoHTML(feature) {
 function layerHoverTooltipHTML(feature) {
   const ref = feature.properties.nom;
   const name = feature.properties.name || t("ui.case_tooltip.unnamed");
+  if (activeView === "trends" && trendsColorMode === "recency") {
+    const cat = getTrendsRecencyAt(ref, trendsDateIdx);
+    const catLabel = t("ui.trends_recency_cat" + (cat || 4));
+    let line2;
+    if (!cat || cat === 4) {
+      line2 = t("ui.trends_recency_tooltip_never");
+    } else {
+      const days = getTrendsRecencyDaysAt(ref, trendsDateIdx);
+      line2 = tf("ui.trends_recency_tooltip_days", {days: days});
+    }
+    return "<strong>" + name + "</strong><br/>" + catLabel + "<br/>" + line2;
+  }
   const layer = getLayer(layerSelect.value);
   const v = currentValues.get(ref);
   const has = v != null && !Number.isNaN(v);
@@ -2661,6 +2689,33 @@ function findGeoLayerByNom(nom) {
 
 // --- province outlines (Trends view) ---
 let trendsScope = "national";
+let trendsColorMode = "cumulative"; // "cumulative" | "recency"
+
+// Confirmed-case recency category fills (see docs spec 2026-09-02). Index by
+// category int 1..4; 0 / missing -> no-data neutral.
+const RECENCY_FILL = {1: "#b2182b", 2: "#ef8a62", 3: "#fddbc7", 4: "#e0e0e0"};
+const RECENCY_NODATA_FILL = "#e0e0e0";
+
+function getTrendsRecencyAt(nom, dateIdx) {
+  const rc = PAYLOAD.confirmed_recency;
+  if (!rc || !rc.by_nom) return 0;
+  const series = rc.by_nom[nom];
+  if (!series || dateIdx < 0 || dateIdx >= series.length) return 0;
+  return series[dateIdx];
+}
+
+function getTrendsRecencyDaysAt(nom, dateIdx) {
+  const rc = PAYLOAD.confirmed_recency;
+  if (!rc || !rc.days_by_nom) return -1;
+  const series = rc.days_by_nom[nom];
+  if (!series || dateIdx < 0 || dateIdx >= series.length) return -1;
+  return series[dateIdx];
+}
+
+function trendsRecencyAvailable() {
+  const rc = PAYLOAD.confirmed_recency;
+  return !!(rc && rc.by_nom && rc.dates && rc.dates.length);
+}
 let trendsSelectedKey = null;
 let trendsHoverTimer = null;
 let trendsHoveredProvince = null;
