@@ -559,6 +559,28 @@ body.epi-splitting #epi-split-handle::before {
   color: var(--link) !important;
   border-color: var(--terracotta) !important;
 }
+/* Cumulative/recency mode toggle + recency swatch legend on the Trends map.
+   Like .trends-scope-btn above, the segmented buttons need their own
+   !important overrides or the generic "select, button" rule wins; and the
+   swatch labels inherit a dark-theme colour from the base dashboard.css that
+   is invisible on the light panel, so re-assert the ink colour here. */
+#trends-mode-toggle { border-color: var(--border) !important; }
+.trends-mode-btn {
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  border-color: var(--border) !important;
+}
+.trends-mode-btn:hover {
+  background: rgba(155, 125, 78, 0.08) !important;
+  color: var(--maroon) !important;
+}
+.trends-mode-btn.active {
+  background: rgba(155, 125, 78, 0.16) !important;
+  color: var(--link) !important;
+}
+.trends-mode-btn + .trends-mode-btn { border-left-color: var(--border) !important; }
+.recency-swatch { color: var(--ink) !important; }
+.recency-chip { border-color: rgba(0, 0, 0, 0.2) !important; }
 /* #trends-search-results renders plain, class-less <button> results (see
    engine.js renderTrendsSearchResults), so -- like .trends-scope-btn above
    -- the hover/active state needs its own !important override or the
